@@ -8,8 +8,9 @@
 # profile is --config-dir, else $CLAUDE_CONFIG_DIR, else ~/.claude. It works
 # at profile level because project settings load only from the directory a
 # session starts in, so a status line set in one repo never reaches the repos
-# nested inside it. Settings name the copy, never this folder: a plugin cache
-# path carries the version and moves on every update.
+# nested inside it. Settings name the copy through $CLAUDE_CONFIG_DIR, never
+# this folder: a plugin cache path carries the version and moves on every
+# update.
 #
 # The report, one line per file and one for statusLine:
 #   + absent, would create        = in sync
@@ -58,7 +59,10 @@ dest="$cfg/scripts"
 stamp="$dest/status-line.source"
 settings="$cfg/settings.json"
 files="status-line.sh status-line-base.sh"
-sl_cmd="sh \"$dest/status-line.sh\""
+# Expanded when the status line runs, not now: whichever profile loads these
+# settings runs its own copy, so a settings.json copied to another profile or
+# machine still finds the right script.
+sl_cmd='sh "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/status-line.sh"'
 
 sha() {
     if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1"; else sha256sum "$1"; fi | cut -d' ' -f1

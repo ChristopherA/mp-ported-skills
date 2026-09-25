@@ -83,7 +83,7 @@ check "--context without dir: usage exit" "2" "$?"
 
 # --- install.sh -----------------------------------------------------------
 inst() { sh "$skill/install.sh" --config-dir "$prof" "$@" </dev/null; }
-cmd_for() { printf 'sh "%s/scripts/status-line.sh"' "$1"; }
+sl_cmd='sh "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/status-line.sh"'
 
 # statusLine absent (no settings.json at all)
 prof="$work/prof-absent"; mkdir -p "$prof"
@@ -94,7 +94,7 @@ has "absent: would set statusLine" "+ statusLine" "$out"
 check "absent: dry run writes nothing" "" "$(ls -A "$prof")"
 out=$(inst); rc=$?
 check "absent: install exits 0" "0" "$rc"
-check "absent: statusLine set" "$(cmd_for "$prof")" "$(jq -r .statusLine.command "$prof/settings.json")"
+check "absent: statusLine set" "$sl_cmd" "$(jq -r .statusLine.command "$prof/settings.json")"
 check "absent: stamp names both files" "2" "$(grep -cE '^status-line(-base)?\.sh [0-9a-f]{64}$' "$prof/scripts/status-line.source")"
 check "base copied unmodified" "" "$(cmp "$skill/status-line-base.sh" "$prof/scripts/status-line-base.sh")"
 
@@ -106,8 +106,17 @@ out=$(inst); check "same: real run exits 0" "0" "$?"
 has "same: nothing written" "In sync. Nothing written." "$out"
 
 # The installed command renders, and its --context reads.
-out=$(payload 7 1000000 inst1 | sh -c "$(jq -r .statusLine.command "$prof/settings.json")" | sed -n 2p | plain)
-check "installed command renders" "[Opus] 70k / 150k" "$out"
+out=$(payload 7 1000000 inst1 | CLAUDE_CONFIG_DIR="$prof" sh -c "$(jq -r .statusLine.command "$prof/settings.json")" | plain)
+check "installed command renders" "[Opus] 70k / 150k" "$(printf '%s\n' "$out" | sed -n 2p)"
+check "installed command names its profile" "$host · prof-absent » proj » feature-x" "$(printf '%s\n' "$out" | sed -n 1p)"
+
+# The command follows CLAUDE_CONFIG_DIR at run time: settings copied into
+# another profile run that profile's copy, not the one installed from.
+prof2="$work/.claude-copied"; mkdir -p "$prof2/scripts"
+command cp "$prof/settings.json" "$prof2/settings.json"
+printf '#!/bin/sh\necho copied-profile-script\n' > "$prof2/scripts/status-line.sh"
+out=$(payload 7 1000000 inst1 | CLAUDE_CONFIG_DIR="$prof2" sh -c "$(jq -r .statusLine.command "$prof2/settings.json")")
+check "command follows CLAUDE_CONFIG_DIR" "copied-profile-script" "$out"
 check "installed --context" "context: 70k tokens used of a 150k smart zone, 93% of window remaining" \
     "$(sh "$prof/scripts/status-line.sh" --context "$proj" </dev/null)"
 
@@ -123,13 +132,17 @@ check "different: settings untouched" "echo other" "$(jq -r .statusLine.command 
 check "different: no scripts written" "no" "$([ -d "$prof/scripts" ] && echo yes || echo no)"
 out=$(inst --replace-statusline); rc=$?
 check "different: replaced with flag" "0" "$rc"
-check "different: now ours" "$(cmd_for "$prof")" "$(jq -r .statusLine.command "$prof/settings.json")"
+check "different: now ours" "$sl_cmd" "$(jq -r .statusLine.command "$prof/settings.json")"
 check "different: other keys kept" "opus 1" "$(jq -r '"\(.model) \(.env.A)"' "$prof/settings.json")"
 check "different: backup kept" "echo other" "$(jq -r .statusLine.command "$prof/settings.json.pre-install-statusline")"
 
 # behind: an unedited earlier install
 printf '# an earlier release\n' > "$prof/scripts/status-line.sh"
-old=$(shasum -a 256 "$prof/scripts/status-line.sh" | cut -d' ' -f1)
+if command -v shasum >/dev/null 2>&1; then
+    old=$(shasum -a 256 "$prof/scripts/status-line.sh" | cut -d' ' -f1)
+else
+    old=$(sha256sum "$prof/scripts/status-line.sh" | cut -d' ' -f1)
+fi
 sed "s/^status-line.sh .*/status-line.sh $old/" "$prof/scripts/status-line.source" > "$work/stamp" && command mv -f "$work/stamp" "$prof/scripts/status-line.source"
 out=$(inst --dry-run)
 has "behind: reported" "~ scripts/status-line.sh  behind" "$out"
