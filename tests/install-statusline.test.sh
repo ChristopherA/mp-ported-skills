@@ -135,6 +135,10 @@ has "absent: would set statusLine" "+ statusLine" "$out"
 check "absent: dry run writes nothing" "" "$(ls -A "$prof")"
 out=$(inst); rc=$?
 check "absent: install exits 0" "0" "$rc"
+has "absent: created" "+ scripts/status-line.sh  created" "$out"
+has "absent: statusLine set" "+ statusLine  none set; set to: $sl_cmd" "$out"
+has "absent: wrote all three" "wrote $prof/scripts/{status-line.sh,status-line-base.sh,status-line.source}" "$out"
+check "absent: no would in a real run" "0" "$(printf '%s\n' "$out" | grep -c would)"
 check "absent: statusLine set" "$sl_cmd" "$(jq -r .statusLine.command "$prof/settings.json")"
 check "absent: stamp names both files" "2" "$(grep -cE '^status-line(-base)?\.sh [0-9a-f]{64}$' "$prof/scripts/status-line.source")"
 check "base copied unmodified" "" "$(cmp "$skill/status-line-base.sh" "$prof/scripts/status-line-base.sh")"
@@ -153,7 +157,11 @@ out=$(inst --dry-run); rc=$?
 check "stale stamp: dry run exits 1" "1" "$rc"
 has "stale stamp: reported" "~ scripts/status-line.source  names 0.0.1 (0000000); would restamp" "$out"
 check "stale stamp: dry run leaves it" "plugin: mp-ported-skills 0.0.1" "$(sed -n 1p "$st")"
+base_before=$(ls -i "$prof/scripts/status-line-base.sh")
 out=$(inst); check "stale stamp: real run exits 0" "0" "$?"
+has "stale stamp: restamped" "~ scripts/status-line.source  names 0.0.1 (0000000); restamped" "$out"
+has "stale stamp: wrote the stamp only" "wrote $prof/scripts/status-line.source" "$out"
+check "stale stamp: in-sync script not rewritten" "$base_before" "$(ls -i "$prof/scripts/status-line-base.sh")"
 check "stale stamp: version rewritten" \
     "plugin: mp-ported-skills $(jq -r .version "$root/plugins/mp-ported-skills/.claude-plugin/plugin.json")" "$(sed -n 1p "$st")"
 check "stale stamp: commit rewritten" "commit: $(git -C "$root" rev-parse --short HEAD)" "$(sed -n 2p "$st")"
@@ -161,7 +169,17 @@ out=$(inst --dry-run); check "stale stamp: then in sync" "0" "$?"
 command rm -f "$st"
 out=$(inst --dry-run)
 has "missing stamp: reported" "~ scripts/status-line.source  missing; would stamp" "$out"
-out=$(inst); check "missing stamp: written" "2" "$(grep -cE '^status-line(-base)?\.sh [0-9a-f]{64}$' "$st")"
+out=$(inst)
+has "missing stamp: stamped" "~ scripts/status-line.source  missing; stamped" "$out"
+check "missing stamp: written" "2" "$(grep -cE '^status-line(-base)?\.sh [0-9a-f]{64}$' "$st")"
+
+# Only statusLine changed: the in-sync scripts and current stamp are left alone.
+jq '.statusLine.command = "echo other"' "$prof/settings.json" > "$work/s" && command mv -f "$work/s" "$prof/settings.json"
+st_before=$(cat "$st")
+out=$(inst --replace-statusline); check "statusLine only: exits 0" "0" "$?"
+check "statusLine only: no scripts written" "0" "$(printf '%s\n' "$out" | grep -c ' wrote ')"
+check "statusLine only: stamp untouched" "$st_before" "$(cat "$st")"
+check "statusLine only: now ours" "$sl_cmd" "$(jq -r .statusLine.command "$prof/settings.json")"
 
 # The installed command renders, and its --context reads.
 out=$(payload 7 1000000 inst1 | CLAUDE_CONFIG_DIR="$prof" sh -c "$(jq -r .statusLine.command "$prof/settings.json")" | plain)
@@ -186,6 +204,7 @@ check "different: dry run exits 1" "1" "$rc"
 has "different: shows current" "currently: echo other" "$out"
 out=$(inst); rc=$?
 check "different: refuses" "1" "$rc"
+has "different: refused run keeps the plan tense" "+ scripts/status-line.sh  would create" "$out"
 check "different: settings untouched" "echo other" "$(jq -r .statusLine.command "$prof/settings.json")"
 check "different: no scripts written" "no" "$([ -d "$prof/scripts" ] && echo yes || echo no)"
 out=$(inst --replace-statusline); rc=$?
@@ -201,6 +220,8 @@ sed "s/^status-line.sh .*/status-line.sh $old/" "$prof/scripts/status-line.sourc
 out=$(inst --dry-run)
 has "behind: reported" "~ scripts/status-line.sh  behind" "$out"
 out=$(inst); check "behind: updates without --force" "0" "$?"
+has "behind: updated" "~ scripts/status-line.sh  behind: an earlier install, unedited; updated" "$out"
+has "behind: wrote the changed script and stamp" "wrote $prof/scripts/{status-line.sh,status-line.source}" "$out"
 check "behind: now current" "" "$(cmp "$skill/status-line.sh" "$prof/scripts/status-line.sh")"
 
 # newer: an unedited install from a later release than this source. Its hash
@@ -239,6 +260,8 @@ out=$(inst); rc=$?
 check "modified: refuses" "1" "$rc"
 check "modified: edit kept" "# local edit" "$(tail -1 "$prof/scripts/status-line.sh")"
 out=$(inst --force); check "modified: --force replaces" "0" "$?"
+has "modified: real --force run reports the replace" "! scripts/status-line.sh  modified since install, or unknown origin; --force replaces it" "$out"
+check "modified: no would in a real --force run" "0" "$(printf '%s\n' "$out" | grep -c would)"
 check "modified: now current" "" "$(cmp "$skill/status-line.sh" "$prof/scripts/status-line.sh")"
 
 # From the plugin cache: no git checkout, so the commit comes from the running
@@ -269,6 +292,7 @@ check "cache miss: commit unknown" "commit: unknown" "$(sed -n 2p "$prof/scripts
 out=$(sh "$skill/install.sh" --config-dir "$work/nope" </dev/null 2>&1); check "missing profile: exit 2" "2" "$?"
 prof="$work/prof-bad"; mkdir -p "$prof"; printf '{not json' > "$prof/settings.json"
 out=$(inst 2>&1); check "invalid settings: exit 2" "2" "$?"
+has "invalid settings: report printed before the error" "+ scripts/status-line.sh  would create" "$out"
 out=$(sh "$skill/install.sh" --bogus </dev/null 2>&1); check "bad flag: exit 2" "2" "$?"
 
 echo "install-statusline: $pass passed, $fail failed"

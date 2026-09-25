@@ -23,8 +23,10 @@
 #   ~ stamp missing, or names another version or commit, while the files
 #     are in sync; a real run rewrites it
 #
-# --dry-run reports and writes nothing. A real run with a ! line whose flag is
-# absent refuses and writes nothing. Installed copies are stamped in
+# --dry-run reports and writes nothing. A real run with a ! line whose flag
+# is absent refuses and writes nothing. A real run that writes copies only
+# the files not in sync, then prints the report with each "would" in the
+# past tense. Installed copies are stamped in
 # scripts/status-line.source with the plugin version, its commit and each
 # file's sha256 as installed; the stamp is how a later run tells "behind" from
 # "modified", since the plugin cache has no git history to ask. A settings.json
@@ -116,91 +118,119 @@ newer() {
 
 echo "install-statusline: mp-ported-skills $version ($commit) -> $cfg"
 
-changes=0 blocked=0
+# The report is held in two tenses until the run knows whether it writes:
+# the plan for a dry or refused run, the past for a real one.
+plan="" past=""
+say() { # <plan line> [<past line>]
+    plan="$plan$1
+"
+    past="$past${2:-$1}
+"
+}
+
+changes=0 blocked=0 to_copy=""
 for f in $files; do
     src="$here/$f" dst="$dest/$f"
     if [ ! -f "$dst" ]; then
-        echo "  + scripts/$f  would create"; changes=1
+        say "  + scripts/$f  would create" "  + scripts/$f  created"; changes=1
     elif [ "$(sha "$dst")" = "$(sha "$src")" ]; then
-        echo "  = scripts/$f  in sync"
+        say "  = scripts/$f  in sync"
+        continue
     elif [ "$(sha "$dst")" = "$(recorded "$f")" ]; then
         changes=1
         if ! newer "$s_version" "$version"; then
-            echo "  ~ scripts/$f  behind: an earlier install, unedited; would update"
+            say "  ~ scripts/$f  behind: an earlier install, unedited; would update" \
+                "  ~ scripts/$f  behind: an earlier install, unedited; updated"
         elif [ "$force" -eq 1 ]; then
-            echo "  ! scripts/$f  installed $s_version is newer than this $version; --force replaces it"
+            say "  ! scripts/$f  installed $s_version is newer than this $version; --force replaces it"
         else
-            echo "  ! scripts/$f  installed $s_version is newer than this $version; needs --force"; blocked=1
+            say "  ! scripts/$f  installed $s_version is newer than this $version; needs --force"; blocked=1
         fi
     else
         changes=1
         if [ "$force" -eq 1 ]; then
-            echo "  ! scripts/$f  modified since install, or unknown origin; --force replaces it"
+            say "  ! scripts/$f  modified since install, or unknown origin; --force replaces it"
         else
-            echo "  ! scripts/$f  modified since install, or unknown origin; needs --force"; blocked=1
+            say "  ! scripts/$f  modified since install, or unknown origin; needs --force"; blocked=1
         fi
     fi
+    to_copy="$to_copy $f"
 done
 
 # A plugin update that leaves these scripts unchanged still moves the stamp,
 # so it keeps naming the release the copies came from.
+restamp=0
 if [ "$changes" -eq 0 ]; then
     if [ -f "$stamp" ]; then
         if [ "$s_version" != "$version" ] || [ "$s_commit" != "$commit" ]; then
-            echo "  ~ scripts/status-line.source  names $s_version ($s_commit); would restamp"; changes=1
+            say "  ~ scripts/status-line.source  names $s_version ($s_commit); would restamp" \
+                "  ~ scripts/status-line.source  names $s_version ($s_commit); restamped"; restamp=1
         fi
     else
-        echo "  ~ scripts/status-line.source  missing; would stamp"; changes=1
+        say "  ~ scripts/status-line.source  missing; would stamp" \
+            "  ~ scripts/status-line.source  missing; stamped"; restamp=1
     fi
+    changes=$restamp
 fi
 
 current=""
 if [ -f "$settings" ]; then
-    jq -e . "$settings" >/dev/null 2>&1 || { echo "ERROR: $settings is not valid JSON" >&2; exit 2; }
+    jq -e . "$settings" >/dev/null 2>&1 || { printf '%s' "$plan"; echo "ERROR: $settings is not valid JSON" >&2; exit 2; }
     current=$(jq -r '.statusLine.command // empty' "$settings")
 fi
 sl_change=0
 if [ -z "$current" ]; then
-    echo "  + statusLine  none set; would set: $sl_cmd"; sl_change=1
+    say "  + statusLine  none set; would set: $sl_cmd" "  + statusLine  none set; set to: $sl_cmd"; sl_change=1
 elif [ "$current" = "$sl_cmd" ]; then
-    echo "  = statusLine  runs this copy"
+    say "  = statusLine  runs this copy"
 else
     sl_change=1
-    echo "  ! statusLine  currently: $current"
+    say "  ! statusLine  currently: $current"
     if [ "$replace" -eq 1 ]; then
-        echo "                --replace-statusline replaces it with: $sl_cmd"
+        say "                --replace-statusline replaces it with: $sl_cmd"
     else
-        echo "                needs --replace-statusline to replace it with: $sl_cmd"; blocked=1
+        say "                needs --replace-statusline to replace it with: $sl_cmd"; blocked=1
     fi
 fi
 [ "$sl_change" -eq 1 ] && changes=1
 
-if [ "$dry" -eq 1 ]; then
-    if [ "$changes" -eq 0 ]; then echo "In sync. Nothing written."; exit 0; fi
-    echo "Dry run: changes above. Nothing written."; exit 1
-fi
-if [ "$blocked" -eq 1 ]; then
-    echo "Refused: a ! line above lacks its flag. Nothing written."; exit 1
-fi
-if [ "$changes" -eq 0 ]; then
+if [ "$dry" -eq 1 ] || [ "$blocked" -eq 1 ] || [ "$changes" -eq 0 ]; then
+    printf '%s' "$plan"
+    if [ "$dry" -eq 1 ] && [ "$changes" -eq 1 ]; then
+        echo "Dry run: changes above. Nothing written."; exit 1
+    fi
+    if [ "$blocked" -eq 1 ]; then
+        echo "Refused: a ! line above lacks its flag. Nothing written."; exit 1
+    fi
     echo "In sync. Nothing written."; exit 0
 fi
 
-mkdir -p "$dest"
-for f in $files; do
-    tmp="$dest/.$f.tmp"
-    command cp -f "$here/$f" "$tmp"
-    chmod 755 "$tmp"
-    command mv -f "$tmp" "$dest/$f"
-done
-{
-    echo "plugin: mp-ported-skills $version"
-    echo "commit: $commit"
-    echo "installed: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    for f in $files; do echo "$f $(sha "$dest/$f")"; done
-} > "$stamp.tmp"
-command mv -f "$stamp.tmp" "$stamp"
-echo "  wrote $dest/{status-line.sh,status-line-base.sh,status-line.source}"
+# The past-tense report prints once the writes succeed, so a failed write
+# never reads as done. The stamp is rewritten with any copy, or alone when
+# only it was stale; a run that changes only statusLine leaves the scripts
+# and stamp as they are.
+wrote=""
+if [ -n "$to_copy" ] || [ "$restamp" -eq 1 ]; then
+    mkdir -p "$dest"
+    for f in $to_copy; do
+        tmp="$dest/.$f.tmp"
+        command cp -f "$here/$f" "$tmp"
+        chmod 755 "$tmp"
+        command mv -f "$tmp" "$dest/$f"
+    done
+    {
+        echo "plugin: mp-ported-skills $version"
+        echo "commit: $commit"
+        echo "installed: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        for f in $files; do echo "$f $(sha "$dest/$f")"; done
+    } > "$stamp.tmp"
+    command mv -f "$stamp.tmp" "$stamp"
+    if [ -n "$to_copy" ]; then
+        wrote="  wrote $dest/{$(printf '%s,' $to_copy)status-line.source}"
+    else
+        wrote="  wrote $stamp"
+    fi
+fi
 
 if [ "$sl_change" -eq 1 ]; then
     tmp="$settings.tmp"
@@ -211,6 +241,8 @@ if [ "$sl_change" -eq 1 ]; then
         jq -n --arg c "$sl_cmd" '{statusLine: {"type": "command", "command": $c}}' > "$tmp"
     fi
     command mv -f "$tmp" "$settings"
-    echo "  set statusLine in $settings"
 fi
+printf '%s' "$past"
+[ -n "$wrote" ] && echo "$wrote"
+[ "$sl_change" -eq 1 ] && echo "  set statusLine in $settings"
 echo "Installed. Sessions started from now on show it."
