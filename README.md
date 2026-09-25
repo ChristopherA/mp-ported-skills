@@ -21,7 +21,7 @@ Install `mattpocock-skills` as well: these skills hand work to his where one alr
 - **`clarify`**: user-invoked shortcut for `clarifying`, as `grill-me` is for `grilling`.
 - **`capturing`**: checks a session at a phase boundary, before `/clear` or `/compact`. It routes whatever is not yet durable to its home (ADR or `CONTEXT.md`, ticket, `clarifying`, `to-questionnaire`), fixes claims the session made stale, asks whether anything should become a rule, commits, and reports one next step, "safe to clear" only when that is true, and a recommendation from Matt's five boundary options.
 - **`capture`**: user-invoked shortcut for `capturing`.
-- **`install-statusline`**: user-invoked. Installs a status line into the current profile whose second line reads `[Opus 5.5 | medium] 41% of zone`: the model, its effort level, and tokens in context as a percentage of the ~150k-token smart zone, coloured green, yellow, then red past 100%. It reports first (in sync, behind, or locally modified, per file), sets `statusLine` only if none is set, and replaces an existing one or an edited copy only on an explicit yes. `capturing` reads the same number through `status-line.sh --context`.
+- **`install-statusline`**: user-invoked. Installs a status line into the current profile whose second line reads `[Opus 5.5|medium] 41% of zone`: the model, its effort level, and tokens in context as a percentage of the ~150k-token smart zone, coloured green, yellow, then red past 100%. It reports first (in sync, behind, or locally modified, per file), sets `statusLine` only if none is set, and replaces an existing one or an edited copy only on an explicit yes. `capturing` reads the same number through `status-line.sh --context`.
 
 ## Credits
 

@@ -18,6 +18,8 @@
 #   ! modified: edited since it was installed, or of unknown origin;
 #     replaced only with --force
 #   ! statusLine runs another command; replaced only with --replace-statusline
+#   ~ stamp missing, or names another version or commit, while the files
+#     are in sync; a real run rewrites it
 #
 # --dry-run reports and writes nothing. A real run with a ! line whose flag is
 # absent refuses and writes nothing. Installed copies are stamped in
@@ -106,6 +108,20 @@ for f in $files; do
         fi
     fi
 done
+
+# A plugin update that leaves these scripts unchanged still moves the stamp,
+# so it keeps naming the release the copies came from.
+if [ "$changes" -eq 0 ]; then
+    if [ -f "$stamp" ]; then
+        s_version=$(sed -n 's/^plugin: mp-ported-skills //p' "$stamp")
+        s_commit=$(sed -n 's/^commit: //p' "$stamp")
+        if [ "$s_version" != "$version" ] || [ "$s_commit" != "$commit" ]; then
+            echo "  ~ scripts/status-line.source  names $s_version ($s_commit); would restamp"; changes=1
+        fi
+    else
+        echo "  ~ scripts/status-line.source  missing; would stamp"; changes=1
+    fi
+fi
 
 current=""
 if [ -f "$settings" ]; then

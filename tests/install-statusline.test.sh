@@ -2,7 +2,7 @@
 # install-statusline.test.sh -- tests for the install-statusline skill's scripts.
 #
 # Render mode against captured-shape JSON payloads, --context against the
-# record the base writes, and install.sh against scratch profile directories:
+# record the wrapper writes, and install.sh against scratch profile directories:
 # statusLine absent, present and the same, present and different, plus a
 # behind and a locally modified installed copy. Touches no real profile and
 # nothing under /tmp outside its own mktemp directory.
@@ -68,7 +68,7 @@ out=$(payload 20 1000000 | MP_SMART_ZONE_K=abc sh "$skill/status-line.sh")
 check "bad zone falls back" "[Opus] 133% of zone" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
 p=$(payload 19 1000000 | jq -c '.effort = {level: "medium"} | .context_window.total_input_tokens = 187654')
 out=$(printf '%s' "$p" | sh "$skill/status-line.sh")
-check "effort and exact tokens" "[Opus | medium] 125% of zone" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
+check "effort and exact tokens" "[Opus|medium] 125% of zone" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
 p=$(payload 4 1000000 | jq -c '.effort = {level: "high"} | del(.model)')
 out=$(printf '%s' "$p" | sh "$skill/status-line.sh")
 check "effort without a model name" "[high] 26% of zone" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
@@ -89,7 +89,7 @@ check "--context reads the record" \
     "context: 60k tokens, 40% of a 150k smart zone, 94% of window remaining" \
     "$(sh "$skill/status-line.sh" --context "$proj/" </dev/null)"
 # Backdate ctx1 so "newest" does not hang on two writes in one second.
-r="$WORKSTREAM_KIT_CONTEXT_DIR/claude-ctx1-context.json"
+r="$WORKSTREAM_KIT_CONTEXT_DIR/claude-ctx1-zone.json"
 jq '.updated = "2000-01-01T00:00:00Z"' "$r" > "$r.new" && command mv -f "$r.new" "$r"
 payload 3 1000000 ctx2 | sh "$skill/status-line.sh" >/dev/null
 check "--context newest for the dir" \
@@ -105,6 +105,17 @@ check "--context empty session: newest" \
 check "--context other dir: nothing" "" "$(sh "$skill/status-line.sh" --context "$work/elsewhere" </dev/null)"
 sh "$skill/status-line.sh" --context >/dev/null 2>&1 </dev/null
 check "--context without dir: usage exit" "2" "$?"
+# Exact tokens: 68,000 in a 1M window whose whole-percent share reads 6%.
+payload 6 1000000 ctx3 | jq -c '.context_window.total_input_tokens = 68000' | sh "$skill/status-line.sh" >/dev/null
+check "--context exact tokens" \
+    "context: 68k tokens, 45% of a 150k smart zone, 94% of window remaining" \
+    "$(sh "$skill/status-line.sh" --context "$proj" ctx3 </dev/null)"
+check "--context matches line 2" "[Opus] 45% of zone" \
+    "$(payload 6 1000000 ctx3 | jq -c '.context_window.total_input_tokens = 68000' | sh "$skill/status-line.sh" | sed -n 2p | plain)"
+check "--context leaves the base record alone" "6" \
+    "$(jq -r '100 - .remaining_pct' "$WORKSTREAM_KIT_CONTEXT_DIR/claude-ctx3-context.json")"
+payload 0 1000000 ctx4 | sh "$skill/status-line.sh" >/dev/null
+check "no usage yet: no record" "no" "$([ -f "$WORKSTREAM_KIT_CONTEXT_DIR/claude-ctx4-zone.json" ] && echo yes || echo no)"
 
 # --- install.sh -----------------------------------------------------------
 inst() { sh "$skill/install.sh" --config-dir "$prof" "$@" </dev/null; }
@@ -129,6 +140,23 @@ check "same: dry run exits 0" "0" "$rc"
 has "same: in sync" "= statusLine  runs this copy" "$out"
 out=$(inst); check "same: real run exits 0" "0" "$?"
 has "same: nothing written" "In sync. Nothing written." "$out"
+
+# A stale stamp over in-sync files: an update that changed neither script.
+st="$prof/scripts/status-line.source"
+sed 's/^plugin: mp-ported-skills .*/plugin: mp-ported-skills 0.0.1/; s/^commit: .*/commit: 0000000/' "$st" > "$work/stamp" && command mv -f "$work/stamp" "$st"
+out=$(inst --dry-run); rc=$?
+check "stale stamp: dry run exits 1" "1" "$rc"
+has "stale stamp: reported" "~ scripts/status-line.source  names 0.0.1 (0000000); would restamp" "$out"
+check "stale stamp: dry run leaves it" "plugin: mp-ported-skills 0.0.1" "$(sed -n 1p "$st")"
+out=$(inst); check "stale stamp: real run exits 0" "0" "$?"
+check "stale stamp: version rewritten" \
+    "plugin: mp-ported-skills $(jq -r .version "$root/plugins/mp-ported-skills/.claude-plugin/plugin.json")" "$(sed -n 1p "$st")"
+check "stale stamp: commit rewritten" "commit: $(git -C "$root" rev-parse --short HEAD)" "$(sed -n 2p "$st")"
+out=$(inst --dry-run); check "stale stamp: then in sync" "0" "$?"
+command rm -f "$st"
+out=$(inst --dry-run)
+has "missing stamp: reported" "~ scripts/status-line.source  missing; would stamp" "$out"
+out=$(inst); check "missing stamp: written" "2" "$(grep -cE '^status-line(-base)?\.sh [0-9a-f]{64}$' "$st")"
 
 # The installed command renders, and its --context reads.
 out=$(payload 7 1000000 inst1 | CLAUDE_CONFIG_DIR="$prof" sh -c "$(jq -r .statusLine.command "$prof/settings.json")" | plain)
