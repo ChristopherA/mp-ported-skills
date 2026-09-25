@@ -1,0 +1,18 @@
+{
+  "name": "mp-ported-skills",
+  "owner": {
+    "name": "Christopher Allen"
+  },
+  "metadata": {
+    "description": "Skills ported to work beside Matt Pocock's skills, following his conventions."
+  },
+  "plugins": [
+    {
+      "name": "mp-ported-skills",
+      "displayName": "MP Ported Skills",
+      "description": "Skills that supplement Matt Pocock's mattpocock-skills plugin, written in its conventions and vocabulary.",
+      "version": "0.1.0",
+      "source": "./plugins/mp-ported-skills"
+    }
+  ]
+}

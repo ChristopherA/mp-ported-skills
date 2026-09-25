@@ -1,0 +1,16 @@
+{
+  "name": "mp-ported-skills",
+  "version": "0.1.0",
+  "description": "Skills that supplement Matt Pocock's mattpocock-skills plugin, written in its conventions and vocabulary.",
+  "author": {
+    "name": "Christopher Allen"
+  },
+  "homepage": "https://github.com/ChristopherA/mp-ported-skills",
+  "repository": "https://github.com/ChristopherA/mp-ported-skills",
+  "license": "BSD-2-Clause-Patent",
+  "keywords": [
+    "skills",
+    "mattpocock-skills",
+    "workflow"
+  ]
+}
