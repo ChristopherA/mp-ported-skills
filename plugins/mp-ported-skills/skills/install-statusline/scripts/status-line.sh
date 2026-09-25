@@ -2,11 +2,11 @@
 # status-line.sh -- Claude Code status line measured against the smart zone.
 #
 # Line 1: host · profile » project » branch
-# Line 2: [Model | effort] 62k / 150k
-#         tokens in context against the smart zone: green below two thirds
-#         of it, yellow up to it, red past it. The effort appears when the
-#         model reports one. Tokens are context_window.total_input_tokens,
-#         or used_percentage * context_window_size where that is absent.
+# Line 2: [Model | effort] 41% of zone
+#         tokens in context as a percentage of the smart zone: green below
+#         67%, yellow to 100%, red past it. The effort appears when the model
+#         reports one. Tokens are context_window.total_input_tokens, or
+#         used_percentage * context_window_size where that is absent.
 #
 # Wraps status-line-base.sh, an unmodified copy of claude-workstream-kit's
 # .claude/scripts/status-line.sh (source below). The base renders line 1 and
@@ -19,7 +19,7 @@
 #
 #   status-line.sh --context <project-dir> [<session-id>]
 #
-# prints "context: 62k tokens used of a 150k smart zone, 94% of window
+# prints "context: 62k tokens, 41% of a 150k smart zone, 94% of window
 # remaining", or nothing when there is no record, so a caller says nothing
 # rather than reporting zero. With a session id it reads that session's record
 # only; without one, the newest record for the project, which is another
@@ -49,7 +49,8 @@ if [ "${1:-}" = "--context" ]; then
     find "${dir%/}/" -maxdepth 1 -name 'claude-*-context.json' -exec jq -rs --arg p "$2" --arg s "${3:-}" --arg z "$zone_k" \
       'def norm: gsub("/+"; "/") | rtrimstr("/");
        [.[]|select((.project_dir|norm)==($p|norm) and ($s == "" or .session_id == $s))]|sort_by(.updated)|last
-       |if . then "context: \(.context_window_size * (100 - .remaining_pct) / 100 / 1000 | floor)k tokens used of a \($z)k smart zone, \(.remaining_pct)% of window remaining" else empty end' {} + 2>/dev/null
+       |if . then (.context_window_size * (100 - .remaining_pct) / 100) as $t
+        | "context: \($t / 1000 | floor)k tokens, \($t * 100 / (($z | tonumber) * 1000) | floor)% of a \($z)k smart zone, \(.remaining_pct)% of window remaining" else empty end' {} + 2>/dev/null
     exit 0
 fi
 
@@ -77,29 +78,28 @@ if ! command -v jq >/dev/null 2>&1; then
     exit 0
 fi
 
-_tsv=$(printf '%s' "$input" | jq -r '[
-  .model.display_name // "",
-  .effort.level // "",
-  ((if (.context_window.total_input_tokens // 0) > 0 then .context_window.total_input_tokens
-    else (.context_window.used_percentage // 0) * (.context_window.context_window_size // 0) / 100 end) / 1000 | floor)
-] | @tsv' 2>/dev/null) || _tsv=""
+_tsv=$(printf '%s' "$input" | jq -r --argjson z "$zone_k" '
+  (if (.context_window.total_input_tokens // 0) > 0 then .context_window.total_input_tokens
+   else (.context_window.used_percentage // 0) * (.context_window.context_window_size // 0) / 100 end) as $t
+  | [ .model.display_name // "", .effort.level // "", ($t | floor), ($t * 100 / ($z * 1000) | floor) ] | @tsv' 2>/dev/null) || _tsv=""
 model_name=$(printf '%s' "$_tsv" | cut -f1)
 effort=$(printf '%s' "$_tsv" | cut -f2)
-used_k=$(printf '%s' "$_tsv" | cut -f3)
+used=$(printf '%s' "$_tsv" | cut -f3)
+pct=$(printf '%s' "$_tsv" | cut -f4)
 
 # No usage data yet: an empty line 2, as the base does.
-case $used_k in ''|*[!0-9]*|0) echo ""; exit 0 ;; esac
+case $used in ''|*[!0-9]*|0) echo ""; exit 0 ;; esac
 
 label=$model_name
 [ -n "$effort" ] && label="${label:+$label | }$effort"
 model_prefix=""
 [ -n "$label" ] && model_prefix="[${label}] "
 
-if [ "$used_k" -gt "$zone_k" ]; then
+if [ "$pct" -gt 100 ]; then
     color='\033[0;31m'
-elif [ "$used_k" -ge $((zone_k * 2 / 3)) ]; then
+elif [ "$pct" -ge 67 ]; then
     color='\033[0;33m'
 else
     color='\033[0;32m'
 fi
-printf '%s%b%sk / %sk%b\n' "$model_prefix" "$color" "$used_k" "$zone_k" '\033[0m'
+printf '%s%b%s%% of zone%b\n' "$model_prefix" "$color" "$pct" '\033[0m'

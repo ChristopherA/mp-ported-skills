@@ -4,7 +4,7 @@ description: Install a status line that measures context against the ~150k-token
 disable-model-invocation: true
 ---
 
-Install a status line into the current Claude Code profile. Line 2 reads `[Model] 62k / 150k`: tokens used against the **smart zone**, green below two thirds of it, yellow up to it, red past it. A percentage of a 1M window stays green long after a session has left the smart zone; this line turns at the point where a **phase boundary** is due. `capturing` reads the same number through `status-line.sh --context`.
+Install a status line into the current Claude Code profile. Line 2 reads `[Opus 5.5 | medium] 41% of zone`: the model, its effort level, and tokens in context as a percentage of the **smart zone** (~150k tokens), green below 67%, yellow to 100%, red past it. A percentage of a 1M window stays green long after a session has left the smart zone; this line turns at the point where a **phase boundary** is due. `capturing` reads the same number through `status-line.sh --context`.
 
 The work is `scripts/install.sh`, which is deterministic; this skill runs it, shows its report, and asks.
 

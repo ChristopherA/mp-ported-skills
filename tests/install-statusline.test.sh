@@ -49,30 +49,32 @@ host=$(hostname -s)
 # --- render ---------------------------------------------------------------
 out=$(payload 4 1000000 | sh "$skill/status-line.sh")
 check "line 1" "$host · testprof » proj » feature-x" "$(printf '%s\n' "$out" | sed -n 1p)"
-check "line 2 green" "[Opus] 40k / 150k" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
+check "line 2 green" "[Opus] 26% of zone" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
 has "green escape" "$(printf '\033[0;32m')" "$out"
 
 out=$(payload 12 1000000 | sh "$skill/status-line.sh")
-has "yellow at 120k" "$(printf '\033[0;33m')120k" "$out"
+has "yellow at 120k" "$(printf '\033[0;33m')80%" "$out"
 out=$(payload 10 1000000 | sh "$skill/status-line.sh")
-has "yellow from 100k" "$(printf '\033[0;33m')100k" "$out"
+has "green at 66%" "$(printf '\033[0;32m')66%" "$out"
+out=$(payload 10 1000000 | jq -c '.context_window.total_input_tokens = 100500' | sh "$skill/status-line.sh")
+has "yellow from 67%" "$(printf '\033[0;33m')67%" "$out"
 out=$(payload 15 1000000 | sh "$skill/status-line.sh")
-has "yellow at exactly 150k" "$(printf '\033[0;33m')150k" "$out"
+has "yellow at exactly 100%" "$(printf '\033[0;33m')100%" "$out"
 out=$(payload 20 1000000 | sh "$skill/status-line.sh")
-has "red past the zone" "$(printf '\033[0;31m')200k" "$out"
+has "red past the zone" "$(printf '\033[0;31m')133%" "$out"
 out=$(payload 20 1000000 | MP_SMART_ZONE_K=300 sh "$skill/status-line.sh")
-check "zone override" "[Opus] 200k / 300k" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
+check "zone override" "[Opus] 66% of zone" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
 out=$(payload 20 1000000 | MP_SMART_ZONE_K=abc sh "$skill/status-line.sh")
-check "bad zone falls back" "[Opus] 200k / 150k" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
+check "bad zone falls back" "[Opus] 133% of zone" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
 p=$(payload 19 1000000 | jq -c '.effort = {level: "medium"} | .context_window.total_input_tokens = 187654')
 out=$(printf '%s' "$p" | sh "$skill/status-line.sh")
-check "effort and exact tokens" "[Opus | medium] 187k / 150k" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
+check "effort and exact tokens" "[Opus | medium] 125% of zone" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
 p=$(payload 4 1000000 | jq -c '.effort = {level: "high"} | del(.model)')
 out=$(printf '%s' "$p" | sh "$skill/status-line.sh")
-check "effort without a model name" "[high] 40k / 150k" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
+check "effort without a model name" "[high] 26% of zone" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
 p=$(payload 4 1000000 | jq -c '.context_window.total_input_tokens = 0')
 out=$(printf '%s' "$p" | sh "$skill/status-line.sh")
-check "zero exact tokens falls back" "[Opus] 40k / 150k" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
+check "zero exact tokens falls back" "[Opus] 26% of zone" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
 out=$(payload 0 1000000 | sh "$skill/status-line.sh")
 check "no usage yet: empty line 2" "" "$(printf '%s\n' "$out" | sed -n 2p)"
 out=$(printf '' | sh "$skill/status-line.sh")
@@ -84,21 +86,21 @@ check "default profile name" "$host · default » proj » feature-x" "$out"
 command rm -f "$WORKSTREAM_KIT_CONTEXT_DIR"/*
 payload 6 1000000 ctx1 | sh "$skill/status-line.sh" >/dev/null
 check "--context reads the record" \
-    "context: 60k tokens used of a 150k smart zone, 94% of window remaining" \
+    "context: 60k tokens, 40% of a 150k smart zone, 94% of window remaining" \
     "$(sh "$skill/status-line.sh" --context "$proj/" </dev/null)"
 # Backdate ctx1 so "newest" does not hang on two writes in one second.
 r="$WORKSTREAM_KIT_CONTEXT_DIR/claude-ctx1-context.json"
 jq '.updated = "2000-01-01T00:00:00Z"' "$r" > "$r.new" && command mv -f "$r.new" "$r"
 payload 3 1000000 ctx2 | sh "$skill/status-line.sh" >/dev/null
 check "--context newest for the dir" \
-    "context: 30k tokens used of a 150k smart zone, 97% of window remaining" \
+    "context: 30k tokens, 20% of a 150k smart zone, 97% of window remaining" \
     "$(sh "$skill/status-line.sh" --context "$proj" </dev/null)"
 check "--context by session" \
-    "context: 60k tokens used of a 150k smart zone, 94% of window remaining" \
+    "context: 60k tokens, 40% of a 150k smart zone, 94% of window remaining" \
     "$(sh "$skill/status-line.sh" --context "$proj" ctx1 </dev/null)"
 check "--context unknown session: nothing" "" "$(sh "$skill/status-line.sh" --context "$proj" nosuch </dev/null)"
 check "--context empty session: newest" \
-    "context: 30k tokens used of a 150k smart zone, 97% of window remaining" \
+    "context: 30k tokens, 20% of a 150k smart zone, 97% of window remaining" \
     "$(sh "$skill/status-line.sh" --context "$proj" "" </dev/null)"
 check "--context other dir: nothing" "" "$(sh "$skill/status-line.sh" --context "$work/elsewhere" </dev/null)"
 sh "$skill/status-line.sh" --context >/dev/null 2>&1 </dev/null
@@ -130,7 +132,7 @@ has "same: nothing written" "In sync. Nothing written." "$out"
 
 # The installed command renders, and its --context reads.
 out=$(payload 7 1000000 inst1 | CLAUDE_CONFIG_DIR="$prof" sh -c "$(jq -r .statusLine.command "$prof/settings.json")" | plain)
-check "installed command renders" "[Opus] 70k / 150k" "$(printf '%s\n' "$out" | sed -n 2p)"
+check "installed command renders" "[Opus] 46% of zone" "$(printf '%s\n' "$out" | sed -n 2p)"
 check "installed command names its profile" "$host · prof-absent » proj » feature-x" "$(printf '%s\n' "$out" | sed -n 1p)"
 
 # The command follows CLAUDE_CONFIG_DIR at run time: settings copied into
@@ -140,7 +142,7 @@ command cp "$prof/settings.json" "$prof2/settings.json"
 printf '#!/bin/sh\necho copied-profile-script\n' > "$prof2/scripts/status-line.sh"
 out=$(payload 7 1000000 inst1 | CLAUDE_CONFIG_DIR="$prof2" sh -c "$(jq -r .statusLine.command "$prof2/settings.json")")
 check "command follows CLAUDE_CONFIG_DIR" "copied-profile-script" "$out"
-check "installed --context" "context: 70k tokens used of a 150k smart zone, 93% of window remaining" \
+check "installed --context" "context: 70k tokens, 46% of a 150k smart zone, 93% of window remaining" \
     "$(sh "$prof/scripts/status-line.sh" --context "$proj" </dev/null)"
 
 # statusLine present and different
