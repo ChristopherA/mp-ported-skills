@@ -42,8 +42,12 @@ label_for() {
     printf '%s' "${l:-$1}"
 }
 
+# Every command this script names is user-invoked in mattpocock-skills
+# (disable-model-invocation: true), so it is missing from the model's skill
+# list; the marker keeps the reply from calling it absent or substituting one.
+you_type="(you type it; user-invoked)"
 # Case 6's suggestions, the runner-up when no later case applies.
-ideas="/grill-with-docs on a new idea, or /improve-codebase-architecture"
+ideas="/grill-with-docs on a new idea, or /improve-codebase-architecture (you type these; they are user-invoked)"
 
 gather() {
     command -v git >/dev/null && git rev-parse --git-dir >/dev/null 2>&1 || {
@@ -114,7 +118,7 @@ gather() {
     fi
 
     case $tracker in
-        none) echo "tracker: no docs/agents/issue-tracker.md (run /setup-matt-pocock-skills)" ;;
+        none) echo "tracker: no docs/agents/issue-tracker.md; run /setup-matt-pocock-skills $you_type" ;;
         other) echo "tracker: not GitHub; read it per docs/agents/issue-tracker.md" ;;
         github) if [ $reached = 1 ]; then echo "tracker: GitHub, reached"
             else echo "tracker: GitHub, UNREACHED: $why"; fi ;;
@@ -196,13 +200,13 @@ gather() {
         [ -n "$inflight" ] || add_case "undecided: git shows nothing in flight; the tracker was not read"
         add_case "none known: the tracker was not read"
     else
-        [ -n "$ready" ] && add_case "2 /implement ${ready%% *}: ${ready%%;*}"
+        [ -n "$ready" ] && add_case "2 /implement ${ready%% *} $you_type: ${ready%%;*}"
         if [ "$n_unl" -gt 0 ] || [ "$n_triage" -gt 0 ] || [ -n "$replied" ]; then
-            add_case "3 /triage: $n_unl unlabelled, $n_triage $t_triage, replied $t_info: ${replied:-none}"
+            add_case "3 /triage $you_type: $n_unl unlabelled, $n_triage $t_triage, replied $t_info: ${replied:-none}"
         fi
         # The open list can lag a push that closed the ticket by a few seconds.
         [ -n "$stale" ] && add_case "4 tracker and repo disagree: close $stale (as of the last read: confirm with gh issue view first)"
-        [ "$n_map" -gt 0 ] && add_case "5 /wayfinder: $maps"
+        [ "$n_map" -gt 0 ] && add_case "5 /wayfinder $you_type: $maps"
         if [ -n "$cases" ]; then add_case "6 nothing else in motion: $ideas"
         else add_case "6 nothing in motion"; add_case "$ideas"; fi
     fi
@@ -225,7 +229,7 @@ rc=$?
 if [ $rc = 0 ]; then
     cat "$tmp/out"
     if [ $hook = 1 ]; then
-        echo "On your first reply, whatever the user wrote, recommend one next step from this state in the resuming skill's shape (the step, its reason, and the runner-up line as the runner-up), then answer anything else they asked. Do not ask what they are working on."
+        echo "On your first reply, whatever the user wrote, recommend one next step from this state in the resuming skill's shape (the step, its reason, and the runner-up line as the runner-up), then answer anything else they asked. Do not ask what they are working on. Commands marked user-invoked are installed but hidden from your skill list: tell the user to type them, and never call them missing or swap in a model-invocable skill."
     fi
 elif [ $hook = 0 ]; then
     cat "$tmp/out"

@@ -30,7 +30,8 @@ has() { # <name> <needle> <haystack>
 }
 next() { printf '%s\n' "$1" | sed -n 's/^next: //p'; }
 runner() { printf '%s\n' "$1" | sed -n 's/^runner-up: //p'; }
-case6_later="6 nothing else in motion: /grill-with-docs on a new idea, or /improve-codebase-architecture"
+ideas="/grill-with-docs on a new idea, or /improve-codebase-architecture (you type these; they are user-invoked)"
+case6_later="6 nothing else in motion: $ideas"
 
 # --- fake gh ----------------------------------------------------------------
 mkdir -p "$work/bin" "$work/gh"
@@ -83,7 +84,7 @@ prs '[]'
 bare="$work/bare"
 git init -q "$bare"
 check "no config: hook silent" "" "$(CLAUDE_PROJECT_DIR=$bare sh "$state" --hook </dev/null 2>&1)"
-has "no config: report names setup" "no docs/agents/issue-tracker.md" "$(sh "$state" "$bare" </dev/null 2>&1)"
+has "no config: report names setup" "no docs/agents/issue-tracker.md; run /setup-matt-pocock-skills (you type it; user-invoked)" "$(sh "$state" "$bare" </dev/null 2>&1)"
 
 check "gh failing: hook silent" "" "$(FAKE_GH_FAIL=1 hook)"
 out=$(FAKE_GH_FAIL=1 run)
@@ -100,15 +101,16 @@ check "gh hung: hook silent" "" "$out"
 # --- the six cases ----------------------------------------------------------
 out=$(run)
 check "case 6: nothing in motion" "6 nothing in motion" "$(next "$out")"
-check "case 6: runner-up names the suggestions" "/grill-with-docs on a new idea, or /improve-codebase-architecture" "$(runner "$out")"
+check "case 6: runner-up names the suggestions" "$ideas" "$(runner "$out")"
 out=$(hook)
 has "case 6: hook states it" "next: 6 nothing in motion" "$out"
-has "case 6: hook carries the runner-up" "runner-up: /grill-with-docs on a new idea, or /improve-codebase-architecture" "$out"
+has "case 6: hook carries the runner-up" "runner-up: $ideas" "$out"
 has "hook: instruction line" "Do not ask what they are working on." "$out"
+has "hook: user-invoked commands are for the user to type" "never call them missing or swap in a model-invocable skill" "$out"
 
 issues "$(list "$(issue 20 wayfinder:map)" "$(issue 21 wayfinder:task)")"
 out=$(run)
-check "case 5: wayfinder map" "5 /wayfinder: #20 t20" "$(next "$out")"
+check "case 5: wayfinder map" "5 /wayfinder (you type it; user-invoked): #20 t20" "$(next "$out")"
 check "case 5: runner-up falls to case 6" "$case6_later" "$(runner "$out")"
 
 g commit -q --allow-empty -m 'Fix the thing' -m 'Closes #30'
@@ -116,18 +118,18 @@ g push -q
 issues "$(list "$(issue 20 wayfinder:map)" "$(issue 30 ready-for-agent)")"
 out=$(run)
 check "case 4: open but closed on main" "4 tracker and repo disagree: close #30 t30 (as of the last read: confirm with gh issue view first)" "$(next "$out")"
-check "case 4: runner-up is case 5" "5 /wayfinder: #20 t20" "$(runner "$out")"
+check "case 4: runner-up is case 5" "5 /wayfinder (you type it; user-invoked): #20 t20" "$(runner "$out")"
 has "case 4: not offered as ready" "ready, blockers closed: none" "$out"
 
 issues "$(list "$(issue 30 enhancement)" "$(issue 31 needs-triage)")"
 out=$(run)
-check "case 3: needs-triage" "3 /triage: 1 unlabelled, 1 needs-triage, replied needs-info: none" "$(next "$out")"
+check "case 3: needs-triage" "3 /triage (you type it; user-invoked): 1 unlabelled, 1 needs-triage, replied needs-info: none" "$(next "$out")"
 check "case 3: runner-up is case 4" "4 tracker and repo disagree: close #30 t30 (as of the last read: confirm with gh issue view first)" "$(runner "$out")"
 
 printf '[{"user":{"login":"me"}},{"user":{"login":"reporter"}}]' >"$FAKE_GH/comments-40.json"
 printf '[{"user":{"login":"reporter"}},{"user":{"login":"me"}}]' >"$FAKE_GH/comments-41.json"
 issues "$(list "$(issue 40 needs-info | jq -c '.comments = 2')" "$(issue 41 needs-info | jq -c '.comments = 2')")"
-check "case 3: needs-info replied" "3 /triage: 0 unlabelled, 0 needs-triage, replied needs-info: #40" "$(next "$(run)")"
+check "case 3: needs-info replied" "3 /triage (you type it; user-invoked): 0 unlabelled, 0 needs-triage, replied needs-info: #40" "$(next "$(run)")"
 issues "$(list "$(issue 41 needs-info | jq -c '.comments = 2')")"
 check "case 6: needs-info awaiting reporter" "6 nothing in motion" "$(next "$(run)")"
 
@@ -135,16 +137,16 @@ issues "$(list "$(issue 31 needs-triage)" "$(issue 50 ready-for-agent 1)" \
     "$(issue 51 ready-for-agent 0 'Blocked by: #31')" "$(issue 52 ready-for-agent 0 'Blocked by: #9')" \
     "$(issue 53 ready-for-agent)")"
 out=$(run)
-check "case 2: first unblocked ready" "2 /implement #52: #52 t52" "$(next "$out")"
+check "case 2: first unblocked ready" "2 /implement #52 (you type it; user-invoked): #52 t52" "$(next "$out")"
 has "case 2: skips native and body blockers" "ready, blockers closed: #52 t52; #53 t53" "$out"
-check "case 2: runner-up is case 3" "3 /triage: 0 unlabelled, 1 needs-triage, replied needs-info: none" "$(runner "$out")"
+check "case 2: runner-up is case 3" "3 /triage (you type it; user-invoked): 0 unlabelled, 1 needs-triage, replied needs-info: none" "$(runner "$out")"
 
 prs '[{"number":60,"title":"fork pr","headRefName":"x","isCrossRepository":true}]'
-check "fork PR is not work in flight" "2 /implement #52: #52 t52" "$(next "$(run)")"
+check "fork PR is not work in flight" "2 /implement #52 (you type it; user-invoked): #52 t52" "$(next "$(run)")"
 prs '[{"number":61,"title":"own pr","headRefName":"y","isCrossRepository":false}]'
 out=$(run)
 has "case 1: own open PR" "1 work in flight: open PR #61 own pr [y]" "$(next "$out")"
-check "case 1: runner-up is case 2" "2 /implement #52: #52 t52" "$(runner "$out")"
+check "case 1: runner-up is case 2" "2 /implement #52 (you type it; user-invoked): #52 t52" "$(runner "$out")"
 prs '[]'
 
 echo x >"$proj/scratch"
@@ -164,7 +166,7 @@ g commit -qam 'Map ready-for-agent to AFK'
 g push -q
 issues "$(list "$(issue 70 AFK)" "$(issue 71 ready-for-agent)")"
 out=$(run)
-check "mapped label: ready by its string" "2 /implement #70: #70 t70" "$(next "$out")"
+check "mapped label: ready by its string" "2 /implement #70 (you type it; user-invoked): #70 t70" "$(next "$out")"
 has "mapped label: counted under its string" "1 AFK" "$out"
 
 printf '%s passed, %s failed\n' "$pass" "$fail"

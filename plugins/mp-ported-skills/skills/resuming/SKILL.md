@@ -35,6 +35,7 @@ Done when the case stands confirmed or you have moved it.
 
 - **Next step**: one command or action, and why this case won.
 - **Runner-up**: the `runner-up:` line: the next case that applies, or the case 6 suggestions.
+- **User-invoked commands**: every command the cases name (`/implement`, `/triage`, `/wayfinder`, `/grill-with-docs`, `/improve-codebase-architecture`, and `/setup-matt-pocock-skills` when no tracker is configured) is user-invoked in `mattpocock-skills`, and `state.sh` marks each one. A user-invoked skill is left out of your skill list, so its absence there does not mean it is missing. Tell the user to type it. Never call it missing, and never offer a model-invocable skill in its place.
 - **Sources**: which were reached. When the tracker was unreached (`gh` missing, offline, unauthenticated), say so, and frame the step as git's view only.
 
 On a no, the runner-up becomes the recommendation, in the same shape, with a new runner-up.
