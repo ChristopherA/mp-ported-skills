@@ -3,8 +3,8 @@
 #
 # Line 1: host · profile » project » branch
 # Line 2: [Model|effort] 41% of zone
-#         tokens in context as a percentage of the smart zone: green below
-#         67%, yellow to 100%, red past it. The effort appears when the model
+#         tokens in context as a percentage of the smart zone: green through
+#         100%, yellow past it, red from 200%. The effort appears when the model
 #         reports one. Tokens are context_window.total_input_tokens, or
 #         used_percentage * context_window_size where that is absent.
 #
@@ -114,9 +114,9 @@ label=$model_name
 model_prefix=""
 [ -n "$label" ] && model_prefix="[${label}] "
 
-if [ "$pct" -gt 100 ]; then
+if [ "$pct" -ge 200 ]; then
     color='\033[0;31m'
-elif [ "$pct" -ge 67 ]; then
+elif [ "$pct" -gt 100 ]; then
     color='\033[0;33m'
 else
     color='\033[0;32m'

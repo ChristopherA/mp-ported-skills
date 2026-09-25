@@ -56,15 +56,17 @@ check "line 2 green" "[Opus] 26% of zone" "$(printf '%s\n' "$out" | sed -n 2p | 
 has "green escape" "$(printf '\033[0;32m')" "$out"
 
 out=$(payload 12 1000000 | sh "$skill/status-line.sh")
-has "yellow at 120k" "$(printf '\033[0;33m')80%" "$out"
-out=$(payload 10 1000000 | sh "$skill/status-line.sh")
-has "green at 66%" "$(printf '\033[0;32m')66%" "$out"
-out=$(payload 10 1000000 | jq -c '.context_window.total_input_tokens = 100500' | sh "$skill/status-line.sh")
-has "yellow from 67%" "$(printf '\033[0;33m')67%" "$out"
+has "green at 120k" "$(printf '\033[0;32m')80%" "$out"
 out=$(payload 15 1000000 | sh "$skill/status-line.sh")
-has "yellow at exactly 100%" "$(printf '\033[0;33m')100%" "$out"
+has "green at exactly 100%" "$(printf '\033[0;32m')100%" "$out"
+out=$(payload 15 1000000 | jq -c '.context_window.total_input_tokens = 151500' | sh "$skill/status-line.sh")
+has "yellow from 101%" "$(printf '\033[0;33m')101%" "$out"
 out=$(payload 20 1000000 | sh "$skill/status-line.sh")
-has "red past the zone" "$(printf '\033[0;31m')133%" "$out"
+has "yellow at 133%" "$(printf '\033[0;33m')133%" "$out"
+out=$(payload 30 1000000 | jq -c '.context_window.total_input_tokens = 298500' | sh "$skill/status-line.sh")
+has "yellow at 199%" "$(printf '\033[0;33m')199%" "$out"
+out=$(payload 30 1000000 | sh "$skill/status-line.sh")
+has "red from 200%" "$(printf '\033[0;31m')200%" "$out"
 out=$(payload 20 1000000 | MP_SMART_ZONE_K=300 sh "$skill/status-line.sh")
 check "zone override" "[Opus] 66% of zone" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
 out=$(payload 20 1000000 | MP_SMART_ZONE_K=abc sh "$skill/status-line.sh")
