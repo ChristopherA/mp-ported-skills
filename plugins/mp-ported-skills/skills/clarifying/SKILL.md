@@ -3,7 +3,11 @@ name: clarifying
 description: Settle a mixed list of open items, or a single decision, one question at a time. Use when a grilling round, spec or triage hands back a list to work through, or the user wants to clarify a decision.
 ---
 
-Settle what is in front of the user, one decision at a time, then stop. The input is `$ARGUMENTS` when given; otherwise the last message. Usually that is a list another skill handed back, mixing settled decisions, loose details and open questions. A single decision is a list of one.
+Settle what is in front of the user, one decision at a time, then stop. Usually that is a list another skill handed back, mixing settled decisions, loose details and open questions. A single decision is a list of one.
+
+An open question can hide the prose above it, so every question you ask is **self-contained**: whatever the user needs to answer it sits in the question text and the option descriptions, and prose before it is optional context.
+
+The input is the last message, unless arguments follow here: $ARGUMENTS
 
 ## 1. Find prior art
 
@@ -19,16 +23,15 @@ Map the items as a **design tree** and sort every item into exactly one bucket:
 - **blocked**: a decision waiting on another answer still open.
 - **elsewhere**: only someone other than the user can answer it.
 
-Show the sort as one block and ask the user to confirm the settled bucket once, as a whole. Done when every item sits in one bucket and the settled bucket is confirmed.
+Show the sort as one block, as an overview. Then confirm the settled bucket one item at a time: a self-contained question per item that states the item, with **keep as is** first and marked `(Recommended)`, and room to tweak it. A short bucket whose items are all trivially settled may be confirmed in one question that lists every item. Done when every item sits in one bucket and every settled item is confirmed or tweaked.
 
 ## 3. Work the frontier
 
 Ask one frontier decision at a time:
 
-1. In prose, set up the stakes, your recommendation and why, and its trade-offs against one or two alternatives.
-2. Ask one AskUserQuestion: a single decision, recommended option first and marked `(Recommended)`. When the choice has no clean options, ask in prose instead.
-3. Reflect the answer in your own words and name the assumption it rests on. A free-text answer that reframes the question outranks the options: restate your premises and re-ask from the user's frame.
-4. Recompute the tree. Settled answers and returned facts move blocked items onto the frontier; decisions they expose join it.
+1. Ask one self-contained AskUserQuestion on a single decision: the stakes and your recommendation, with why, in the question text; each option's trade-off in its description; the recommended option first and marked `(Recommended)`. When the choice has no clean options, ask in prose instead.
+2. Reflect the answer in your own words and name the assumption it rests on. A free-text answer that reframes the question outranks the options: restate your premises and re-ask from the user's frame.
+3. Recompute the tree. Settled answers and returned facts move blocked items onto the frontier; decisions they expose join it.
 
 After every third settled decision, ask the question the loop cannot ask itself: does the premise still hold, and should this exist at all? A run of consistent answers is coherence, not validation.
 

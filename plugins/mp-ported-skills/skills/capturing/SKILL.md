@@ -3,7 +3,7 @@ name: capturing
 description: Capture a session at a phase boundary so nothing decided, learned or promised is lost across /clear or /compact. Use when a phase ends, before /clear or /compact, or when the user wants to wrap up.
 ---
 
-A **phase boundary** is where the user picks Continue, `/clear`, `/handoff`, a subagent or `/compact`. Every move but Continue turns this session, the **primary source**, into a lossy secondary one, and the work is only safe if what it produced already landed in its durable home. Capture is that check. The session is the input; `$ARGUMENTS`, when given, names the next phase.
+A **phase boundary** is where the user picks Continue, `/clear`, `/handoff`, a subagent or `/compact`. Every move but Continue turns this session, the **primary source**, into a lossy secondary one, and the work is only safe if what it produced already landed in its durable home. Capture is that check. The session is the input. Arguments, when any follow here, name the next phase: $ARGUMENTS
 
 ## 1. Sweep
 
