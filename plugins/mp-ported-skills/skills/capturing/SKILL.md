@@ -10,7 +10,7 @@ A **phase boundary** is where the user picks Continue, `/clear`, `/handoff`, a s
 Walk the whole session for what was decided, learned or promised and is not yet durable. Route each item to its home now, as you find it:
 
 - **Settled decision or term**: an ADR or `CONTEXT.md`, through `domain-modeling`.
-- **Unfinished work**: a ticket, published to the tracker per `docs/agents/issue-tracker.md`.
+- **Unfinished work**: a ticket, published to the tracker per `docs/agents/issue-tracker.md`. This session originated it, so it lands ready: `ready-for-agent`, or `ready-for-human` when it needs human judgment or access. `needs-triage` is the on-ramp for work arriving from others.
 - **Open decision**: `clarifying`.
 - **Something only another person knows**: name it and suggest the user run `/to-questionnaire`.
 - **Already durable** (a commit, a ticket, an ADR, a research file, a `prototype/` branch): point at it and move on.
