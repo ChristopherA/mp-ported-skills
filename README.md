@@ -15,7 +15,8 @@ Install `mattpocock-skills` as well: these skills hand work to his where one alr
 
 ## Skills
 
-None yet.
+- **`clarifying`**: settles a mixed list of open items, or a single decision, one question at a time. It sorts the items into settled, facts, frontier, blocked and elsewhere; looks facts up rather than asking; asks each frontier decision with a recommendation; and ends with a summary and a completeness word (full, partial or minimal), taking no action. Use it on the list a `grilling` round, spec or triage hands back.
+- **`clarify`**: user-invoked shortcut for `clarifying`, as `grill-me` is for `grilling`.
 
 ## Layout
 
