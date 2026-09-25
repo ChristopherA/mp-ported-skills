@@ -110,7 +110,12 @@ check "gh hung: hook silent" "" "$out"
 
 # The default hook budget must end the hook before Claude Code's timeout does:
 # an alarm at hooks.json's timeout stands in for Claude Code, and exit 142 is
-# the alarm killing it.
+# the alarm killing it. A missing or non-numeric timeout would leave no alarm
+# and the case testing nothing, so that fails first.
+case $hook_timeout in
+    '' | *[!0-9]*) fail=$((fail + 1)); echo "FAIL hooks.json timeout is not a number: $hook_timeout"; hook_timeout=0 ;;
+    *) pass=$((pass + 1)) ;;
+esac
 out=$(FAKE_GH_SLEEP=$((hook_timeout + 5)) perl -e 'alarm shift; exec @ARGV' -- "$hook_timeout" \
     env CLAUDE_PLUGIN_ROOT="$root/plugins/mp-ported-skills" CLAUDE_PROJECT_DIR="$proj" \
     sh -c "$hook_cmd" </dev/null 2>&1)
