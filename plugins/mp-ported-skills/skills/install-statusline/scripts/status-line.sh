@@ -15,11 +15,13 @@
 # window, which on a 1M window stays green long after a session has left the
 # ~150k-token smart zone.
 #
-#   status-line.sh --context <project-dir>
+#   status-line.sh --context <project-dir> [<session-id>]
 #
 # prints "context: 62k tokens used of a 150k smart zone, 94% of window
-# remaining" from the newest record for that project, or nothing when there is
-# none, so a caller says nothing rather than reporting zero.
+# remaining", or nothing when there is no record, so a caller says nothing
+# rather than reporting zero. With a session id it reads that session's record
+# only; without one, the newest record for the project, which is another
+# session's whenever two sessions share the project.
 #
 # Environment:
 #   MP_SMART_ZONE_K             smart zone in thousands of tokens (default 150)
@@ -35,16 +37,16 @@ base="$here/status-line-base.sh"
 zone_k=${MP_SMART_ZONE_K:-150}
 case $zone_k in ''|*[!0-9]*|0) zone_k=150 ;; esac
 
-# === --context <project-dir>: the read side ===
+# === --context <project-dir> [<session-id>]: the read side ===
 # Same record, directory and path normalisation as the base's own --context;
 # only the sentence differs, so it reads the record fields directly.
 if [ "${1:-}" = "--context" ]; then
-    [ -n "${2:-}" ] || { echo "usage: status-line.sh --context <project-dir>" >&2; exit 2; }
+    [ -n "${2:-}" ] || { echo "usage: status-line.sh --context <project-dir> [<session-id>]" >&2; exit 2; }
     command -v jq >/dev/null 2>&1 || exit 0
     dir=${WORKSTREAM_KIT_CONTEXT_DIR:-/tmp}
-    find "${dir%/}/" -maxdepth 1 -name 'claude-*-context.json' -exec jq -rs --arg p "$2" --arg z "$zone_k" \
+    find "${dir%/}/" -maxdepth 1 -name 'claude-*-context.json' -exec jq -rs --arg p "$2" --arg s "${3:-}" --arg z "$zone_k" \
       'def norm: gsub("/+"; "/") | rtrimstr("/");
-       [.[]|select((.project_dir|norm)==($p|norm))]|sort_by(.updated)|last
+       [.[]|select((.project_dir|norm)==($p|norm) and ($s == "" or .session_id == $s))]|sort_by(.updated)|last
        |if . then "context: \(.context_window_size * (100 - .remaining_pct) / 100 / 1000 | floor)k tokens used of a \($z)k smart zone, \(.remaining_pct)% of window remaining" else empty end' {} + 2>/dev/null
     exit 0
 fi

@@ -77,6 +77,20 @@ payload 6 1000000 ctx1 | sh "$skill/status-line.sh" >/dev/null
 check "--context reads the record" \
     "context: 60k tokens used of a 150k smart zone, 94% of window remaining" \
     "$(sh "$skill/status-line.sh" --context "$proj/" </dev/null)"
+# Backdate ctx1 so "newest" does not hang on two writes in one second.
+r="$WORKSTREAM_KIT_CONTEXT_DIR/claude-ctx1-context.json"
+jq '.updated = "2000-01-01T00:00:00Z"' "$r" > "$r.new" && command mv -f "$r.new" "$r"
+payload 3 1000000 ctx2 | sh "$skill/status-line.sh" >/dev/null
+check "--context newest for the dir" \
+    "context: 30k tokens used of a 150k smart zone, 97% of window remaining" \
+    "$(sh "$skill/status-line.sh" --context "$proj" </dev/null)"
+check "--context by session" \
+    "context: 60k tokens used of a 150k smart zone, 94% of window remaining" \
+    "$(sh "$skill/status-line.sh" --context "$proj" ctx1 </dev/null)"
+check "--context unknown session: nothing" "" "$(sh "$skill/status-line.sh" --context "$proj" nosuch </dev/null)"
+check "--context empty session: newest" \
+    "context: 30k tokens used of a 150k smart zone, 97% of window remaining" \
+    "$(sh "$skill/status-line.sh" --context "$proj" "" </dev/null)"
 check "--context other dir: nothing" "" "$(sh "$skill/status-line.sh" --context "$work/elsewhere" </dev/null)"
 sh "$skill/status-line.sh" --context >/dev/null 2>&1 </dev/null
 check "--context without dir: usage exit" "2" "$?"
