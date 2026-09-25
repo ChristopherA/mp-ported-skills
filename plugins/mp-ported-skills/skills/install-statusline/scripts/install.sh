@@ -15,6 +15,8 @@
 # The report, one line per file and one for statusLine:
 #   + absent, would create        = in sync
 #   ~ behind: an earlier install, unedited since; a real run updates it
+#   ! newer: unedited, but the stamp names a later release than this one;
+#     replaced (a downgrade) only with --force
 #   ! modified: edited since it was installed, or of unknown origin;
 #     replaced only with --force
 #   ! statusLine runs another command; replaced only with --replace-statusline
@@ -87,6 +89,27 @@ commit=${commit:-unknown}
 recorded() {
     [ -f "$stamp" ] && awk -v f="$1" '$1 == f { print $2 }' "$stamp" || true
 }
+s_version="" s_commit=""
+if [ -f "$stamp" ]; then
+    s_version=$(sed -n 's/^plugin: mp-ported-skills //p' "$stamp")
+    s_commit=$(sed -n 's/^commit: //p' "$stamp")
+fi
+
+# newer <a> <b>: a is a later release than b. Dotted numbers compare field by
+# field, so 0.10.0 follows 0.9.9; anything else, "unknown" included, is never
+# newer.
+newer() {
+    awk -v a="$1" -v b="$2" 'BEGIN {
+        re = "^[0-9]+(\\.[0-9]+)*$"
+        if (a !~ re || b !~ re) exit 1
+        na = split(a, x, "."); nb = split(b, y, ".")
+        for (i = 1; i <= (na > nb ? na : nb); i++) {
+            if (x[i] + 0 > y[i] + 0) exit 0
+            if (x[i] + 0 < y[i] + 0) exit 1
+        }
+        exit 1
+    }'
+}
 
 echo "install-statusline: mp-ported-skills $version ($commit) -> $cfg"
 
@@ -98,7 +121,14 @@ for f in $files; do
     elif [ "$(sha "$dst")" = "$(sha "$src")" ]; then
         echo "  = scripts/$f  in sync"
     elif [ "$(sha "$dst")" = "$(recorded "$f")" ]; then
-        echo "  ~ scripts/$f  behind: an earlier install, unedited; would update"; changes=1
+        changes=1
+        if ! newer "$s_version" "$version"; then
+            echo "  ~ scripts/$f  behind: an earlier install, unedited; would update"
+        elif [ "$force" -eq 1 ]; then
+            echo "  ! scripts/$f  installed $s_version is newer than this $version; --force replaces it"
+        else
+            echo "  ! scripts/$f  installed $s_version is newer than this $version; needs --force"; blocked=1
+        fi
     else
         changes=1
         if [ "$force" -eq 1 ]; then
@@ -113,8 +143,6 @@ done
 # so it keeps naming the release the copies came from.
 if [ "$changes" -eq 0 ]; then
     if [ -f "$stamp" ]; then
-        s_version=$(sed -n 's/^plugin: mp-ported-skills //p' "$stamp")
-        s_commit=$(sed -n 's/^commit: //p' "$stamp")
         if [ "$s_version" != "$version" ] || [ "$s_commit" != "$commit" ]; then
             echo "  ~ scripts/status-line.source  names $s_version ($s_commit); would restamp"; changes=1
         fi

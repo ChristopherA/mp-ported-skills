@@ -21,7 +21,8 @@ Show the report as printed. Exit 0 means everything is in sync: say so and stop.
 Each `!` line needs its own yes, asked one at a time:
 
 - **`! statusLine`**: the profile already runs another status line. Show its command, say this one replaces it, and ask. A yes adds `--replace-statusline`.
-- **`! scripts/<file>`**: an installed copy was edited after it was installed, or came from elsewhere. Replacing it discards that edit. A yes adds `--force`.
+- **`! scripts/<file>  installed X is newer than this Y`**: the profile already has a later release, and this run comes from an older plugin copy, as a session started before an update does. Replacing it installs the older release. A yes adds `--force`.
+- **`! scripts/<file>  modified`**: an installed copy was edited after it was installed, or came from elsewhere. Replacing it discards that edit. A yes adds `--force`.
 
 With no `!` lines, ask once whether to install.
 

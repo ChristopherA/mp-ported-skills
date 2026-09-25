@@ -4,7 +4,8 @@
 # Render mode against captured-shape JSON payloads, --context against the
 # record the wrapper writes, and install.sh against scratch profile directories:
 # statusLine absent, present and the same, present and different, plus a
-# behind and a locally modified installed copy. Touches no real profile and
+# behind, a newer (downgrade-guarded) and a locally modified installed
+# copy. Touches no real profile and
 # nothing under /tmp outside its own mktemp directory.
 #
 # Usage: sh tests/install-statusline.test.sh
@@ -26,6 +27,7 @@ check() { # <name> <expected> <actual>
     fi
 }
 plain() { sed 's/\x1b\[[0-9;]*m//g'; }
+sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1"; else sha256sum "$1"; fi | cut -d' ' -f1; }
 has() { # <name> <needle> <haystack>
     case $3 in *"$2"*) pass=$((pass + 1)) ;; *) fail=$((fail + 1)); printf 'FAIL %s\n  missing: %s\n  in: %s\n' "$1" "$2" "$3" ;; esac
 }
@@ -191,16 +193,40 @@ check "different: backup kept" "echo other" "$(jq -r .statusLine.command "$prof/
 
 # behind: an unedited earlier install
 printf '# an earlier release\n' > "$prof/scripts/status-line.sh"
-if command -v shasum >/dev/null 2>&1; then
-    old=$(shasum -a 256 "$prof/scripts/status-line.sh" | cut -d' ' -f1)
-else
-    old=$(sha256sum "$prof/scripts/status-line.sh" | cut -d' ' -f1)
-fi
+old=$(sha "$prof/scripts/status-line.sh")
 sed "s/^status-line.sh .*/status-line.sh $old/" "$prof/scripts/status-line.source" > "$work/stamp" && command mv -f "$work/stamp" "$prof/scripts/status-line.source"
 out=$(inst --dry-run)
 has "behind: reported" "~ scripts/status-line.sh  behind" "$out"
 out=$(inst); check "behind: updates without --force" "0" "$?"
 check "behind: now current" "" "$(cmp "$skill/status-line.sh" "$prof/scripts/status-line.sh")"
+
+# newer: an unedited install from a later release than this source. Its hash
+# matches the stamp just as "behind" does; only the versions tell them apart.
+st="$prof/scripts/status-line.source"
+setstamp() { # <version>
+    printf '# a release other than this one\n' > "$prof/scripts/status-line.sh"
+    sed "s/^plugin: mp-ported-skills .*/plugin: mp-ported-skills $1/; s/^status-line.sh .*/status-line.sh $(sha "$prof/scripts/status-line.sh")/" "$st" > "$work/stamp" && command mv -f "$work/stamp" "$st"
+}
+this=$(jq -r .version "$root/plugins/mp-ported-skills/.claude-plugin/plugin.json")
+setstamp 99.0.0
+out=$(inst --dry-run)
+has "newer: reported" "! scripts/status-line.sh  installed 99.0.0 is newer than this $this; needs --force" "$out"
+out=$(inst); rc=$?
+check "newer: refuses" "1" "$rc"
+check "newer: file kept" "# a release other than this one" "$(cat "$prof/scripts/status-line.sh")"
+out=$(inst --force); check "newer: --force replaces" "0" "$?"
+check "newer: now this release" "" "$(cmp "$skill/status-line.sh" "$prof/scripts/status-line.sh")"
+setstamp 0.0.9
+out=$(inst --dry-run)
+has "older stamp: still behind" "~ scripts/status-line.sh  behind" "$out"
+# Versions compare by number, not as strings: prefixing the minor field with
+# a 1 makes it numerically later (2 -> 12) but, from 0.2 on, a string earlier.
+later=$(printf '%s' "$this" | awk -F. '{ $2 = "1" $2; print }' OFS=.)
+setstamp "$later"
+out=$(inst --dry-run)
+has "newer: minor compared as a number" "! scripts/status-line.sh  installed $later is newer" "$out"
+# Back to this release before the modified case.
+out=$(inst --force)
 
 # locally modified: edited after install
 printf '# local edit\n' >> "$prof/scripts/status-line.sh"
