@@ -10,8 +10,6 @@
     {
       "name": "mp-ported-skills",
       "displayName": "MP Ported Skills",
-      "description": "Skills that supplement Matt Pocock's mattpocock-skills plugin, written in its conventions and vocabulary.",
-      "version": "0.3.2",
       "source": "./plugins/mp-ported-skills"
     }
   ]
