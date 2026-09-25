@@ -21,11 +21,19 @@ Install `mattpocock-skills` as well: these skills hand work to his where one alr
 - **`clarify`**: user-invoked shortcut for `clarifying`, as `grill-me` is for `grilling`.
 - **`capturing`**: checks a session at a phase boundary, before `/clear` or `/compact`. It routes whatever is not yet durable to its home (ADR or `CONTEXT.md`, ticket, `clarifying`, `to-questionnaire`), fixes claims the session made stale, asks whether anything should become a rule, commits, and reports one next step, "safe to clear" only when that is true, and a recommendation from Matt's five boundary options.
 - **`capture`**: user-invoked shortcut for `capturing`.
+- **`resuming`**: recommends one next step, its reason and a runner-up, read from the tracker and git, never by asking the user what they were doing. The first of six cases wins: work in flight, a ready ticket whose blockers are all closed (`/implement #N`, the step `capturing` leaves), incoming work (`/triage`), an open ticket a commit on the default branch already closes, an open `wayfinder:map`, or nothing in motion. It says which sources it reached, and writes nothing.
+- **`next`**: user-invoked shortcut for `resuming`. Not `resume`, which is Claude Code's built-in session picker.
 - **`install-statusline`**: user-invoked. Installs a status line into the current profile whose second line reads `[Opus 5.5|medium] 41% of zone`: the model, its effort level, and tokens in context as a percentage of the ~150k-token smart zone, coloured green, yellow, then red past 100%. It reports first (in sync, behind, newer, or locally modified, per file), sets `statusLine` only if none is set, and replaces an existing one, an edited copy, or a copy from a later release (a downgrade) only on an explicit yes. `capturing` reads the same number through `status-line.sh --context`.
+
+## Hook
+
+A `SessionStart` hook runs on startup, `/clear` and `/compact` in repos that have `docs/agents/issue-tracker.md`, and nowhere else. It loads the state `resuming` reads (branch and sync, uncommitted and unpushed counts, open PRs, issues per triage label, ready tickets with closed blockers, the winning case) into Claude's context, with an instruction to open the first reply with a recommendation. It gives up after four seconds (`MP_RESUME_BUDGET`), and prints nothing when the tracker is unreachable, so a slow or offline `gh` never delays or clutters a session.
 
 ## Credits
 
 `capturing` is learned from Peter Kaminski's `wrap-up-this-session` skill, published under the MPL-2.0 license, and not copied from it.
+
+`resuming` takes its weighing order, its one step with a runner-up, and its rule of never asking from `cowork-where-was-i` in [claude-cowork-kit](https://github.com/ChristopherA/claude-cowork-kit), and its status and staleness checks from [claude-workstream-kit](https://github.com/ChristopherA/claude-workstream-kit). The problem it solves was met first in [pkai-starter-kit#18](https://github.com/peterkaminski-ai/pkai-starter-kit/issues/18).
 
 `install-statusline` ships `status-line-base.sh` unmodified from [claude-workstream-kit](https://github.com/ChristopherA/claude-workstream-kit) (BSD-2-Clause-Patent), and wraps it.
 
@@ -36,6 +44,7 @@ Install `mattpocock-skills` as well: these skills hand work to his where one alr
 plugins/mp-ported-skills/
   .claude-plugin/plugin.json               the plugin
   skills/<skill>/SKILL.md                  one folder per skill
+  hooks/hooks.json                         the SessionStart hook
 tests/                                     test scripts, run with sh
 ```
 

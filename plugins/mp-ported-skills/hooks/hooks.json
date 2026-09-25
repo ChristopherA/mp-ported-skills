@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/skills/resuming/scripts/state.sh\" --hook </dev/null",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
