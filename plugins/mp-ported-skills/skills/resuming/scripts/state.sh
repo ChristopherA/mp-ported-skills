@@ -4,7 +4,8 @@
 # Reads git (no fetch: remote refs are as of the last fetch) and, when
 # docs/agents/issue-tracker.md names GitHub, the tracker through `gh`. Prints
 # state lines, then `next: <case> ...` for the first of the six weighing cases
-# that applies. Writes nothing.
+# that applies and `runner-up: ...` for the second (case 6's suggestions when
+# no other applies). Writes nothing.
 #
 # Usage: sh state.sh [--hook] [dir]
 #   default  report everything; an unreached tracker is reported, not hidden.
@@ -41,11 +42,15 @@ label_for() {
     printf '%s' "${l:-$1}"
 }
 
+# Case 6's suggestions, the runner-up when no later case applies.
+ideas="/grill-with-docs on a new idea, or /improve-codebase-architecture"
+
 gather() {
     command -v git >/dev/null && git rev-parse --git-dir >/dev/null 2>&1 || {
         echo "git: not a repository"
         [ $hook = 1 ] && exit 3
         echo "next: 6 nothing in motion"
+        echo "runner-up: $ideas"
         exit 0
     }
 
@@ -181,22 +186,27 @@ gather() {
         [ -n "$maps" ] && echo "wayfinder maps: $maps"
     fi
 
-    # --- weigh: the first case that applies ------------------------------
-    if [ -n "$inflight" ]; then
-        echo "next: 1 work in flight: ${inflight#, }"
-    elif [ $reached = 0 ]; then
-        echo "next: undecided: git shows nothing in flight; the tracker was not read"
-    elif [ -n "$ready" ]; then
-        echo "next: 2 /implement ${ready%% *}: ${ready%%;*}"
-    elif [ "$n_unl" -gt 0 ] || [ "$n_triage" -gt 0 ] || [ -n "$replied" ]; then
-        echo "next: 3 /triage: $n_unl unlabelled, $n_triage $t_triage, replied $t_info: ${replied:-none}"
-    elif [ -n "$stale" ]; then
-        echo "next: 4 tracker and repo disagree: close $stale"
-    elif [ "$n_map" -gt 0 ]; then
-        echo "next: 5 /wayfinder: $maps"
+    # --- weigh: the first case that applies, and the next one ------------
+    # Every applicable case in order; the first is next, the second runner-up.
+    cases=
+    add_case() { cases="$cases$1
+"; }
+    [ -n "$inflight" ] && add_case "1 work in flight: ${inflight#, }"
+    if [ $reached = 0 ]; then
+        [ -n "$inflight" ] || add_case "undecided: git shows nothing in flight; the tracker was not read"
+        add_case "none known: the tracker was not read"
     else
-        echo "next: 6 nothing in motion"
+        [ -n "$ready" ] && add_case "2 /implement ${ready%% *}: ${ready%%;*}"
+        if [ "$n_unl" -gt 0 ] || [ "$n_triage" -gt 0 ] || [ -n "$replied" ]; then
+            add_case "3 /triage: $n_unl unlabelled, $n_triage $t_triage, replied $t_info: ${replied:-none}"
+        fi
+        # The open list can lag a push that closed the ticket by a few seconds.
+        [ -n "$stale" ] && add_case "4 tracker and repo disagree: close $stale (as of the last read: confirm with gh issue view first)"
+        [ "$n_map" -gt 0 ] && add_case "5 /wayfinder: $maps"
+        if [ -n "$cases" ]; then add_case "6 nothing else in motion: $ideas"
+        else add_case "6 nothing in motion"; add_case "$ideas"; fi
     fi
+    printf '%s' "$cases" | sed -n '1s/^/next: /p; 2s/^/runner-up: /p'
 }
 
 # gather runs in the background so the watchdog can stop a hung `gh`. The EXIT
@@ -215,7 +225,7 @@ rc=$?
 if [ $rc = 0 ]; then
     cat "$tmp/out"
     if [ $hook = 1 ]; then
-        echo "On your first reply, whatever the user wrote, recommend one next step from this state in the resuming skill's shape (the step, its reason, a runner-up), then answer anything else they asked. Do not ask what they are working on."
+        echo "On your first reply, whatever the user wrote, recommend one next step from this state in the resuming skill's shape (the step, its reason, and the runner-up line as the runner-up), then answer anything else they asked. Do not ask what they are working on."
     fi
 elif [ $hook = 0 ]; then
     cat "$tmp/out"
