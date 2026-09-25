@@ -8,7 +8,7 @@ Issues live in GitHub Issues for `ChristopherA/mp-ported-skills`, via the `gh` C
 
 ### Triage labels
 
-The five default triage labels, each label string equal to its role name. See `docs/agents/triage-labels.md`.
+The five default triage labels, each label string equal to its role name, plus a `research` label and a priority line in the issue body. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
