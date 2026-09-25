@@ -5,7 +5,8 @@
 # record the wrapper writes, and install.sh against scratch profile directories:
 # statusLine absent, present and the same, present and different, plus a
 # behind, a newer (downgrade-guarded) and a locally modified installed
-# copy. Touches no real profile and
+# copy, and a run from a plugin-cache copy outside git whose commit comes from
+# installed_plugins.json. Touches no real profile and
 # nothing under /tmp outside its own mktemp directory.
 #
 # Usage: sh tests/install-statusline.test.sh
@@ -237,6 +238,30 @@ check "modified: refuses" "1" "$rc"
 check "modified: edit kept" "# local edit" "$(tail -1 "$prof/scripts/status-line.sh")"
 out=$(inst --force); check "modified: --force replaces" "0" "$?"
 check "modified: now current" "" "$(cmp "$skill/status-line.sh" "$prof/scripts/status-line.sh")"
+
+# From the plugin cache: no git checkout, so the commit comes from the running
+# profile's installed_plugins.json, looked up by install path. CLAUDE_CONFIG_DIR
+# (the running profile) and --config-dir (the install target) differ, so a
+# lookup under --config-dir finds no record.
+cache="$work/cache/mp-ported-skills/$this"
+mkdir -p "$(dirname "$cache")"
+command cp -R "$root/plugins/mp-ported-skills" "$cache"
+running="$work/.claude-running"; mkdir -p "$running/plugins"
+cinst() { # <installPath in the record>; installs into $prof
+    jq -n --arg p "$1" --arg v "$this" \
+        '{plugins: {"mp-ported-skills@mp-ported-skills": [{installPath: $p, version: $v, gitCommitSha: "abcdef0123456789abcdef0123456789abcdef01"}]}}' \
+        > "$running/plugins/installed_plugins.json"
+    GIT_CEILING_DIRECTORIES="$work" CLAUDE_CONFIG_DIR="$running" \
+        sh "$cache/skills/install-statusline/scripts/install.sh" --config-dir "$prof" </dev/null
+}
+check "cache: copy is outside git" "no" \
+    "$(GIT_CEILING_DIRECTORIES="$work" git -C "$cache" rev-parse --git-dir >/dev/null 2>&1 && echo yes || echo no)"
+prof="$work/prof-cache-match"; mkdir -p "$prof"
+out=$(cinst "$cache"); check "cache match: install exits 0" "0" "$?"
+check "cache match: commit from the record" "commit: abcdef0" "$(sed -n 2p "$prof/scripts/status-line.source")"
+prof="$work/prof-cache-miss"; mkdir -p "$prof"
+out=$(cinst "$work/cache/elsewhere"); check "cache miss: install exits 0" "0" "$?"
+check "cache miss: commit unknown" "commit: unknown" "$(sed -n 2p "$prof/scripts/status-line.source")"
 
 # Environment errors
 out=$(sh "$skill/install.sh" --config-dir "$work/nope" </dev/null 2>&1); check "missing profile: exit 2" "2" "$?"

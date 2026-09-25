@@ -80,6 +80,9 @@ commit=""
 if git -C "$plugin_root" rev-parse --git-dir >/dev/null 2>&1; then
     commit=$(git -C "$plugin_root" rev-parse --short HEAD 2>/dev/null) || commit=""
 else
+    # The running profile's record, not --config-dir's: this copy of the plugin
+    # lives in the cache of the profile Claude Code runs as, and --config-dir
+    # names only where to install.
     ip="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"
     [ -f "$ip" ] && commit=$(jq -r --arg p "$plugin_root" \
         '[.plugins[][]? | select(.installPath == $p) | .gitCommitSha] | first // empty | .[0:7]' "$ip" 2>/dev/null) || commit=""
