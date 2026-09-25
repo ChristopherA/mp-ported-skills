@@ -7,9 +7,11 @@ A Claude Code plugin of skills designed to be compatible with, and to supplement
 This repository is its own plugin marketplace.
 
 ```
-/plugin marketplace add ChristopherA/mp-ported-skills
+/plugin marketplace add https://github.com/ChristopherA/mp-ported-skills.git
 /plugin install mp-ported-skills@mp-ported-skills
 ```
+
+The full HTTPS URL clones with no SSH step. The short `ChristopherA/mp-ported-skills` form makes Claude Code test `ssh git@github.com` first, which raises an approval prompt when your GitHub SSH key is hardware-backed (Secure Enclave, a security key).
 
 Install `mattpocock-skills` as well: these skills hand work to his where one already does the job.
 
