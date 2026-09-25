@@ -2,9 +2,11 @@
 # status-line.sh -- Claude Code status line measured against the smart zone.
 #
 # Line 1: host · profile » project » branch
-# Line 2: [Model] 62k / 150k   (tokens used against the smart zone: green
-#                               below two thirds of it, yellow up to it, red
-#                               past it)
+# Line 2: [Model | effort] 62k / 150k
+#         tokens in context against the smart zone: green below two thirds
+#         of it, yellow up to it, red past it. The effort appears when the
+#         model reports one. Tokens are context_window.total_input_tokens,
+#         or used_percentage * context_window_size where that is absent.
 #
 # Wraps status-line-base.sh, an unmodified copy of claude-workstream-kit's
 # .claude/scripts/status-line.sh (source below). The base renders line 1 and
@@ -77,16 +79,21 @@ fi
 
 _tsv=$(printf '%s' "$input" | jq -r '[
   .model.display_name // "",
-  ((.context_window.used_percentage // 0) * (.context_window.context_window_size // 0) / 100 / 1000 | floor)
+  .effort.level // "",
+  ((if (.context_window.total_input_tokens // 0) > 0 then .context_window.total_input_tokens
+    else (.context_window.used_percentage // 0) * (.context_window.context_window_size // 0) / 100 end) / 1000 | floor)
 ] | @tsv' 2>/dev/null) || _tsv=""
 model_name=$(printf '%s' "$_tsv" | cut -f1)
-used_k=$(printf '%s' "$_tsv" | cut -f2)
+effort=$(printf '%s' "$_tsv" | cut -f2)
+used_k=$(printf '%s' "$_tsv" | cut -f3)
 
 # No usage data yet: an empty line 2, as the base does.
 case $used_k in ''|*[!0-9]*|0) echo ""; exit 0 ;; esac
 
+label=$model_name
+[ -n "$effort" ] && label="${label:+$label | }$effort"
 model_prefix=""
-[ -n "$model_name" ] && model_prefix="[${model_name}] "
+[ -n "$label" ] && model_prefix="[${label}] "
 
 if [ "$used_k" -gt "$zone_k" ]; then
     color='\033[0;31m'

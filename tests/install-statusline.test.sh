@@ -64,6 +64,15 @@ out=$(payload 20 1000000 | MP_SMART_ZONE_K=300 sh "$skill/status-line.sh")
 check "zone override" "[Opus] 200k / 300k" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
 out=$(payload 20 1000000 | MP_SMART_ZONE_K=abc sh "$skill/status-line.sh")
 check "bad zone falls back" "[Opus] 200k / 150k" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
+p=$(payload 19 1000000 | jq -c '.effort = {level: "medium"} | .context_window.total_input_tokens = 187654')
+out=$(printf '%s' "$p" | sh "$skill/status-line.sh")
+check "effort and exact tokens" "[Opus | medium] 187k / 150k" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
+p=$(payload 4 1000000 | jq -c '.effort = {level: "high"} | del(.model)')
+out=$(printf '%s' "$p" | sh "$skill/status-line.sh")
+check "effort without a model name" "[high] 40k / 150k" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
+p=$(payload 4 1000000 | jq -c '.context_window.total_input_tokens = 0')
+out=$(printf '%s' "$p" | sh "$skill/status-line.sh")
+check "zero exact tokens falls back" "[Opus] 40k / 150k" "$(printf '%s\n' "$out" | sed -n 2p | plain)"
 out=$(payload 0 1000000 | sh "$skill/status-line.sh")
 check "no usage yet: empty line 2" "" "$(printf '%s\n' "$out" | sed -n 2p)"
 out=$(printf '' | sh "$skill/status-line.sh")
