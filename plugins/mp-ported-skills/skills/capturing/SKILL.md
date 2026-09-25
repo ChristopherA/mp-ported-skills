@@ -39,10 +39,10 @@ Run `git status` and compare it with what this session changed. Show the user an
 - **One first next step**: the next ticket whose blockers are all closed, and why that one.
 - **Safe to clear**, only when moves 1-5 actually happened. Otherwise say what is missing.
 
-End with the context reading, from:
+End with this session's context reading, from:
 
 ```sh
-"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/status-line.sh" --context "$PWD" </dev/null
+"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/status-line.sh" --context "$PWD" "${CLAUDE_SESSION_ID}" </dev/null
 ```
 
-When it prints nothing, say nothing about context. Then walk the five boundary questions in order (continue, `/clear`, `/handoff`, subagent, `/compact`) against that reading and the next phase, and recommend one. The choice is the user's.
+When it prints nothing, report no number; say once that `/install-statusline` provides one. Then walk the five boundary questions in order (continue, `/clear`, `/handoff`, subagent, `/compact`) against the next phase, and recommend one. The reading decides question 1: continue only when the next phase needs this session as a primary source, or fits in what is left of the smart zone. The choice is the user's.
