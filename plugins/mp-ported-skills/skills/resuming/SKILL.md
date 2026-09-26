@@ -26,7 +26,7 @@ When the SessionStart hook already put this state in context, use it; run the sc
 
 - **Case 1**: name the work: `git status`, `git log --oneline <default>..HEAD`, the PR's title. Finishing means commit, push or merge as the state shows.
 - **Case 4**: `gh issue view N` before recommending a close. The open list can lag a push that closed the ticket by a few seconds.
-- **Cases 5 and 6**: search `CONTEXT.md`, ADRs and docs for recently closed ticket numbers still described as open; a hit is case 4.
+- **Cases 5 and 6**: search `CONTEXT.md` (or each `CONTEXT.md` that `CONTEXT-MAP.md` lists, with its context's `docs/adr/`), `docs/adr/`, the repo's `README.md` and the open tickets for one thing: ticket numbers closed on the tracker that they still describe as open. A hit is case 4. Read nothing else.
 - **Tracker not GitHub**: read it per `docs/agents/issue-tracker.md` and weigh the cases by hand.
 
 Done when the case stands confirmed or you have moved it.
@@ -36,6 +36,6 @@ Done when the case stands confirmed or you have moved it.
 - **Next step**: one command or action, and why this case won.
 - **Runner-up**: the `runner-up:` line: the next case that applies, or the case 6 suggestions.
 - **User-invoked commands**: every command the cases name (`/implement`, `/triage`, `/wayfinder`, `/grill-with-docs`, `/improve-codebase-architecture`, and `/setup-matt-pocock-skills` when no tracker is configured) is user-invoked in `mattpocock-skills`, and `state.sh` marks each one. A user-invoked skill is left out of your skill list, so its absence there does not mean it is missing. Tell the user to type it. Never call it missing, and never offer a model-invocable skill in its place.
-- **Sources**: which were reached. When the tracker was unreached (`gh` missing, offline, unauthenticated), say so, and frame the step as git's view only.
+- **Sources**: which were reached. State only what a source returned; when a source was not reached, name it instead of filling in its value (no "no open PRs" when `gh` failed). When that source is the tracker (`gh` missing, offline, unauthenticated), also frame the step as git's view only.
 
 On a no, the runner-up becomes the recommendation, in the same shape, with a new runner-up.
