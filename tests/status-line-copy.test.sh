@@ -56,7 +56,7 @@ prof="$work/prof"; mkdir -p "$prof"
 check "absent: no copy yet" "absent" "$(lib "$v1" "$prof" sl_state status-line.sh)"
 
 lib "$v1" "$prof" sl_write status-line.sh status-line-base.sh
-check "write: copy made" "" "$(cmp "$v1/scripts/status-line.sh" "$prof/scripts/status-line.sh")"
+check "write: copy made" "same" "$(same "$v1/scripts/status-line.sh" "$prof/scripts/status-line.sh")"
 check "write: in sync" "in-sync" "$(lib "$v1" "$prof" sl_state status-line.sh)"
 check "write: base in sync" "in-sync" "$(lib "$v1" "$prof" sl_state status-line-base.sh)"
 check "write: stamp names the release" "plugin: mp-ported-skills 1.0.0" "$(sed -n 1p "$prof/scripts/status-line.source")"
