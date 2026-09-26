@@ -1,13 +1,14 @@
 #!/bin/sh
 # install-statusline.test.sh -- tests for the status line and its installer.
 #
-# Render mode against captured-shape JSON payloads, --context against the
-# record the wrapper writes, and install.sh against scratch profile directories:
-# statusLine absent, present and the same, present and different, plus a
-# behind, a newer (downgrade-guarded) and a locally modified installed
-# copy, and a run from a plugin-cache copy outside git whose commit comes from
-# installed_plugins.json. Touches no real profile and
-# nothing under /tmp outside its own mktemp directory.
+# Render mode against captured-shape JSON payloads, --context and --zone
+# against the record the wrapper writes, with that record's format pinned,
+# and install.sh against scratch profile directories: statusLine absent,
+# present and the same, present and different, plus a behind, a newer
+# (downgrade-guarded) and a locally modified installed copy, and a run from
+# a plugin-cache copy outside git whose commit comes from
+# installed_plugins.json. Touches no real profile and nothing under /tmp
+# outside its own mktemp directory.
 #
 # Usage: sh tests/install-statusline.test.sh
 
@@ -122,6 +123,30 @@ check "--context leaves the base record alone" "6" \
     "$(jq -r '100 - .remaining_pct' "$WORKSTREAM_KIT_CONTEXT_DIR/claude-ctx3-context.json")"
 payload 0 1000000 ctx4 | sh "$scripts/status-line.sh" >/dev/null
 check "no usage yet: no record" "no" "$([ -f "$WORKSTREAM_KIT_CONTEXT_DIR/claude-ctx4-zone.json" ] && echo yes || echo no)"
+
+# --- --zone ---------------------------------------------------------------
+check "--zone reads the session's record" "45% of zone" "$(sh "$scripts/status-line.sh" --zone "$proj" ctx3 </dev/null)"
+out=$(sh "$scripts/status-line.sh" --zone "$proj" nosuch </dev/null); rc=$?
+check "--zone unknown session: nothing" "" "$out"
+check "--zone unknown session: exit 0" "0" "$rc"
+sh "$scripts/status-line.sh" --zone "$proj" >/dev/null 2>&1 </dev/null
+check "--zone without session: usage exit" "2" "$?"
+check "--zone threshold override" "22% of zone" \
+    "$(MP_SMART_ZONE_K=300 sh "$scripts/status-line.sh" --zone "$proj" ctx3 </dev/null)"
+
+# The record format, pinned on both sides. The profile's installed copy
+# writes the record and the plugin's copy may read it, so a change to the
+# writer's keys or types, or to what the readers expect, must fail here.
+check "record: the writer's keys and types" \
+    "project_dir:string remaining_pct:number session_id:string tokens:number updated:string" \
+    "$(jq -r 'to_entries | sort_by(.key) | map("\(.key):\(.value | type)") | join(" ")' "$WORKSTREAM_KIT_CONTEXT_DIR/claude-ctx3-zone.json")"
+printf '{"session_id":"pin1","project_dir":"%s","tokens":61500,"remaining_pct":88,"updated":"2026-01-01T00:00:00Z"}\n' "$proj" \
+    > "$WORKSTREAM_KIT_CONTEXT_DIR/claude-pin1-zone.json"
+check "record: --zone reads a written-by-hand record" "41% of zone" \
+    "$(sh "$scripts/status-line.sh" --zone "$proj" pin1 </dev/null)"
+check "record: --context reads the same record" \
+    "context: 61k tokens, 41% of a 150k smart zone, 88% of window remaining" \
+    "$(sh "$scripts/status-line.sh" --context "$proj" pin1 </dev/null)"
 
 # --- install.sh -----------------------------------------------------------
 inst() { sh "$skill/install.sh" --config-dir "$prof" "$@" </dev/null; }

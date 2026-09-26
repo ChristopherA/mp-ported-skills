@@ -30,6 +30,12 @@
 # session's record only; without one, the newest record for the project, which
 # is another session's whenever two sessions share the project.
 #
+#   status-line.sh --zone <project-dir> <session-id>
+#
+# prints the short form of the same reading, "41% of zone", for that session
+# only, or nothing when it has no record. It reads the record an installed
+# copy writes, so the plugin's newer copy can read an older one's.
+#
 # Environment:
 #   MP_SMART_ZONE_K             smart zone in thousands of tokens (default 150)
 #   WORKSTREAM_KIT_CONTEXT_DIR  record directory, for both scripts (default /tmp)
@@ -44,20 +50,28 @@ base="$here/status-line-base.sh"
 zone_k=${MP_SMART_ZONE_K:-150}
 case $zone_k in ''|*[!0-9]*|0) zone_k=150 ;; esac
 
-# === --context <project-dir> [<session-id>]: the read side ===
+# === --context and --zone: the read side ===
 # Same directory and path normalisation as the base's own --context, over the
-# wrapper's record.
-if [ "${1:-}" = "--context" ]; then
-    [ -n "${2:-}" ] || { echo "usage: status-line.sh --context <project-dir> [<session-id>]" >&2; exit 2; }
+# wrapper's record. Both read one record and compute one percentage, so the
+# short and long forms can never disagree.
+case ${1:-} in
+--context|--zone)
+    if [ "$1" = --zone ]; then
+        [ -n "${2:-}" ] && [ -n "${3:-}" ] || { echo "usage: status-line.sh --zone <project-dir> <session-id>" >&2; exit 2; }
+    else
+        [ -n "${2:-}" ] || { echo "usage: status-line.sh --context <project-dir> [<session-id>]" >&2; exit 2; }
+    fi
     command -v jq >/dev/null 2>&1 || exit 0
     dir=${WORKSTREAM_KIT_CONTEXT_DIR:-/tmp}
-    find "${dir%/}/" -maxdepth 1 -name 'claude-*-zone.json' -exec jq -rs --arg p "$2" --arg s "${3:-}" --arg z "$zone_k" \
+    find "${dir%/}/" -maxdepth 1 -name 'claude-*-zone.json' -exec jq -rs --arg m "$1" --arg p "$2" --arg s "${3:-}" --arg z "$zone_k" \
       'def norm: gsub("/+"; "/") | rtrimstr("/");
        [.[]|select((.project_dir|norm)==($p|norm) and ($s == "" or .session_id == $s))]|sort_by(.updated)|last
-       |if . then .tokens as $t
-        | "context: \($t / 1000 | floor)k tokens, \($t * 100 / (($z | tonumber) * 1000) | floor)% of a \($z)k smart zone, \(.remaining_pct)% of window remaining" else empty end' {} + 2>/dev/null
-    exit 0
-fi
+       |if . then .tokens as $t | ($t * 100 / (($z | tonumber) * 1000) | floor) as $pct
+        | if $m == "--zone" then "\($pct)% of zone"
+          else "context: \($t / 1000 | floor)k tokens, \($pct)% of a \($z)k smart zone, \(.remaining_pct)% of window remaining" end
+        else empty end' {} + 2>/dev/null
+    exit 0 ;;
+esac
 
 # === Render ===
 input=$(cat)
