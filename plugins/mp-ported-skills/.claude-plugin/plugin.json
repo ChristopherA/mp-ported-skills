@@ -1,6 +1,6 @@
 {
   "name": "mp-ported-skills",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Skills that supplement Matt Pocock's mattpocock-skills plugin, written in its conventions and vocabulary.",
   "author": {
     "name": "Christopher Allen"
