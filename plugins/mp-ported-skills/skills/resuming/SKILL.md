@@ -13,8 +13,8 @@ sh "${CLAUDE_SKILL_DIR}/scripts/state.sh" </dev/null
 
 It reads git (no fetch) and, when `docs/agents/issue-tracker.md` names GitHub, the tracker through `gh`, taking label strings from `docs/agents/triage-labels.md`. Its `next:` line is the first of these cases that applies, and its `runner-up:` line the second, or case 6's suggestions when no other applies:
 
-1. **Work in flight**: uncommitted changes, unpushed commits, a branch other than the default, or an open PR from this repo. Finish it.
-2. **A `ready-for-agent` ticket with every blocker closed**: `/implement #N`, lowest number first. This is `capturing`'s one first next step, so what capture leaves, resume finds.
+1. **Work in flight**: uncommitted changes, unpushed commits, a branch other than the default, an open PR from this repo, or a ticket labelled `in-motion`, the `ready-for-human` ticket `capturing` marks as the one a session was working on, which git cannot see. Finish it.
+2. **A `ready-for-agent` ticket with every blocker closed**: `/implement #N`, lowest number first. When no ticket is `in-motion`, this is `capturing`'s one first next step, so what capture leaves, resume finds.
 3. **Incoming work**: unlabelled issues, `needs-triage`, or `needs-info` with a reply since the last triage notes. `/triage`.
 4. **Tracker and repo disagree**: an open ticket a commit on the default branch already closes. Fix the tracker, since every later session starts from it.
 5. **An open `wayfinder:map`**: continue `/wayfinder`.
@@ -24,7 +24,7 @@ When the SessionStart hook already put this state in context, use it; run the sc
 
 ## 2. Check what the script cannot
 
-- **Case 1**: name the work: `git status`, `git log --oneline <default>..HEAD`, the PR's title. Finishing means commit, push or merge as the state shows.
+- **Case 1**: name the work: `git status`, `git log --oneline <default>..HEAD`, the PR's title, or `gh issue view N` for an `in-motion` ticket. Finishing means commit, push or merge as the state shows, or picking the ticket up where its last comment left it.
 - **Case 4**: `gh issue view N` before recommending a close. The open list can lag a push that closed the ticket by a few seconds.
 - **Cases 5 and 6**: search `CONTEXT.md` (or each `CONTEXT.md` that `CONTEXT-MAP.md` lists, with its context's `docs/adr/`), `docs/adr/`, the repo's `README.md` and the open tickets for one thing: ticket numbers closed on the tracker that they still describe as open. A hit is case 4. Read nothing else.
 - **Tracker not GitHub**: read it per `docs/agents/issue-tracker.md` and weigh the cases by hand.

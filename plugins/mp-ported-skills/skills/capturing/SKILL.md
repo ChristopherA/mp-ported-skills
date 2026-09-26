@@ -11,6 +11,7 @@ Walk the whole session for what was decided, learned or promised and is not yet 
 
 - **Settled decision or term**: an ADR or `CONTEXT.md`, through `domain-modeling`.
 - **Unfinished work**: a ticket, published to the tracker per `docs/agents/issue-tracker.md`. This session originated it, so it lands ready: `ready-for-agent`, or `ready-for-human` when it needs human judgment or access. `needs-triage` is the on-ramp for work arriving from others.
+- **A `ready-for-human` ticket this session worked on and left open**: label it `in-motion` and remove that label from every other open ticket, so `resuming` names it first and git's silence cannot hide it. Create the label per `docs/agents/issue-tracker.md` when the tracker lacks it. When the session finished or set aside the ticket that holds the label, remove it.
 - **Open decision**: `clarifying`.
 - **Something only another person knows**: name it and suggest the user run `/to-questionnaire`.
 - **Already durable** (a commit, a ticket, an ADR, a research file, a `prototype/` branch): point at it and move on.
@@ -36,7 +37,7 @@ Run `git status` and compare it with what this session changed. Show the user an
 ## 6. Report
 
 - What was routed where, and what stays open.
-- **One first next step**: a ticket with the `ready-for-agent` role's label string from `docs/agents/triage-labels.md`, with every blocker closed, lowest number first, and why that one. `resuming`'s case 2 defines this rule, so an edit to one is made to both.
+- **One first next step**: the `in-motion` ticket when one is labelled; otherwise a ticket with the `ready-for-agent` role's label string from `docs/agents/triage-labels.md`, with every blocker closed, lowest number first, and why that one. `resuming`'s cases 1 and 2 define this rule, so an edit to one is made to both.
 - **Safe to clear**, only when moves 1-5 actually happened. Otherwise say what is missing.
 
 End with this session's context reading, from:

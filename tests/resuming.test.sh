@@ -5,9 +5,10 @@
 # PATH that serves fixture JSON: no issue-tracker config (hook silent), `gh`
 # failing (hook silent, report says unreached), a hung `gh` (hook silent
 # within its budget, and within the hook's timeout on the default budget),
-# each of the six weighing cases, and label strings read from
-# triage-labels.md. Hook cases run the command string from hooks.json, as
-# Claude Code does. Touches nothing outside its own mktemp directory.
+# each of the six weighing cases, a ticket labelled in-motion, and label
+# strings read from triage-labels.md. Hook cases run the command string from
+# hooks.json, as Claude Code does. Touches nothing outside its own mktemp
+# directory.
 #
 # Usage: sh tests/resuming.test.sh
 
@@ -164,6 +165,21 @@ out=$(run)
 check "case 2: first unblocked ready" "2 /implement #52 (you type it; user-invoked): #52 t52" "$(next "$out")"
 has "case 2: skips native and body blockers" "ready, blockers closed: #52 t52; #53 t53" "$out"
 check "case 2: runner-up is case 3" "3 /triage (you type it; user-invoked): 0 unlabelled, 1 needs-triage, replied needs-info: none" "$(runner "$out")"
+
+# A ready-for-human ticket a session left in motion, in a clean repo.
+saved_issues=$(cat "$FAKE_GH/issues.json")
+issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 25 ready-for-human)" "$(issue 52 ready-for-agent)")"
+out=$(run)
+check "case 1: ticket in motion" "1 work in flight: in motion #24 t24" "$(next "$out")"
+check "case 1: in motion, runner-up is case 2" "2 /implement #52 (you type it; user-invoked): #52 t52" "$(runner "$out")"
+has "in motion: its own line" "in motion: #24 t24" "$out"
+issues "$(list "$(issue 25 ready-for-human)" "$(issue 52 ready-for-agent)")"
+check "unmarked ready-for-human is not in motion" "2 /implement #52 (you type it; user-invoked): #52 t52" "$(next "$(run)")"
+issues "$(list "$(issue 30 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)")"
+has "in motion: skips a ticket main already closes" "in motion: none" "$(run)"
+issues "$(list "$(issue 26 ready-for-agent,in-motion)" "$(issue 52 ready-for-agent)")"
+check "in motion: only on a ready-for-human ticket" "2 /implement #26 (you type it; user-invoked): #26 t26" "$(next "$(run)")"
+issues "$saved_issues"
 
 prs '[{"number":60,"title":"fork pr","headRefName":"x","isCrossRepository":true}]'
 check "fork PR is not work in flight" "2 /implement #52 (you type it; user-invoked): #52 t52" "$(next "$(run)")"

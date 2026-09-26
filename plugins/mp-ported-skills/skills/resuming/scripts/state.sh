@@ -153,20 +153,27 @@ gather() {
                         else "unlabelled" end)]
             | sort_by(.n)')
         open_nums=$(printf '%s' "$rows" | jq -c '[.[].n]')
+        fixed_nums=$(printf '%s' "$fixed" | jq -Rc 'split(" ") | map(select(. != "") | tonumber)')
         count() { printf '%s' "$rows" | jq --arg r "$1" '[.[] | select(.role == $r)] | length'; }
 
         # Open tickets the default branch already closes.
-        stale=$(printf '%s' "$rows" | jq -r --arg f "$fixed" '
-            ($f | split(" ") | map(select(. != "") | tonumber)) as $fx
-            | [.[] | select(.n as $n | $fx | index($n))] | map("#\(.n) \(.t)") | join("; ")')
+        stale=$(printf '%s' "$rows" | jq -r --argjson fx "$fixed_nums" '
+            [.[] | select(.n as $n | $fx | index($n))] | map("#\(.n) \(.t)") | join("; ")')
 
         # Ready-for-agent tickets with every blocker closed, not already fixed.
-        ready=$(printf '%s' "$rows" | jq -r --argjson open "$open_nums" --arg f "$fixed" '
-            ($f | split(" ") | map(select(. != "") | tonumber)) as $fx
-            | [.[] | select(.role == "agent" and .dep == 0
+        ready=$(printf '%s' "$rows" | jq -r --argjson open "$open_nums" --argjson fx "$fixed_nums" '
+            [.[] | select(.role == "agent" and .dep == 0
                             and ([.line[] | select(. as $b | $open | index($b))] | length == 0)
                             and (.n as $n | $fx | index($n) | not))]
             | map("#\(.n) \(.t)") | join("; ")')
+
+        # Ready-for-human tickets a session left in motion: capturing labels the
+        # one it worked on, which git cannot see. Not already fixed.
+        moving=$(printf '%s' "$rows" | jq -r --argjson fx "$fixed_nums" '
+            [.[] | select(.role == "human" and (.l | index("in-motion"))
+                            and (.n as $n | $fx | index($n) | not))]
+            | map("#\(.n) \(.t)") | join("; ")')
+        [ -n "$moving" ] && inflight="$inflight, in motion $moving"
 
         # needs-info with a reply: the last comment is not the tracker user's.
         replied=
@@ -185,6 +192,7 @@ gather() {
         n_agent=$(count agent) n_human=$(count human) n_map=$(count map)
         maps=$(printf '%s' "$rows" | jq -r '[.[] | select(.role == "map")] | map("#\(.n) \(.t)") | join("; ")')
         echo "issues: $n_unl unlabelled, $n_triage $t_triage, $n_info $t_info (replied: ${replied:-none}), $n_agent $t_agent, $n_human $t_human, $n_map wayfinder:map"
+        echo "in motion: ${moving:-none}"
         echo "ready, blockers closed: ${ready:-none}"
         echo "open but closed by a commit on $default: ${stale:-none}"
         [ -n "$maps" ] && echo "wayfinder maps: $maps"
