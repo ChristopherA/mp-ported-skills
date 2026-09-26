@@ -36,7 +36,7 @@ Run `git status` and compare it with what this session changed. Show the user an
 ## 6. Report
 
 - What was routed where, and what stays open.
-- **One first next step**: the next ticket whose blockers are all closed, and why that one.
+- **One first next step**: a ticket with the `ready-for-agent` role's label string from `docs/agents/triage-labels.md`, with every blocker closed, lowest number first, and why that one. `resuming`'s case 2 defines this rule, so an edit to one is made to both.
 - **Safe to clear**, only when moves 1-5 actually happened. Otherwise say what is missing.
 
 End with this session's context reading, from:

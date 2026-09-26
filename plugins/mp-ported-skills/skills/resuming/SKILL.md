@@ -14,7 +14,7 @@ sh "${CLAUDE_SKILL_DIR}/scripts/state.sh" </dev/null
 It reads git (no fetch) and, when `docs/agents/issue-tracker.md` names GitHub, the tracker through `gh`, taking label strings from `docs/agents/triage-labels.md`. Its `next:` line is the first of these cases that applies, and its `runner-up:` line the second, or case 6's suggestions when no other applies:
 
 1. **Work in flight**: uncommitted changes, unpushed commits, a branch other than the default, or an open PR from this repo. Finish it.
-2. **A ready ticket with every blocker closed**: `/implement #N`, lowest number first. This is `capturing`'s one first next step, so what capture leaves, resume finds.
+2. **A `ready-for-agent` ticket with every blocker closed**: `/implement #N`, lowest number first. This is `capturing`'s one first next step, so what capture leaves, resume finds.
 3. **Incoming work**: unlabelled issues, `needs-triage`, or `needs-info` with a reply since the last triage notes. `/triage`.
 4. **Tracker and repo disagree**: an open ticket a commit on the default branch already closes. Fix the tracker, since every later session starts from it.
 5. **An open `wayfinder:map`**: continue `/wayfinder`.
