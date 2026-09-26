@@ -25,6 +25,8 @@ GIT_CEILING_DIRECTORIES="$work"
 export GIT_CEILING_DIRECTORIES
 export CLAUDE_CONFIG_DIR="$work/.claude-running"
 mkdir -p "$CLAUDE_CONFIG_DIR"
+# The status line reads these; a session that sets them must not change what renders.
+unset MP_SMART_ZONE_K MP_SESSION_TITLE CLAUDE_AUTOCOMPACT_PCT_OVERRIDE 2>/dev/null || true
 
 pass=0 fail=0
 check() { # <name> <expected> <actual>
