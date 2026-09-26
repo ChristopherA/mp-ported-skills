@@ -1,7 +1,9 @@
 #!/bin/sh
 # install-statusline.test.sh -- tests for the status line and its installer.
 #
-# Render mode against captured-shape JSON payloads, --context and --zone
+# Render mode against captured-shape JSON payloads, with session titles off
+# and on (line 1 against scratch repos on and off their default branch,
+# detached, with a workstream and a persona), --context and --zone
 # against the record the wrapper writes, with that record's format pinned,
 # and install.sh against scratch profile directories: statusLine absent,
 # present and the same, present and different, plus a behind, a newer
@@ -43,7 +45,7 @@ export WORKSTREAM_KIT_CONTEXT_DIR="$work/ctx"
 mkdir -p "$WORKSTREAM_KIT_CONTEXT_DIR"
 export CLAUDE_CONFIG_DIR="$work/.claude-testprof"
 mkdir -p "$CLAUDE_CONFIG_DIR"
-unset MP_SMART_ZONE_K CLAUDE_AUTOCOMPACT_PCT_OVERRIDE 2>/dev/null || true
+unset MP_SMART_ZONE_K MP_SESSION_TITLE CLAUDE_AUTOCOMPACT_PCT_OVERRIDE 2>/dev/null || true
 
 payload() { # <used_pct> <size> [session]
     printf '{"model":{"display_name":"Opus"},"workspace":{"project_dir":"%s"},"session_id":"%s","context_window":{"used_percentage":%s,"remaining_percentage":%s,"context_window_size":%s},"cost":{"total_cost_usd":0}}' \
@@ -89,6 +91,52 @@ check "empty stdin: nothing" "" "$out"
 out=$(payload 4 1000000 | CLAUDE_CONFIG_DIR="$HOME/.claude" sh "$scripts/status-line.sh" | sed -n 1p)
 check "default profile name" "$host · default » proj » feature-x" "$out"
 
+# --- line 1 with session titles on ----------------------------------------
+# A repo whose default branch is main, as origin/HEAD says.
+tproj="$work/tproj"
+git init -q --bare -b main "$work/origin.git"
+git init -q -b main "$tproj"
+git -C "$tproj" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m init
+git -C "$tproj" remote add origin "$work/origin.git"
+git -C "$tproj" push -q origin main 2>/dev/null
+git -C "$tproj" remote set-head origin main >/dev/null
+titled() { # <dir> [<jq filter on the payload>]: render with titles on
+    printf '{"model":{"display_name":"Opus"},"workspace":{"project_dir":"%s"},"session_id":"t1","context_window":{"used_percentage":4,"remaining_percentage":96,"context_window_size":1000000},"cost":{"total_cost_usd":0}}' "$1" \
+        | jq -c "${2:-.}" | MP_SESSION_TITLE=1 sh "$scripts/status-line.sh" | plain
+}
+check "titles: default branch, no line 1" "[Opus] 26% of zone" "$(titled "$tproj")"
+check "titles: persona" "agent: reviewer" "$(titled "$tproj" '.agent = {name: "reviewer"}' | sed -n 1p)"
+git -C "$tproj" checkout -q -b prototype/foo
+check "titles: another branch" "prototype/foo" "$(titled "$tproj" | sed -n 1p)"
+check "titles: branch and persona" "prototype/foo » agent: reviewer" \
+    "$(titled "$tproj" '.agent = {name: "reviewer"}' | sed -n 1p)"
+mkdir -p "$tproj/.state"; printf 'workstream: ws1\n' > "$tproj/.state/ACTIVE.md"
+check "titles: branch and workstream" "prototype/foo » ws1" "$(titled "$tproj" | sed -n 1p)"
+git -C "$tproj" checkout -q main
+check "titles: workstream on the default branch" "ws1" "$(titled "$tproj" | sed -n 1p)"
+command rm -rf "$tproj/.state"
+sha=$(git -C "$tproj" rev-parse --short HEAD)
+git -C "$tproj" checkout -q --detach
+check "titles: detached HEAD" "detached $sha" "$(titled "$tproj" | sed -n 1p)"
+git -C "$tproj" checkout -q main
+# No origin/HEAD: the default is init.defaultBranch.
+lproj="$work/lproj"
+git init -q -b trunk "$lproj"; git -C "$lproj" config init.defaultBranch trunk
+check "titles: init.defaultBranch is the default" "[Opus] 26% of zone" "$(titled "$lproj")"
+# Outside git: nothing to show, and the project name must not leak.
+nproj="$work/nproj"; mkdir -p "$nproj"
+check "titles: outside git, no line 1" "[Opus] 26% of zone" "$(titled "$nproj")"
+out=$(titled "$tproj" '.context_window.used_percentage = 0')
+check "titles: no usage yet, one empty line" "1 " "$(printf '%s\n' "$out" | wc -l | tr -d ' ') $out"
+check "titles off: line 1 unchanged" "$host · testprof » tproj » main" \
+    "$(printf '{"workspace":{"project_dir":"%s"},"context_window":{"used_percentage":4,"context_window_size":1000000}}' "$tproj" \
+        | sh "$scripts/status-line.sh" | sed -n 1p)"
+# Without jq the base can read nothing, and says so; that must still show.
+nojq="$work/nojq-sl"; mkdir -p "$nojq"
+for t in sh cat sed dirname basename hostname git head grep tr; do ln -s "$(command -v $t)" "$nojq/$t"; done
+check "titles, no jq: the base's notice shows" "jq required" \
+    "$(printf '{"workspace":{"project_dir":"%s"}}' "$tproj" | PATH="$nojq" MP_SESSION_TITLE=1 sh "$scripts/status-line.sh" | sed -n 1p)"
+
 # --- --context ------------------------------------------------------------
 command rm -f "$WORKSTREAM_KIT_CONTEXT_DIR"/*
 payload 6 1000000 ctx1 | sh "$scripts/status-line.sh" >/dev/null
@@ -126,6 +174,8 @@ check "no usage yet: no record" "no" "$([ -f "$WORKSTREAM_KIT_CONTEXT_DIR/claude
 
 # --- --zone ---------------------------------------------------------------
 check "--zone reads the session's record" "45% of zone" "$(sh "$scripts/status-line.sh" --zone "$proj" ctx3 </dev/null)"
+check "titles: --context unchanged" "context: 68k tokens, 45% of a 150k smart zone, 94% of window remaining" \
+    "$(MP_SESSION_TITLE=1 sh "$scripts/status-line.sh" --context "$proj" ctx3 </dev/null)"
 out=$(sh "$scripts/status-line.sh" --zone "$proj" nosuch </dev/null); rc=$?
 check "--zone unknown session: nothing" "" "$out"
 check "--zone unknown session: exit 0" "0" "$rc"

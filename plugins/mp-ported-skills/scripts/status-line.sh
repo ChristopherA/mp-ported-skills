@@ -1,7 +1,14 @@
 #!/bin/sh
 # status-line.sh -- Claude Code status line measured against the smart zone.
 #
-# Line 1: host · profile » project » branch
+# Line 1: host · profile » project » branch » workstream
+#         With session titles on (MP_SESSION_TITLE=1), the title already shows
+#         project, profile and host, so line 1 shows only what is unusual:
+#         branch » workstream » agent: <name>, each part only when it applies.
+#         The branch shows only off the default (origin/HEAD, else
+#         init.defaultBranch, else main), a detached HEAD as "detached <sha>",
+#         and the agent when the session runs an --agent persona. With none of
+#         these, line 1 is not printed at all.
 # Line 2: [Model|effort] 41% of zone
 #         tokens in context as a percentage of the smart zone: green through
 #         100%, yellow past it, red from 200%. The effort appears when the model
@@ -38,6 +45,7 @@
 #
 # Environment:
 #   MP_SMART_ZONE_K             smart zone in thousands of tokens (default 150)
+#   MP_SESSION_TITLE            1 when the profile has session titles on
 #   WORKSTREAM_KIT_CONTEXT_DIR  record directory, for both scripts (default /tmp)
 #
 # Base copied from ChristopherA/claude-workstream-kit 5115068 (v0.11.0),
@@ -85,10 +93,45 @@ profile=${profile#.claude-}
 out=$(printf '%s' "$input" | sh "$base")
 line1=$(printf '%s\n' "$out" | sed -n 1p | sed 's/ » none$//')
 
-if [ -n "$line1" ]; then
-    printf '%s · %s » %s\n' "$host" "$profile" "$line1"
+if [ "${MP_SESSION_TITLE:-}" != 1 ]; then
+    if [ -n "$line1" ]; then
+        printf '%s · %s » %s\n' "$host" "$profile" "$line1"
+    else
+        printf '%s · %s\n' "$host" "$profile"
+    fi
+elif ! command -v jq >/dev/null 2>&1; then
+    # The base printed only "jq required"; pass it through.
+    printf '%s\n' "$line1"
 else
-    printf '%s · %s\n' "$host" "$profile"
+    # Line 1 keeps only what is unusual: drop the project and the default
+    # branch, flag a detached HEAD, add the agent.
+    _l1=$(printf '%s' "$input" | jq -r '[.workspace.project_dir // "", .agent.name // ""] | @tsv' 2>/dev/null) || _l1=""
+    l1_dir=$(printf '%s' "$_l1" | cut -f1)
+    l1_agent=$(printf '%s' "$_l1" | cut -f2)
+    if [ -n "$l1_dir" ]; then
+        line1=${line1#"$(basename "$l1_dir")"}
+        line1=${line1#" » "}
+    else
+        # No project dir read: drop the base's first part, which is the project.
+        case $line1 in *" » "*) line1=${line1#* » } ;; *) line1="" ;; esac
+    fi
+    if [ -n "$l1_dir" ] && git -C "$l1_dir" rev-parse --git-dir >/dev/null 2>&1; then
+        if [ -z "$(git -C "$l1_dir" branch --show-current 2>/dev/null)" ]; then
+            sha=$(git -C "$l1_dir" rev-parse --short HEAD 2>/dev/null) || sha=""
+            [ -n "$sha" ] && line1="detached ${sha}${line1:+ » $line1}"
+        else
+            default=$(git -C "$l1_dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null) || default=""
+            default=${default#origin/}
+            [ -n "$default" ] || default=$(git -C "$l1_dir" config init.defaultBranch 2>/dev/null) || default=""
+            [ -n "$default" ] || default=main
+            case $line1 in
+                "$default") line1="" ;;
+                "$default » "*) line1=${line1#"$default » "} ;;
+            esac
+        fi
+    fi
+    [ -n "$l1_agent" ] && line1="${line1:+$line1 » }agent: $l1_agent"
+    [ -n "$line1" ] && printf '%s\n' "$line1"
 fi
 
 # Without jq the base has already said so on its line 2; pass it through.
