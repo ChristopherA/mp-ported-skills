@@ -50,8 +50,8 @@ check "installed, no record: no reading yet" \
     "No reading yet: the status line writes one after this session's first response in a terminal." \
     "$(run "$installed" "$proj" s2)"
 
-check "not installed: points to the installer" \
-    "No reading: this profile has no status line. /install-statusline installs one." \
+check "not installed: points to setup" \
+    "No reading: this profile has no status line. /setup-mp-ported-skills turns one on." \
     "$(run "$bare" "$proj" s2)"
 
 # The skill passes its session-id substitution; when that comes through empty,

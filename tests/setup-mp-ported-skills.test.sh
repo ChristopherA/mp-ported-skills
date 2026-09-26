@@ -6,9 +6,10 @@
 # Runs setup.sh against scratch profile directories: the report for a fresh
 # profile, each feature on and off, and an existing settings.json kept and
 # backed up, its earliest state kept across several changes. The status line
-# cases: another command's statusLine, an edited copy (on and off), a copy
-# with no stamp, a behind copy, a newer copy left alone, and an off that
-# leaves another command's statusLine in place. Also no jq, invalid JSON and
+# cases: the statusLine written renders and follows CLAUDE_CONFIG_DIR, another
+# command's statusLine (replaced alone when the copy is in sync), an edited
+# copy (on and off), a copy with no stamp, a behind copy, a newer copy left
+# alone, and an off that leaves another command's statusLine in place. Also no jq, invalid JSON and
 # bad usage, flags on a feature they do not apply to included. Touches nothing outside its own mktemp directory.
 #
 # Usage: sh tests/setup-mp-ported-skills.test.sh
@@ -127,6 +128,34 @@ check "sl on: reported" "on" "$(feature status-line)"
 setup "$v1" "$p" status-line on
 check "sl on again: exit 0" "0" "$rc"
 has "sl on again: already" "already on" "$out"
+
+# The statusLine written runs the profile's copy, and follows CLAUDE_CONFIG_DIR
+# at run time: settings copied into another profile run that profile's copy.
+sl_payload='{"model":{"display_name":"Opus"},"workspace":{"project_dir":"/nowhere"},"session_id":"s1","context_window":{"used_percentage":7,"remaining_percentage":93,"context_window_size":1000000}}'
+run_sl() { # <profile>: render through the statusLine command in its settings
+    printf '%s' "$sl_payload" | WORKSTREAM_KIT_CONTEXT_DIR="$work/ctx" CLAUDE_CONFIG_DIR="$1" \
+        sh -c "$(jq -r .statusLine.command "$1/settings.json")" | sed 's/\x1b\[[0-9;]*m//g'
+}
+mkdir -p "$work/ctx"
+check "sl on: the command renders" "[Opus] 46% of zone" "$(run_sl "$p" | sed -n 2p)"
+p2="$work/sl-copied"; mkdir -p "$p2/scripts"
+command cp -f "$p/settings.json" "$p2/settings.json"
+printf 'echo copied-profile-script\n' > "$p2/scripts/status-line.sh"
+check "sl on: the command follows CLAUDE_CONFIG_DIR" "copied-profile-script" "$(run_sl "$p2")"
+
+# Only statusLine differs: --replace-statusline sets it and leaves the in-sync
+# copy and its stamp alone.
+p3="$work/sl-only"; mkdir -p "$p3"
+setup "$v1" "$p3" status-line on
+jq '.statusLine.command = "my-line.sh"' "$p3/settings.json" > "$p3/s" && command mv -f "$p3/s" "$p3/settings.json"
+stamp_before=$(cat "$p3/scripts/status-line.source")
+copy_before=$(ls -i "$p3/scripts/status-line.sh")
+setup "$v1" "$p3" status-line on --replace-statusline
+check "sl only statusLine: exit 0" "0" "$rc"
+check "sl only statusLine: set" "$sl_cmd" "$(jq -r .statusLine.command "$p3/settings.json")"
+check "sl only statusLine: stamp untouched" "$stamp_before" "$(cat "$p3/scripts/status-line.source")"
+check "sl only statusLine: copy not rewritten" "$copy_before" "$(ls -i "$p3/scripts/status-line.sh")"
+check "sl only statusLine: reports no copy" "0" "$(printf '%s\n' "$out" | grep -c 'copied from')"
 
 # A behind copy is reported as on, and turning on again updates it.
 setup "$v2" "$p" report

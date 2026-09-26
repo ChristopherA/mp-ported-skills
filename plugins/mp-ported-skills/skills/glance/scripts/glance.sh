@@ -30,7 +30,7 @@ zone=$(sh "$here/../../../scripts/status-line.sh" --zone "${1:-$PWD}" "$sid" </d
 if [ -n "$zone" ]; then
     printf '%s\n' "$zone"
 elif [ ! -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/status-line.sh" ]; then
-    echo "No reading: this profile has no status line. /install-statusline installs one."
+    echo "No reading: this profile has no status line. /setup-mp-ported-skills turns one on."
 else
     echo "No reading yet: the status line writes one after this session's first response in a terminal."
 fi

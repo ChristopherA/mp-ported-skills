@@ -48,7 +48,7 @@ v1=$(plugin 1.0.0)
 v2=$(plugin 1.1.0)
 printf '# changed in 1.1.0\n' >> "$v2/scripts/status-line.sh"
 
-install_copy() { # <plugin-root> <profile>: a stamped copy, as the installer makes
+install_copy() { # <plugin-root> <profile>: a stamped copy, as /setup-mp-ported-skills makes
     mkdir -p "$2"
     (. "$1/scripts/status-line-copy.sh" && sl_init "$1" "$2" \
         && sl_write status-line.sh status-line-base.sh) </dev/null

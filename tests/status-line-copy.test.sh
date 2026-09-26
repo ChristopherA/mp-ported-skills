@@ -4,7 +4,9 @@
 # the copy and its stamp.
 #
 # Sources the library against plugin copies at chosen versions and scratch
-# profile directories. Touches no real profile and nothing under /tmp outside
+# profile directories, and checks the commit the stamp records: a checkout's
+# HEAD, or for a plugin-cache copy the running profile's installed_plugins.json
+# entry for that path, else unknown. Touches no real profile and nothing under /tmp outside
 # its own mktemp directory.
 #
 # Usage: sh tests/status-line-copy.test.sh
@@ -15,7 +17,8 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 work=$(mktemp -d)
 trap 'command rm -rf "$work"' EXIT
 # The plugin copies below sit outside any checkout, so their commit is looked
-# up in this (empty) running profile and comes out unknown.
+# up in this running profile, which holds no record until the provenance
+# cases at the end, and comes out unknown.
 export CLAUDE_CONFIG_DIR="$work/.claude-running"
 mkdir -p "$CLAUDE_CONFIG_DIR"
 
@@ -91,6 +94,24 @@ printf '# local edit\n' >> "$prof3/scripts/status-line-base.sh"
 lib "$v2" "$prof3" sl_write status-line.sh
 check "write: updated file in sync" "in-sync" "$(lib "$v2" "$prof3" sl_state status-line.sh)"
 check "write: an edit elsewhere stays modified" "modified" "$(lib "$v2" "$prof3" sl_state status-line-base.sh)"
+
+# Provenance. Run from a checkout, the commit is its HEAD. From the plugin
+# cache, outside git, it is the one the running profile's installed_plugins.json
+# records for that install path; the target profile's record is not read.
+check "commit: a checkout's HEAD" "$(git -C "$root" rev-parse --short HEAD)" \
+    "$(lib "$root/plugins/mp-ported-skills" "$prof" eval 'echo "$SL_COMMIT"')"
+installed_record() { # <installPath>: the running profile's record of this plugin
+    mkdir -p "$CLAUDE_CONFIG_DIR/plugins"
+    jq -n --arg p "$1" \
+        '{plugins: {"mp-ported-skills@mp-ported-skills": [{installPath: $p, version: "1.0.0", gitCommitSha: "abcdef0123456789abcdef0123456789abcdef01"}]}}' \
+        > "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json"
+}
+installed_record "$v1"
+check "commit: from the running profile's record" "abcdef0" "$(lib "$v1" "$prof" eval 'echo "$SL_COMMIT"')"
+mkdir -p "$prof/plugins"; command cp -f "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" "$prof/plugins/"
+installed_record "$work/elsewhere"
+check "commit: no record for this path, unknown" "unknown" "$(lib "$v1" "$prof" eval 'echo "$SL_COMMIT"')"
+command rm -rf "$CLAUDE_CONFIG_DIR/plugins" "$prof/plugins"
 
 echo "status-line-copy: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
