@@ -26,9 +26,11 @@ Install `mattpocock-skills` as well: these skills hand work to his where one alr
 - **`install-statusline`**: user-invoked. Installs a status line into the current profile whose second line reads `[Opus 5.5|medium] 41% of zone`: the model, its effort level, and tokens in context as a percentage of the ~150k-token smart zone, coloured green through 100%, yellow past it, and red from 200%. The bands run past mattpocock-skills' advice to stop at ~150k rather than push on in a degraded session; issue #14 records the evidence and why red starts at 200%. It reports first (in sync, behind, newer, or locally modified, per file), sets `statusLine` only if none is set, and replaces an existing one, an edited copy, or a copy from a later release (a downgrade) only on an explicit yes. With `MP_SESSION_TITLE=1` in the profile's `env` settings, where the session title already names the project, line 1 shows only what is unusual: a branch other than the default, a detached HEAD, a workstream, or an `--agent` persona, and is left out otherwise. `capturing` reads the same number through `status-line.sh --context`, and `status-line.sh --zone` prints its short form, `41% of zone`.
 - **`glance`**: user-invoked. Prints this session's zone reading, `41% of zone`, into the conversation, for claude.ai/code and the Claude app, which show no status line. It runs the plugin's own `status-line.sh --zone`, so a status line installed from an older release still gives a reading. With no reading it says why: no status line installed (and how to install one), or none written yet, which happens before the first response or in a session with no terminal.
 
-## Hook
+## Hooks
 
 A `SessionStart` hook runs on startup, `/clear` and `/compact` in repos that have `docs/agents/issue-tracker.md`, and nowhere else. It loads the state `resuming` reads (branch and sync, uncommitted and unpushed counts, open PRs, issues per triage label, ready tickets with closed blockers, the winning case) into Claude's context, with an instruction to open the first reply with a recommendation. It gives up after four seconds (`MP_RESUME_BUDGET`), and prints nothing when the tracker is unreachable, so a slow or offline `gh` never delays or clutters a session.
+
+A second `SessionStart` hook titles the session `<project> · <profile> · <host>` (for example `mp-ported-skills · mattpocock-hub · chryseikori`) when the profile sets `MP_SESSION_TITLE=1` in its `env` settings, and does nothing otherwise. Remote Control pushes the title to claude.ai/code and the Claude app on the first message. The project comes first because claude.ai/code lists sessions without grouping them by project and cuts long titles off at the end. It runs on startup, `/clear` and fork, never on resume or `/compact`, so a `/rename` survives both.
 
 ## Credits
 
@@ -45,8 +47,8 @@ The status line ships `scripts/status-line-base.sh` unmodified from [claude-work
 plugins/mp-ported-skills/
   .claude-plugin/plugin.json               the plugin
   skills/<skill>/SKILL.md                  one folder per skill
-  hooks/hooks.json                         the SessionStart hook
-  scripts/                                 the status line, shared by skills and the hook
+  hooks/hooks.json                         the SessionStart hooks
+  scripts/                                 the status line and the title hook
 tests/                                     test scripts, run with sh
 ```
 

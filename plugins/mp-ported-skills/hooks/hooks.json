@@ -10,6 +10,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "startup|clear|fork",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/session-title.sh\"",
+            "timeout": 5
+          }
+        ]
       }
     ]
   }
