@@ -25,7 +25,7 @@ Show the report as printed: each feature `on`, `off`, or `modified` (the status 
 For each feature in the report's order, ask one question: turn it on, turn it off, or leave it as it is. Put its current state and the trade-off in the question, and recommend keeping the current state unless the report shows a problem.
 
 - **Remote Control**: on lets the user drive any session from claude.ai/code or the Claude app without typing `/remote-control`; off keeps sessions local unless started by hand.
-- **Status line**: on shows the zone reading in the terminal. A `statusLine` that runs another command is replaced, which needs its own yes. A `modified` copy is kept unless the user says to discard the edit; replacing or removing it needs its own yes. Off removes `statusLine` (only this plugin's), the copy and its stamp; `/glance` still gives the reading.
+- **Status line**: on shows the zone reading in the terminal. A `statusLine` that runs another command is replaced, which needs its own yes. A `modified` copy is kept unless the user says to discard the edit; replacing or removing it needs its own yes. So is a copy from a release that cannot be ordered against the plugin's (a pre-release, say): replacing it needs its own yes, and passes `--force`. Off removes `statusLine` (only this plugin's), the copy and its stamp; `/glance` still gives the reading.
 - **Titles**: the one setting drives both the session title and status line 1, so say both change.
 
 ## 3. Apply each yes as it comes

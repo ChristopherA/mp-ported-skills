@@ -3,8 +3,11 @@
 #
 #   . "<plugin-root>/scripts/status-line-copy.sh"
 #   sl_init <plugin-root> <profile-dir> || exit    # fails without jq
-#   sl_state status-line.sh    # absent | in-sync | behind | newer | modified
-#   sl_write [<file>...]       # copy those files, then rewrite the stamp
+#   sl_state status-line.sh    # absent | in-sync | behind | newer | unordered
+#                              # | modified
+#   sl_write [--force] [<file>...]   # copy those files, then rewrite the stamp;
+#                              # refused over a later release, and over an
+#                              # unordered one without --force
 #
 # A profile's statusLine runs its own copy of status-line.sh and
 # status-line-base.sh, in <profile>/scripts/, because settings cannot name a
@@ -26,9 +29,8 @@ sl_sha() {
 }
 
 # sl_init <plugin-root> <profile-dir>: the plugin to copy from, and the
-# profile to copy into. Returns 2 without jq: the version would read as
-# "unknown", which is never newer, so a newer copy would read as behind and
-# be downgraded.
+# profile to copy into. Returns 2 without jq, which it needs to read this
+# plugin's version.
 sl_init() {
     command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required" >&2; return 2; }
     SL_FILES="status-line.sh status-line-base.sh"
@@ -66,7 +68,11 @@ sl_state() {
     _sl_have=$(sl_sha "$SL_DEST/$1")
     [ "$_sl_have" = "$(sl_sha "$SL_SRC/$1")" ] && { echo in-sync; return; }
     if [ "$_sl_have" = "$(sl_stamped "$1")" ]; then
-        if sl_newer "$SL_S_VERSION" "$SL_VERSION"; then echo newer; else echo behind; fi
+        case $(sl_order) in
+        later) echo newer ;;
+        unordered) echo unordered ;;
+        *) echo behind ;;
+        esac
     else
         echo modified
     fi
@@ -88,10 +94,33 @@ sl_newer() {
     }'
 }
 
-# sl_write [<file>...]: copy each named file from this plugin into the
-# profile, then rewrite the stamp for every file in SL_FILES. With no files it
-# only restamps. Each write lands whole or not at all.
+# sl_order: how the release the stamp names compares with this plugin's:
+#   same       no stamp, no release in it, or this plugin's own
+#   earlier    both plain dotted numbers, the stamp's lower
+#   later      both plain dotted numbers, the stamp's higher
+#   unordered  they differ, and neither is known to be older: either is
+#              not plain dotted numbers ("0.6.0-rc1", "unknown"), or both
+#              name one release two ways (1.0 and 1.0.0)
+sl_order() {
+    if [ -z "$SL_S_VERSION" ] || [ "$SL_S_VERSION" = "$SL_VERSION" ]; then echo same
+    elif sl_newer "$SL_S_VERSION" "$SL_VERSION"; then echo later
+    elif sl_newer "$SL_VERSION" "$SL_S_VERSION"; then echo earlier
+    else echo unordered; fi
+}
+
+# sl_write [--force] [<file>...]: copy each named file from this plugin into
+# the profile, then rewrite the stamp for every file in SL_FILES. With no
+# files it only restamps. Each write lands whole or not at all. It writes
+# nothing and returns 1 when the stamp names a later release, or an unordered
+# one without --force, so no caller can downgrade a copy by forgetting to
+# check.
 sl_write() {
+    _sl_force=0
+    [ "${1:-}" = --force ] && { _sl_force=1; shift; }
+    case $(sl_order) in
+    later) return 1 ;;
+    unordered) [ "$_sl_force" -eq 1 ] || return 1 ;;
+    esac
     mkdir -p "$SL_DEST" || return
     for _sl_f in "$@"; do
         command cp -f "$SL_SRC/$_sl_f" "$SL_DEST/.$_sl_f.tmp" \

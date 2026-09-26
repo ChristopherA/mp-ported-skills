@@ -173,6 +173,26 @@ check "sl newer: exit 0" "0" "$rc"
 check "sl newer: not downgraded" "" "$(cmp "$v2/scripts/status-line.sh" "$p/scripts/status-line.sh" 2>&1)"
 check "sl newer: stamp kept" "plugin: mp-ported-skills 1.1.0" "$(sed -n 1p "$p/scripts/status-line.source")"
 
+# A pre-release copy read by a later plain release: neither is known to be
+# older, so it is reported, and replaced only with --force.
+vrc=$(plugin_at 1.2.0-rc1)
+printf '# changed in 1.2.0-rc1\n' >> "$vrc/scripts/status-line.sh"
+v3=$(plugin_at 2.0.0)
+printf '# changed in 2.0.0\n' >> "$v3/scripts/status-line.sh"
+pu="$work/sl-unordered"; mkdir -p "$pu"
+setup "$vrc" "$pu" status-line on
+setup "$v3" "$pu" report
+check "sl unordered: reported on" "on" "$(feature status-line)"
+has "sl unordered: says it cannot be ordered" "cannot be ordered" "$out"
+setup "$v3" "$pu" status-line on
+check "sl unordered on: refused" "1" "$rc"
+has "sl unordered on: needs --force" "--force" "$out"
+check "sl unordered on: copy kept" "" "$(cmp "$vrc/scripts/status-line.sh" "$pu/scripts/status-line.sh" 2>&1)"
+setup "$v3" "$pu" status-line on --force
+check "sl unordered --force: exit 0" "0" "$rc"
+check "sl unordered --force: replaced" "" "$(cmp "$v3/scripts/status-line.sh" "$pu/scripts/status-line.sh" 2>&1)"
+check "sl unordered --force: restamped" "plugin: mp-ported-skills 2.0.0" "$(sed -n 1p "$pu/scripts/status-line.source")"
+
 # An edited copy reads as modified; on and off both refuse without --force.
 printf '# local edit\n' >> "$p/scripts/status-line.sh"
 edited=$(sha < "$p/scripts/status-line.sh")

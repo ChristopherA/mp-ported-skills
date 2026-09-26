@@ -41,6 +41,7 @@ plugin() { # <version>: a plugin copy at that version; prints its root
     fi
     echo "$p"
 }
+same() { cmp -s "$1" "$2" && echo same || echo differs; }
 # lib <plugin-root> <profile> <command...>: run a command with the library
 # loaded for that plugin and profile.
 lib() {
@@ -94,6 +95,53 @@ printf '# local edit\n' >> "$prof3/scripts/status-line-base.sh"
 lib "$v2" "$prof3" sl_write status-line.sh
 check "write: updated file in sync" "in-sync" "$(lib "$v2" "$prof3" sl_state status-line.sh)"
 check "write: an edit elsewhere stays modified" "modified" "$(lib "$v2" "$prof3" sl_state status-line-base.sh)"
+
+# The library refuses a downgrade itself, so a caller that forgets to check
+# cannot make one: the copy and its stamp stay as the later release left them.
+prof4="$work/prof4"; mkdir -p "$prof4"
+lib "$v2" "$prof4" sl_write status-line.sh status-line-base.sh
+stamp4=$(command cat "$prof4/scripts/status-line.source")
+lib "$v1" "$prof4" sl_write status-line.sh
+check "downgrade: sl_write returns non-zero" "1" "$?"
+check "downgrade: copy untouched" "same" "$(same "$v2/scripts/status-line.sh" "$prof4/scripts/status-line.sh")"
+check "downgrade: stamp untouched" "$stamp4" "$(command cat "$prof4/scripts/status-line.source")"
+lib "$v1" "$prof4" sl_write
+check "downgrade: a bare restamp is refused too" "1" "$?"
+
+# A version that is not plain dotted numbers cannot be ordered against a
+# different one, so neither side is taken to be older: the copy reads as
+# unordered, whichever side carries it, and is replaced only with --force.
+vrc=$(plugin 1.2.0-rc1)
+printf '# changed in 1.2.0-rc1\n' >> "$vrc/scripts/status-line.sh"
+prof5="$work/prof5"; mkdir -p "$prof5"
+lib "$vrc" "$prof5" sl_write status-line.sh status-line-base.sh
+check "pre-release stamp, earlier-looking plugin: unordered" "unordered" "$(lib "$v2" "$prof5" sl_state status-line.sh)"
+lib "$v2" "$prof5" sl_write status-line.sh
+check "unordered: sl_write refused" "1" "$?"
+check "unordered: copy untouched" "same" "$(same "$vrc/scripts/status-line.sh" "$prof5/scripts/status-line.sh")"
+# The case a pre-release stamp exists for: a later plain release reads it.
+v3=$(plugin 2.0.0)
+printf '# changed in 2.0.0\n' >> "$v3/scripts/status-line.sh"
+check "pre-release stamp, later plain plugin: unordered" "unordered" "$(lib "$v3" "$prof5" sl_state status-line.sh)"
+vunk=$(plugin unknown)
+check "non-numeric plugin: unordered" "unordered" "$(lib "$vunk" "$prof4" sl_state status-line.sh)"
+lib "$vunk" "$prof4" sl_write status-line.sh
+check "non-numeric plugin: sl_write refused" "1" "$?"
+# The same pre-release on both sides is one release: an unedited copy of an
+# earlier build of it reads as behind, as with plain versions.
+vrc2="$work/plugin-rc-rebuilt"; command cp -R "$vrc" "$vrc2"
+printf '# rebuilt\n' >> "$vrc2/scripts/status-line.sh"
+check "same pre-release on both sides: behind" "behind" "$(lib "$vrc2" "$prof5" sl_state status-line.sh)"
+# --force replaces an unordered copy, and never a later one.
+lib "$v3" "$prof5" sl_write --force status-line.sh
+check "unordered --force: written" "0" "$?"
+check "unordered --force: in sync" "in-sync" "$(lib "$v3" "$prof5" sl_state status-line.sh)"
+check "unordered --force: stamp names this plugin" "2.0.0" "$(lib "$v3" "$prof5" eval 'echo "$SL_S_VERSION"')"
+lib "$v1" "$prof4" sl_write --force status-line.sh
+check "later --force: still refused" "1" "$?"
+# Two spellings of one release are not known to be in order either.
+check "1.0 against 1.0.0: unordered" "unordered" \
+    "$(lib "$(plugin 1.0)" "$prof4" eval 'SL_S_VERSION=1.0.0; sl_order')"
 
 # Provenance. Run from a checkout, the commit is its HEAD. From the plugin
 # cache, outside git, it is the one the running profile's installed_plugins.json

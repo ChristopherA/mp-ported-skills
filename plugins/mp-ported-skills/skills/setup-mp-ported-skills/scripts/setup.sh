@@ -10,7 +10,9 @@
 #              titles          env.MP_SESSION_TITLE=1 in settings.json, which
 #                              the title hook and status line 1 both follow
 #   --force               replace or remove a status line copy edited since
-#                         it was installed
+#                         it was installed, or replace one stamped with a
+#                         release that cannot be ordered against this
+#                         plugin's (a pre-release, say)
 #   --replace-statusline  replace a statusLine that runs another command
 #
 # The profile is --config-dir, else $CLAUDE_CONFIG_DIR, else ~/.claude. The
@@ -23,7 +25,9 @@
 # scripts/status-line-copy.sh; after that, the plugin's SessionStart hook
 # keeps the copy current (docs/adr/0001). A copy
 # the stamp says is from a later release than this plugin is never replaced,
-# so a session started before an update never downgrades it.
+# so a session started before an update never downgrades it; one from a
+# release that cannot be ordered against this plugin's is replaced only with
+# --force.
 #
 # Exit: 0 reported, changed, or already so; 1 refused, with the flag it
 # needs, and nothing written; 2 usage or environment error.
@@ -107,11 +111,13 @@ titles_state() { [ "$(get .env.MP_SESSION_TITLE)" = 1 ] && echo on || echo off; 
 #   sl_modified  stamped files edited since they were installed
 #   sl_foreign   files present with no stamp, so of unknown origin
 #   sl_later     1 when the stamp names a later release than this plugin
+#   sl_unordered stamped, unedited files from a release that cannot be
+#                ordered against this plugin's, replaced only with --force
 #   sl_current   the statusLine command settings.json runs, or empty
 sl_read() {
     sl_current=$(get .statusLine.command)
-    sl_copy="" sl_modified="" sl_foreign="" sl_later=0 sl_detail=""
-    [ -f "$SL_STAMP" ] && sl_newer "$SL_S_VERSION" "$SL_VERSION" && sl_later=1
+    sl_copy="" sl_modified="" sl_foreign="" sl_unordered="" sl_later=0 sl_detail=""
+    [ "$(sl_order)" = later ] && sl_later=1
     for f in $SL_FILES; do
         _state=$(sl_state "$f")
         [ -f "$SL_STAMP" ] || [ "$_state" != modified ] || _state=foreign
@@ -131,6 +137,9 @@ sl_read() {
 " ;;
         newer)
             sl_detail="$sl_detail    scripts/$f  from $SL_S_VERSION, later than this plugin's $SL_VERSION
+" ;;
+        unordered) sl_unordered="$sl_unordered $f"
+            sl_detail="$sl_detail    scripts/$f  from $SL_S_VERSION, which cannot be ordered against this plugin's $SL_VERSION
 " ;;
         esac
     done
@@ -176,6 +185,14 @@ status_line_on() {
 "; fi
         done
     fi
+    # A stamp that cannot be ordered against this plugin guards every file,
+    # the absent ones included: writing restamps the lot.
+    if [ "$(sl_order)" = unordered ]; then
+        if [ "$force" -eq 1 ]; then sl_copy="$sl_copy $sl_unordered"
+        elif [ -n "$sl_unordered$sl_copy" ]; then
+            blocked="$blocked  ! scripts/  from $SL_S_VERSION, which cannot be ordered against this plugin's $SL_VERSION; needs --force to replace it
+"; fi
+    fi
     [ -z "$blocked" ] || refuse "$blocked"
 
     if [ -z "$sl_copy" ] && [ -f "$SL_STAMP" ] && [ "$sl_current" = "$sl_cmd" ]; then
@@ -184,7 +201,10 @@ status_line_on() {
     if [ "$sl_later" -eq 1 ]; then
         echo "  = scripts/  from $SL_S_VERSION, later than this plugin's $SL_VERSION; left as they are"
     elif [ -n "$sl_copy" ] || [ ! -f "$SL_STAMP" ]; then
-        sl_write $sl_copy
+        _write=sl_write; [ "$force" -eq 1 ] && _write="sl_write --force"
+        # The checks above leave the library nothing to refuse, so a failure
+        # here is the write itself.
+        $_write $sl_copy || { echo "ERROR: could not write the status line copy into $SL_DEST" >&2; exit 2; }
         for f in $sl_copy; do echo "  + scripts/$f  copied from $SL_VERSION"; done
         echo "  + scripts/status-line.source  stamped $SL_VERSION ($SL_COMMIT)"
     fi

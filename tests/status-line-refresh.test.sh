@@ -118,6 +118,22 @@ check "newer: no output" "" "$out"
 check "newer: exit 0" "0" "$rc"
 check "newer: untouched" "$before" "$(snapshot "$p")"
 
+# Unordered: a pre-release stamp read by a later plain release. Neither is
+# known to be older, so the copy is kept, and one line points to the setup
+# skill, which can replace it.
+vrc=$(plugin 1.2.0-rc1)
+printf '# changed in 1.2.0-rc1\n' >> "$vrc/scripts/status-line.sh"
+v3=$(plugin 2.0.0)
+printf '# changed in 2.0.0\n' >> "$v3/scripts/status-line.sh"
+p="$work/unordered"; install_copy "$vrc" "$p"
+before=$(snapshot "$p")
+hook "$v3" "$p"
+check "unordered: exit 0" "0" "$rc"
+check "unordered: untouched" "$before" "$(snapshot "$p")"
+check "unordered: one line" "1" "$(printf '%s\n' "$out" | grep -c .)"
+check "unordered: points to /setup-mp-ported-skills" "1" "$(printf '%s\n' "$out" | grep -c '/setup-mp-ported-skills')"
+check "unordered: names both releases" "1" "$(printf '%s\n' "$out" | grep -c '1\.2\.0-rc1.*2\.0\.0')"
+
 # In sync: nothing written, the stamp included.
 p="$work/insync"; install_copy "$v2" "$p"
 before=$(snapshot "$p")

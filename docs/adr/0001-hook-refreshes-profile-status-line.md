@@ -9,5 +9,5 @@ A profile's `statusLine` can't come from a plugin: in Claude Code 2.1.283 a plug
 
 ## Consequences
 
-- The hook writes files into the profile, so it must never overwrite a copy that has been edited since it was installed. It tells edited copies apart from out-of-date ones with the install stamp (`scripts/status-line.source`). An edited copy is left alone, with one line in the session's startup context. A copy newer than the session's plugin is left alone silently, so a session started before an update never downgrades it.
+- The hook writes files into the profile, so it must never overwrite a copy that has been edited since it was installed. It tells edited copies apart from out-of-date ones with the install stamp (`scripts/status-line.source`). An edited copy is left alone, with one line in the session's startup context. A copy newer than the session's plugin is left alone silently, so a session started before an update never downgrades it. A copy whose release cannot be ordered against the plugin's (a pre-release) is left alone too, with one line, because neither is known to be older.
 - The stamp file doubles as the status line's opt-in marker.
