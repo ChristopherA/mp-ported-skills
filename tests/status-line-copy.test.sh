@@ -1,0 +1,96 @@
+#!/bin/sh
+# status-line-copy.test.sh -- tests for the status line copy library, which
+# compares a profile's copy of the status line with the plugin's and writes
+# the copy and its stamp.
+#
+# Sources the library against plugin copies at chosen versions and scratch
+# profile directories. Touches no real profile and nothing under /tmp outside
+# its own mktemp directory.
+#
+# Usage: sh tests/status-line-copy.test.sh
+
+set -u
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+work=$(mktemp -d)
+trap 'command rm -rf "$work"' EXIT
+# The plugin copies below sit outside any checkout, so their commit is looked
+# up in this (empty) running profile and comes out unknown.
+export CLAUDE_CONFIG_DIR="$work/.claude-running"
+mkdir -p "$CLAUDE_CONFIG_DIR"
+
+pass=0 fail=0
+check() { # <name> <expected> <actual>
+    if [ "$2" = "$3" ]; then
+        pass=$((pass + 1))
+    else
+        fail=$((fail + 1))
+        printf 'FAIL %s\n  expected: %s\n  actual:   %s\n' "$1" "$2" "$3"
+    fi
+}
+
+plugin() { # <version>: a plugin copy at that version; prints its root
+    p="$work/plugin-$1"
+    if [ ! -d "$p" ]; then
+        command cp -R "$root/plugins/mp-ported-skills" "$p"
+        jq --arg v "$1" '.version = $v' "$root/plugins/mp-ported-skills/.claude-plugin/plugin.json" \
+            > "$p/.claude-plugin/plugin.json"
+    fi
+    echo "$p"
+}
+# lib <plugin-root> <profile> <command...>: run a command with the library
+# loaded for that plugin and profile.
+lib() {
+    (GIT_CEILING_DIRECTORIES="$work"
+     export GIT_CEILING_DIRECTORIES
+     . "$1/scripts/status-line-copy.sh" && sl_init "$1" "$2" && shift 2 && "$@") </dev/null
+}
+
+v1=$(plugin 1.0.0)
+prof="$work/prof"; mkdir -p "$prof"
+
+check "absent: no copy yet" "absent" "$(lib "$v1" "$prof" sl_state status-line.sh)"
+
+lib "$v1" "$prof" sl_write status-line.sh status-line-base.sh
+check "write: copy made" "" "$(cmp "$v1/scripts/status-line.sh" "$prof/scripts/status-line.sh")"
+check "write: in sync" "in-sync" "$(lib "$v1" "$prof" sl_state status-line.sh)"
+check "write: base in sync" "in-sync" "$(lib "$v1" "$prof" sl_state status-line-base.sh)"
+check "write: stamp names the release" "plugin: mp-ported-skills 1.0.0" "$(sed -n 1p "$prof/scripts/status-line.source")"
+check "write: stamp commit unknown outside a checkout" "commit: unknown" "$(sed -n 2p "$prof/scripts/status-line.source")"
+check "write: stamp records each file" "status-line.sh status-line-base.sh" \
+    "$(awk 'NR > 3 { printf "%s%s", (NR > 4 ? " " : ""), $1 }' "$prof/scripts/status-line.source")"
+
+# A later release whose status-line.sh changed; its base did not.
+v2=$(plugin 1.1.0)
+printf '# changed in 1.1.0\n' >> "$v2/scripts/status-line.sh"
+check "behind: earlier release, unedited" "behind" "$(lib "$v2" "$prof" sl_state status-line.sh)"
+check "behind: unchanged file stays in sync" "in-sync" "$(lib "$v2" "$prof" sl_state status-line-base.sh)"
+
+# The profile moves to 1.1.0; a session still running 1.0.0 must not
+# downgrade it.
+lib "$v2" "$prof" sl_write status-line.sh
+check "newer: later release, unedited" "newer" "$(lib "$v1" "$prof" sl_state status-line.sh)"
+check "newer: the stamp names the later release" "1.1.0" "$(lib "$v1" "$prof" eval 'echo "$SL_S_VERSION"')"
+# 1.10.0 follows 1.9.0, though it sorts before it as text.
+v10=$(plugin 1.10.0)
+printf '# changed in 1.10.0\n' >> "$v10/scripts/status-line.sh"
+prof10="$work/prof10"; mkdir -p "$prof10"
+lib "$v10" "$prof10" sl_write status-line.sh status-line-base.sh
+check "newer: minor compared as a number" "newer" "$(lib "$(plugin 1.9.0)" "$prof10" sl_state status-line.sh)"
+
+printf '# local edit\n' >> "$prof/scripts/status-line.sh"
+check "modified: edited since install" "modified" "$(lib "$v2" "$prof" sl_state status-line.sh)"
+command rm -f "$prof10/scripts/status-line.source"
+check "modified: no stamp, unknown origin" "modified" "$(lib "$v1" "$prof10" sl_state status-line.sh)"
+
+# Updating one file must not stamp another's local edit as installed, or a
+# later release would read it as behind and overwrite it.
+prof3="$work/prof3"; mkdir -p "$prof3"
+lib "$v1" "$prof3" sl_write status-line.sh status-line-base.sh
+printf '# local edit\n' >> "$prof3/scripts/status-line-base.sh"
+lib "$v2" "$prof3" sl_write status-line.sh
+check "write: updated file in sync" "in-sync" "$(lib "$v2" "$prof3" sl_state status-line.sh)"
+check "write: an edit elsewhere stays modified" "modified" "$(lib "$v2" "$prof3" sl_state status-line-base.sh)"
+
+echo "status-line-copy: $pass passed, $fail failed"
+[ "$fail" -eq 0 ]

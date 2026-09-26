@@ -3,13 +3,13 @@
 #
 # Usage: install.sh [--dry-run] [--force] [--replace-statusline] [--config-dir DIR]
 #
-# Copies status-line.sh and status-line-base.sh from this folder into
+# Copies status-line.sh and status-line-base.sh from the plugin's scripts/ into
 # <profile>/scripts/ and points that profile's statusLine at the copy. The
 # profile is --config-dir, else $CLAUDE_CONFIG_DIR, else ~/.claude. It works
 # at profile level because project settings load only from the directory a
 # session starts in, so a status line set in one repo never reaches the repos
 # nested inside it. Settings name the copy through $CLAUDE_CONFIG_DIR, never
-# this folder: a plugin cache path carries the version and moves on every
+# the plugin: a plugin cache path carries the version and moves on every
 # update.
 #
 # The report, one line per file and one for statusLine:
@@ -26,10 +26,9 @@
 # --dry-run reports and writes nothing. A real run with a ! line whose flag
 # is absent refuses and writes nothing. A real run that writes copies only
 # the files not in sync, then prints the report with each "would" in the
-# past tense. Installed copies are stamped in
-# scripts/status-line.source with the plugin version, its commit and each
-# file's sha256 as installed; the stamp is how a later run tells "behind" from
-# "modified", since the plugin cache has no git history to ask. A settings.json
+# past tense. The compare, the copy and its stamp,
+# scripts/status-line.source, are the plugin's scripts/status-line-copy.sh,
+# which says how the stamp tells "behind" from "modified". A settings.json
 # about to change is first copied to settings.json.pre-install-statusline.
 #
 # Exit: 0 in sync or installed; 1 a dry run found changes, or a real run
@@ -61,62 +60,15 @@ command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required" >&2; exit 2; }
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 plugin_root=$(CDPATH= cd -- "$here/../../.." && pwd)
-dest="$cfg/scripts"
-stamp="$dest/status-line.source"
+. "$plugin_root/scripts/status-line-copy.sh"
+sl_init "$plugin_root" "$cfg"
 settings="$cfg/settings.json"
-files="status-line.sh status-line-base.sh"
 # Expanded when the status line runs, not now: whichever profile loads these
 # settings runs its own copy, so a settings.json copied to another profile or
 # machine still finds the right script.
 sl_cmd='sh "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/status-line.sh"'
 
-sha() {
-    if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1"; else sha256sum "$1"; fi | cut -d' ' -f1
-}
-
-# Provenance: the plugin version, and the commit it was installed from -- the
-# checkout's HEAD when run from one, else the commit the plugin manager
-# recorded for this install path.
-version=$(jq -r '.version // "unknown"' "$plugin_root/.claude-plugin/plugin.json" 2>/dev/null) || version=unknown
-commit=""
-if git -C "$plugin_root" rev-parse --git-dir >/dev/null 2>&1; then
-    commit=$(git -C "$plugin_root" rev-parse --short HEAD 2>/dev/null) || commit=""
-else
-    # The running profile's record, not --config-dir's: this copy of the plugin
-    # lives in the cache of the profile Claude Code runs as, and --config-dir
-    # names only where to install.
-    ip="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"
-    [ -f "$ip" ] && commit=$(jq -r --arg p "$plugin_root" \
-        '[.plugins[][]? | select(.installPath == $p) | .gitCommitSha] | first // empty | .[0:7]' "$ip" 2>/dev/null) || commit=""
-fi
-commit=${commit:-unknown}
-
-recorded() {
-    [ -f "$stamp" ] && awk -v f="$1" '$1 == f { print $2 }' "$stamp" || true
-}
-s_version="" s_commit=""
-if [ -f "$stamp" ]; then
-    s_version=$(sed -n 's/^plugin: mp-ported-skills //p' "$stamp")
-    s_commit=$(sed -n 's/^commit: //p' "$stamp")
-fi
-
-# newer <a> <b>: a is a later release than b. Dotted numbers compare field by
-# field, so 0.10.0 follows 0.9.9; anything else, "unknown" included, is never
-# newer.
-newer() {
-    awk -v a="$1" -v b="$2" 'BEGIN {
-        re = "^[0-9]+(\\.[0-9]+)*$"
-        if (a !~ re || b !~ re) exit 1
-        na = split(a, x, "."); nb = split(b, y, ".")
-        for (i = 1; i <= (na > nb ? na : nb); i++) {
-            if (x[i] + 0 > y[i] + 0) exit 0
-            if (x[i] + 0 < y[i] + 0) exit 1
-        }
-        exit 1
-    }'
-}
-
-echo "install-statusline: mp-ported-skills $version ($commit) -> $cfg"
+echo "install-statusline: mp-ported-skills $SL_VERSION ($SL_COMMIT) -> $cfg"
 
 # The report is held in two tenses until the run knows whether it writes:
 # the plan for a dry or refused run, the past for a real one.
@@ -129,31 +81,32 @@ say() { # <plan line> [<past line>]
 }
 
 changes=0 blocked=0 to_copy=""
-for f in $files; do
-    src="$here/$f" dst="$dest/$f"
-    if [ ! -f "$dst" ]; then
-        say "  + scripts/$f  would create" "  + scripts/$f  created"; changes=1
-    elif [ "$(sha "$dst")" = "$(sha "$src")" ]; then
+for f in $SL_FILES; do
+    case $(sl_state "$f") in
+    in-sync)
         say "  = scripts/$f  in sync"
-        continue
-    elif [ "$(sha "$dst")" = "$(recorded "$f")" ]; then
+        continue ;;
+    absent)
+        say "  + scripts/$f  would create" "  + scripts/$f  created"; changes=1 ;;
+    behind)
         changes=1
-        if ! newer "$s_version" "$version"; then
-            say "  ~ scripts/$f  behind: an earlier install, unedited; would update" \
-                "  ~ scripts/$f  behind: an earlier install, unedited; updated"
-        elif [ "$force" -eq 1 ]; then
-            say "  ! scripts/$f  installed $s_version is newer than this $version; --force replaces it"
+        say "  ~ scripts/$f  behind: an earlier install, unedited; would update" \
+            "  ~ scripts/$f  behind: an earlier install, unedited; updated" ;;
+    newer)
+        changes=1
+        if [ "$force" -eq 1 ]; then
+            say "  ! scripts/$f  installed $SL_S_VERSION is newer than this $SL_VERSION; --force replaces it"
         else
-            say "  ! scripts/$f  installed $s_version is newer than this $version; needs --force"; blocked=1
-        fi
-    else
+            say "  ! scripts/$f  installed $SL_S_VERSION is newer than this $SL_VERSION; needs --force"; blocked=1
+        fi ;;
+    *) # modified, or anything sl_state did not name: never replaced unasked
         changes=1
         if [ "$force" -eq 1 ]; then
             say "  ! scripts/$f  modified since install, or unknown origin; --force replaces it"
         else
             say "  ! scripts/$f  modified since install, or unknown origin; needs --force"; blocked=1
-        fi
-    fi
+        fi ;;
+    esac
     to_copy="$to_copy $f"
 done
 
@@ -161,10 +114,10 @@ done
 # so it keeps naming the release the copies came from.
 restamp=0
 if [ "$changes" -eq 0 ]; then
-    if [ -f "$stamp" ]; then
-        if [ "$s_version" != "$version" ] || [ "$s_commit" != "$commit" ]; then
-            say "  ~ scripts/status-line.source  names $s_version ($s_commit); would restamp" \
-                "  ~ scripts/status-line.source  names $s_version ($s_commit); restamped"; restamp=1
+    if [ -f "$SL_STAMP" ]; then
+        if [ "$SL_S_VERSION" != "$SL_VERSION" ] || [ "$SL_S_COMMIT" != "$SL_COMMIT" ]; then
+            say "  ~ scripts/status-line.source  names $SL_S_VERSION ($SL_S_COMMIT); would restamp" \
+                "  ~ scripts/status-line.source  names $SL_S_VERSION ($SL_S_COMMIT); restamped"; restamp=1
         fi
     else
         say "  ~ scripts/status-line.source  missing; would stamp" \
@@ -211,24 +164,11 @@ fi
 # and stamp as they are.
 wrote=""
 if [ -n "$to_copy" ] || [ "$restamp" -eq 1 ]; then
-    mkdir -p "$dest"
-    for f in $to_copy; do
-        tmp="$dest/.$f.tmp"
-        command cp -f "$here/$f" "$tmp"
-        chmod 755 "$tmp"
-        command mv -f "$tmp" "$dest/$f"
-    done
-    {
-        echo "plugin: mp-ported-skills $version"
-        echo "commit: $commit"
-        echo "installed: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        for f in $files; do echo "$f $(sha "$dest/$f")"; done
-    } > "$stamp.tmp"
-    command mv -f "$stamp.tmp" "$stamp"
+    sl_write $to_copy
     if [ -n "$to_copy" ]; then
-        wrote="  wrote $dest/{$(printf '%s,' $to_copy)status-line.source}"
+        wrote="  wrote $SL_DEST/{$(printf '%s,' $to_copy)status-line.source}"
     else
-        wrote="  wrote $stamp"
+        wrote="  wrote $SL_STAMP"
     fi
 fi
 

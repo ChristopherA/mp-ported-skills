@@ -35,7 +35,7 @@ A `SessionStart` hook runs on startup, `/clear` and `/compact` in repos that hav
 
 `resuming` takes its weighing order, its one step with a runner-up, and its rule of never asking from `cowork-where-was-i` in [claude-cowork-kit](https://github.com/ChristopherA/claude-cowork-kit), and its status and staleness checks from [claude-workstream-kit](https://github.com/ChristopherA/claude-workstream-kit). The problem it solves was met first in [pkai-starter-kit#18](https://github.com/peterkaminski-ai/pkai-starter-kit/issues/18).
 
-`install-statusline` ships `status-line-base.sh` unmodified from [claude-workstream-kit](https://github.com/ChristopherA/claude-workstream-kit) (BSD-2-Clause-Patent), and wraps it.
+The status line ships `scripts/status-line-base.sh` unmodified from [claude-workstream-kit](https://github.com/ChristopherA/claude-workstream-kit) (BSD-2-Clause-Patent), and wraps it.
 
 ## Layout
 
@@ -45,6 +45,7 @@ plugins/mp-ported-skills/
   .claude-plugin/plugin.json               the plugin
   skills/<skill>/SKILL.md                  one folder per skill
   hooks/hooks.json                         the SessionStart hook
+  scripts/                                 the status line, shared by skills and the hook
 tests/                                     test scripts, run with sh
 ```
 
