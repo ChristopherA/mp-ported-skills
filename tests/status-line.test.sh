@@ -5,7 +5,8 @@
 # Render mode against captured-shape JSON payloads, with session titles off
 # and on (line 1 against scratch repos on and off their default branch,
 # detached, with a workstream and a persona), and --context and --zone
-# against the record the wrapper writes, with that record's format pinned.
+# against the record the wrapper writes, with that record's format pinned
+# and malformed or foreign records beside it skipped.
 # Copying the status line into a profile is tested in
 # status-line-copy.test.sh and setup-mp-ported-skills.test.sh. Touches no
 # real profile and nothing under /tmp outside its own mktemp directory.
@@ -193,6 +194,33 @@ check "record: --zone reads a written-by-hand record" "41% of zone" \
 check "record: --context reads the same record" \
     "context: 61k tokens, 41% of a 150k smart zone, 88% of window remaining" \
     "$(sh "$scripts/status-line.sh" --context "$proj" pin1 </dev/null)"
+
+# Records the readers cannot use sit beside the good ones: a half-written
+# file, text that is not JSON, and JSON from an unrelated tool. Each is
+# skipped, and the good records still read.
+printf '{"session_id":"bad1","project_dir":"%s","tok' "$proj" > "$WORKSTREAM_KIT_CONTEXT_DIR/claude-bad1-zone.json"
+printf 'not json\n' > "$WORKSTREAM_KIT_CONTEXT_DIR/claude-bad2-zone.json"
+printf '[1,2,3]\n' > "$WORKSTREAM_KIT_CONTEXT_DIR/claude-bad3-zone.json"
+printf '{"session_id":"bad4","tokens":"many"}\n' > "$WORKSTREAM_KIT_CONTEXT_DIR/claude-bad4-zone.json"
+printf '{"session_id":"bad6","project_dir":"%s","tokens":99000,"remaining_pct":90,"updated":"2026-01-01T00:00:00Z"} garbage' "$proj" \
+    > "$WORKSTREAM_KIT_CONTEXT_DIR/claude-bad6-zone.json"
+# Its own project, so "newest" has one good candidate and one newer bad one.
+printf '{"session_id":"pin2","project_dir":"%s","tokens":30000,"remaining_pct":97,"updated":"2026-01-01T00:00:00Z"}\n' "$work/malformed" \
+    > "$WORKSTREAM_KIT_CONTEXT_DIR/claude-pin2-zone.json"
+printf '{"session_id":"bad5","project_dir":"%s","tokens":"many","updated":"2099-01-01T00:00:00Z"}\n' "$work/malformed" \
+    > "$WORKSTREAM_KIT_CONTEXT_DIR/claude-bad5-zone.json"
+check "malformed beside good: --zone reads the good record" "41% of zone" \
+    "$(sh "$scripts/status-line.sh" --zone "$proj" pin1 </dev/null)"
+check "malformed beside good: --context reads the good record" \
+    "context: 61k tokens, 41% of a 150k smart zone, 88% of window remaining" \
+    "$(sh "$scripts/status-line.sh" --context "$proj" pin1 </dev/null)"
+check "malformed beside good: --context newest skips the bad" \
+    "context: 30k tokens, 20% of a 150k smart zone, 97% of window remaining" \
+    "$(sh "$scripts/status-line.sh" --context "$work/malformed" </dev/null)"
+out=$(sh "$scripts/status-line.sh" --zone "$proj" bad1 2>&1 </dev/null); rc=$?
+check "malformed session record: nothing" "" "$out"
+check "malformed session record: exit 0" "0" "$rc"
+check "record then garbage: nothing" "" "$(sh "$scripts/status-line.sh" --zone "$proj" bad6 </dev/null)"
 
 echo "status-line: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

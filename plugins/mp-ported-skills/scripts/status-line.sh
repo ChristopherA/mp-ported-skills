@@ -43,6 +43,9 @@
 # only, or nothing when it has no record. It reads the record an installed
 # copy writes, so the plugin's newer copy can read an older one's.
 #
+# Both skip any record file that is malformed or from another tool, so one bad
+# file beside the session's record does not hide it.
+#
 # Environment:
 #   MP_SMART_ZONE_K             smart zone in thousands of tokens (default 150)
 #   MP_SESSION_TITLE            1 when the profile has session titles on
@@ -71,13 +74,21 @@ case ${1:-} in
     fi
     command -v jq >/dev/null 2>&1 || exit 0
     dir=${WORKSTREAM_KIT_CONTEXT_DIR:-/tmp}
-    find "${dir%/}/" -maxdepth 1 -name 'claude-*-zone.json' -exec jq -rs --arg m "$1" --arg p "$2" --arg s "${3:-}" --arg z "$zone_k" \
+    # One jq per record, keeping only files that parse whole as one record with
+    # the fields read below: a parse error in a batch fails the whole batch, so
+    # one malformed or foreign file would otherwise hide every good record.
+    find "${dir%/}/" -maxdepth 1 -name 'claude-*-zone.json' -exec jq -cs \
+      'select(length == 1) | .[0] | select(type == "object"
+        and (.project_dir | type) == "string" and (.session_id | type) == "string"
+        and (.tokens | type) == "number" and (.remaining_pct | type) == "number"
+        and (.updated | type) == "string")' {} \; 2>/dev/null |
+    jq -rs --arg m "$1" --arg p "$2" --arg s "${3:-}" --arg z "$zone_k" \
       'def norm: gsub("/+"; "/") | rtrimstr("/");
        [.[]|select((.project_dir|norm)==($p|norm) and ($s == "" or .session_id == $s))]|sort_by(.updated)|last
        |if . then .tokens as $t | ($t * 100 / (($z | tonumber) * 1000) | floor) as $pct
         | if $m == "--zone" then "\($pct)% of zone"
           else "context: \($t / 1000 | floor)k tokens, \($pct)% of a \($z)k smart zone, \(.remaining_pct)% of window remaining" end
-        else empty end' {} + 2>/dev/null
+        else empty end' 2>/dev/null
     exit 0 ;;
 esac
 
