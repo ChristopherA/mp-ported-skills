@@ -20,6 +20,10 @@ A ported skill that wraps one of Matt's installed skills owns only the concern i
 
 This covers wrappers only. A skill that just names a Matt command for the user to type, as `resuming` names `/implement`, is outside it.
 
+## Releasing
+
+A change under `plugins/mp-ported-skills/` bumps `version` in its `.claude-plugin/plugin.json`, in its own commit titled `Bump plugin to X.Y.Z`, after the change's commit: the plugin cache is keyed by version, so installs fetch the change only under a new one. Tests, docs and this file ship outside the plugin and take no bump.
+
 ## Tests
 
 Tests are `tests/*.test.sh`, run with `sh`. Every `git commit` a test makes in a scratch repo passes `-c commit.gpgsign=false`: the maintainer's global git config signs commits, and a signing prompt hangs a test that has no terminal.
