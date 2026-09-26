@@ -5,8 +5,9 @@
 # PATH that serves fixture JSON: no issue-tracker config (hook silent), `gh`
 # failing (hook silent, report says unreached), a hung `gh` (hook silent
 # within its budget, and within the hook's timeout on the default budget),
-# each of the six weighing cases, a ticket labelled in-motion, and label
-# strings read from triage-labels.md. Hook cases run the command string from
+# each of the six weighing cases, a ticket labelled in-motion, the next
+# child of an in-motion parent, and label strings read from
+# triage-labels.md. Hook cases run the command string from
 # hooks.json, as Claude Code does. Touches nothing outside its own mktemp
 # directory.
 #
@@ -48,6 +49,10 @@ cat >"$work/bin/gh" <<'EOF'
 case "$1 $2" in
     "api user") echo '{"login":"me"}' ;;
     "api "*/comments*) n=${2%/comments*}; n=${n##*/}; cat "$FAKE_GH/comments-$n.json" ;;
+    "api "*/sub_issues*) n=${2%/sub_issues*}; n=${n##*/}
+        [ -f "$FAKE_GH/sub-$n.fail" ] && exit 1
+        if [ -f "$FAKE_GH/sub-$n.json" ]; then cat "$FAKE_GH/sub-$n.json"; else echo '[]'; fi ;;
+    "api "*/dependencies/blocked_by*) n=${2%/dependencies*}; n=${n##*/}; cat "$FAKE_GH/deps-$n.json" ;;
     "api "*/issues*) cat "$FAKE_GH/issues.json" ;;
     "pr list") cat "$FAKE_GH/prs.json" ;;
     *) exit 1 ;;
@@ -63,7 +68,7 @@ prs() { printf '%s' "$1" >"$FAKE_GH/prs.json"; }
 # issue <n> <labels csv> [blocked_by] [body]
 issue() {
     jq -nc --argjson n "$1" --arg l "$2" --argjson d "${3:-0}" --arg b "${4:-}" \
-        '{number: $n, title: "t\($n)", body: $b, comments: 0,
+        '{number: $n, title: "t\($n)", body: $b, comments: 0, state: "open",
           labels: ($l | split(",") | map(select(. != "") | {name: .})),
           issue_dependencies_summary: {blocked_by: $d}}'
 }
@@ -179,6 +184,31 @@ issues "$(list "$(issue 30 ready-for-human,in-motion)" "$(issue 52 ready-for-age
 has "in motion: skips a ticket main already closes" "in motion: none" "$(run)"
 issues "$(list "$(issue 26 ready-for-agent,in-motion)" "$(issue 52 ready-for-agent)")"
 check "in motion: only on a ready-for-human ticket" "2 /implement #26 (you type it; user-invoked): #26 t26" "$(next "$(run)")"
+
+# An in-motion parent with sub-issues: its next child is the step.
+issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)")"
+closed() { issue "$@" | jq -c '.state = "closed"'; }
+list "$(closed 26 ready-for-human)" "$(issue 27 ready-for-agent 1)" \
+    "$(issue 28 ready-for-agent 0 'Blocked by: #9')" "$(issue 29 ready-for-human)" >"$FAKE_GH/sub-24.json"
+out=$(run)
+check "in-motion parent: next child ready-for-agent" "1 work in flight: in motion #24 t24; next child #28 (ready-for-agent, /implement #28, you type it; user-invoked): t28" "$(next "$out")"
+check "in-motion parent: runner-up unchanged" "2 /implement #52 (you type it; user-invoked): #52 t52" "$(runner "$out")"
+list "$(issue 26 ready-for-human)" "$(issue 28 ready-for-agent)" >"$FAKE_GH/sub-24.json"
+check "in-motion parent: next child ready-for-human" "1 work in flight: in motion #24 t24; next child #26 (ready-for-human, by hand): t26" "$(next "$(run)")"
+list "$(closed 26 ready-for-human)" "$(closed 28 ready-for-agent)" >"$FAKE_GH/sub-24.json"
+check "in-motion parent: children all closed" "1 work in flight: in motion #24 t24" "$(next "$(run)")"
+command rm -f "$FAKE_GH/sub-24.json"
+check "in-motion ticket: no sub-issues" "1 work in flight: in motion #24 t24" "$(next "$(run)")"
+list "$(issue 27 ready-for-agent 1)" "$(issue 28 ready-for-agent 0 'Blocked by: #52')" >"$FAKE_GH/sub-24.json"
+printf '[{"number":26,"state":"open"},{"number":9,"state":"closed"}]' >"$FAKE_GH/deps-27.json"
+check "in-motion parent: open children all blocked" "1 work in flight: in motion #24 t24; every open child blocked: #27 by #26, #28 by #52" "$(next "$(run)")"
+printf 'not json' >"$FAKE_GH/deps-27.json"
+check "in-motion parent: blocker list unread" "1 work in flight: in motion #24 t24; every open child blocked: #27 by an unread blocker, #28 by #52" "$(next "$(run)")"
+list "$(issue 27 enhancement)" >"$FAKE_GH/sub-24.json"
+check "in-motion parent: next child not ready" "1 work in flight: in motion #24 t24; next child #27 (not ready): t27" "$(next "$(run)")"
+touch "$FAKE_GH/sub-24.fail"
+check "in-motion parent: sub-issues unread" "1 work in flight: in motion #24 t24; sub-issues not read" "$(next "$(run)")"
+command rm -f "$FAKE_GH/sub-24.fail" "$FAKE_GH/sub-24.json" "$FAKE_GH/deps-27.json"
 issues "$saved_issues"
 
 prs '[{"number":60,"title":"fork pr","headRefName":"x","isCrossRepository":true}]'

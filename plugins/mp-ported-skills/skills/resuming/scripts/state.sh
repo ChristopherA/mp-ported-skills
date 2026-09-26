@@ -45,9 +45,48 @@ label_for() {
 # Every command this script names is user-invoked in mattpocock-skills
 # (disable-model-invocation: true), so it is missing from the model's skill
 # list; the marker keeps the reply from calling it absent or substituting one.
-you_type="(you type it; user-invoked)"
+you_type_bare="you type it; user-invoked"
+you_type="($you_type_bare)"
 # Case 6's suggestions, the runner-up when no later case applies.
 ideas="/grill-with-docs on a new idea, or /improve-codebase-architecture (you type these; they are user-invoked)"
+
+# next_child <n>: "; next child ..." for in-motion parent #n, naming the first
+# open sub-issue in the parent's order with every blocker closed (the blocker
+# test of the frontier rule in docs/agents/issue-tracker.md) and its command; "; every open child
+# blocked: ..." with the blockers when none qualifies; nothing when #n has no
+# open sub-issues. Reads $open_nums, $body_blockers and the label strings.
+next_child() {
+    subs=$(gh api "repos/{owner}/{repo}/issues/$1/sub_issues?per_page=100" 2>/dev/null) &&
+        printf '%s' "$subs" | jq -e 'type == "array"' >/dev/null 2>&1 ||
+        { printf '; sub-issues not read'; return; }
+    kids=$(printf '%s' "$subs" | jq -c --argjson open "$open_nums" "$body_blockers"'
+        [.[] | select(.state == "open")
+         | {n: .number, t: .title, l: [.labels[].name],
+            dep: (.issue_dependencies_summary.blocked_by // 0),
+            line: [body_blockers[] | select(. as $b | $open | index($b))]}]')
+    [ "$(printf '%s' "$kids" | jq length)" = 0 ] && return
+    step=$(printf '%s' "$kids" | jq -r --arg ta "$t_agent" --arg th "$t_human" --arg you "$you_type_bare" '
+        [.[] | select(.dep == 0 and (.line | length == 0))] | first // empty
+        | "; next child #\(.n) ("
+          + (if (.l | index($ta)) then "\($ta), /implement #\(.n), \($you)"
+             elif (.l | index($th)) then "\($th), by hand"
+             else "not ready" end)
+          + "): \(.t)"')
+    if [ -n "$step" ]; then printf '%s' "$step"; return; fi
+    blocked=
+    for k in $(printf '%s' "$kids" | jq -r '.[].n'); do
+        by=$(printf '%s' "$kids" | jq -r --argjson k "$k" '.[] | select(.n == $k) | .line[]')
+        if [ "$(printf '%s' "$kids" | jq --argjson k "$k" '.[] | select(.n == $k) | .dep')" -gt 0 ]; then
+            by="$by
+$(gh api "repos/{owner}/{repo}/issues/$k/dependencies/blocked_by" 2>/dev/null |
+                jq -r '.[] | select(.state == "open") | .number' 2>/dev/null)"
+        fi
+        by=$(printf '%s\n' "$by" | grep . | sort -un | sed 's/^/#/' | tr '\n' ' ')
+        blocked="$blocked, #$k by ${by:-an unread blocker}"
+    done
+    blocked=$(printf '%s' "$blocked" | sed 's/ ,/,/g; s/ $//')
+    printf '; every open child blocked: %s' "${blocked#, }"
+}
 
 gather() {
     command -v git >/dev/null && git rev-parse --git-dir >/dev/null 2>&1 || {
@@ -134,15 +173,17 @@ gather() {
             | map("#\(.number) \(.title) [\(.headRefName)]") | join("; ")')
         [ -n "$own" ] && echo "open PRs from this repo: $own" && inflight="$inflight, open PR $own"
 
+        # Issue numbers a body's `Blocked by:` lines name.
+        body_blockers='def body_blockers: [(.body // "") | splits("\r?\n")
+            | select(test("^\\s*blocked by:"; "i")) | scan("#([0-9]+)") | .[0] | tonumber];'
+
         # Open issues only (the endpoint also lists PRs), with what the cases need.
         rows=$(printf '%s' "$issues" | jq -c --arg tr "$t_triage" --arg ti "$t_info" \
-            --arg ta "$t_agent" --arg th "$t_human" --arg tw "$t_wont" '
+            --arg ta "$t_agent" --arg th "$t_human" --arg tw "$t_wont" "$body_blockers"'
             [.[] | select(.pull_request | not)
              | {n: .number, t: .title, c: .comments, l: [.labels[].name],
                 dep: (.issue_dependencies_summary.blocked_by // 0),
-                line: ([(.body // "") | splits("\r?\n")
-                        | select(test("^\\s*blocked by:"; "i"))
-                        | scan("#([0-9]+)") | .[0] | tonumber])}
+                line: body_blockers}
              | .role = (if (.l | index($ta)) then "agent"
                         elif (.l | index($th)) then "human"
                         elif (.l | index($ti)) then "info"
@@ -169,11 +210,17 @@ gather() {
 
         # Ready-for-human tickets a session left in motion: capturing labels the
         # one it worked on, which git cannot see. Not already fixed.
-        moving=$(printf '%s' "$rows" | jq -r --argjson fx "$fixed_nums" '
+        moving_rows=$(printf '%s' "$rows" | jq -c --argjson fx "$fixed_nums" '
             [.[] | select(.role == "human" and (.l | index("in-motion"))
-                            and (.n as $n | $fx | index($n) | not))]
-            | map("#\(.n) \(.t)") | join("; ")')
-        [ -n "$moving" ] && inflight="$inflight, in motion $moving"
+                            and (.n as $n | $fx | index($n) | not))]')
+        moving=$(printf '%s' "$moving_rows" | jq -r 'map("#\(.n) \(.t)") | join("; ")')
+        # A parent's work in flight is its next child, so each carries that step.
+        in_motion=
+        for n in $(printf '%s' "$moving_rows" | jq -r '.[].n'); do
+            in_motion="$in_motion; $(printf '%s' "$moving_rows" |
+                jq -r --argjson n "$n" '.[] | select(.n == $n) | "#\(.n) \(.t)"')$(next_child "$n")"
+        done
+        [ -n "$in_motion" ] && inflight="$inflight, in motion ${in_motion#; }"
 
         # needs-info with a reply: the last comment is not the tracker user's.
         replied=

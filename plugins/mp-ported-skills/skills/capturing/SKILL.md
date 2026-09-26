@@ -39,7 +39,7 @@ Run `git status` and compare it with what this session changed. Show the user an
 ## 6. Report
 
 - What was routed where, what stays open, and what has no home.
-- **One first next step**, from this repo's tracker only: the `in-motion` ticket when one is labelled; otherwise a ticket with the `ready-for-agent` role's label string from `docs/agents/triage-labels.md`, with every blocker closed, lowest number first, and why that one. `resuming`'s cases 1 and 2 define this rule, so an edit to one is made to both. When this repo has no tracker, there is no next ticket; list tickets this session left open in other repos as work for a session started in that repo.
+- **One first next step**, from this repo's tracker only: the `in-motion` ticket when one is labelled, or, when it has open sub-issues, its next child as `resuming` case 1 defines it; otherwise a ticket with the `ready-for-agent` role's label string from `docs/agents/triage-labels.md`, with every blocker closed, lowest number first, and why that one. `resuming`'s cases 1 and 2 define this rule, so an edit to one is made to both. When this repo has no tracker, there is no next ticket; list tickets this session left open in other repos as work for a session started in that repo.
 - **Safe to clear**, only when moves 1-5 actually happened. Otherwise say what is missing.
 
 End with this session's context reading, from:
