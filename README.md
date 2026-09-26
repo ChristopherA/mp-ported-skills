@@ -32,6 +32,8 @@ A `SessionStart` hook runs on startup, `/clear` and `/compact` in repos that hav
 
 A second `SessionStart` hook titles the session `<project> · <profile> · <host>` (for example `mp-ported-skills · mattpocock-hub · chryseikori`) when the profile sets `MP_SESSION_TITLE=1` in its `env` settings, and does nothing otherwise. Remote Control pushes the title to claude.ai/code and the Claude app on the first message. The project comes first because claude.ai/code lists sessions without grouping them by project and cuts long titles off at the end. It runs on startup, `/clear` and fork, never on resume or `/compact`, so a `/rename` survives both.
 
+A third `SessionStart` hook keeps the profile's copy of the status line current, in profiles that have one installed (the install stamp, `scripts/status-line.source`, is the opt-in). A copy from an earlier release that has not been edited is replaced from the plugin and restamped. An edited copy is left alone, and the session's startup context gains one line pointing to `/setup-mp-ported-skills`. A copy from a later release than the session's plugin is left alone silently, so a session started before an update never downgrades it. Without `jq` it does nothing. It runs on startup, `/clear` and `/compact`, and never fails a session start.
+
 ## Credits
 
 `capturing` is learned from Peter Kaminski's `wrap-up-this-session` skill, published under the MPL-2.0 license, and not copied from it.
@@ -48,7 +50,7 @@ plugins/mp-ported-skills/
   .claude-plugin/plugin.json               the plugin
   skills/<skill>/SKILL.md                  one folder per skill
   hooks/hooks.json                         the SessionStart hooks
-  scripts/                                 the status line and the title hook
+  scripts/                                 the status line and the title and refresh hooks
 tests/                                     test scripts, run with sh
 ```
 
