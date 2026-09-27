@@ -44,7 +44,7 @@ Run `git status` and compare it with what this session changed. Show the user an
 
 Then gather the **before-clear jobs**: small actions that finish this session's work, such as a push, closing a ticket, or a plugin update after a version bump. Ask them as one self-contained multi-select AskUserQuestion, each job an option whose description says what it does and whom it reaches. Run the ones ticked. More than four jobs take a second question. With no jobs, skip the question.
 
-A job the user might run at the terminal, such as a plugin update, takes two options, each with the full command in its description, since nothing tells you whether the user is at this machine or on a remote client: **run it** through Bash, first and marked `(Recommended)` because it works from any client, and on a permission denial say so and stop; or **copy** it as a `!` command to this machine's clipboard with `pbcopy`. `!` commands and `/plugin` run only in the local terminal, and a remote client cannot reach this machine's clipboard.
+A job the user might run at the terminal, such as a plugin update, takes two options, each with the full command in its description, since nothing tells you whether the user is at this machine or on a remote client: **run it** through Bash, first and marked `(Recommended)` because it works from any client, and on a permission denial say so and stop; or **copy** it as a `!` command to this machine's clipboard with `pbcopy`. `!` commands and `/plugin` run only in the local terminal, and a remote client cannot reach this machine's clipboard. After a plugin update, tell the user to type `/reload-plugins`, which works from any client, to load it in this session.
 
 End with this session's context reading, from:
 
