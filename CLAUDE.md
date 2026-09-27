@@ -24,6 +24,8 @@ This covers wrappers only. A skill that just names a Matt command for the user t
 
 A change under `plugins/mp-ported-skills/` bumps `version` in its `.claude-plugin/plugin.json`, in its own commit titled `Bump plugin to X.Y.Z`, after the change's commit: the plugin cache is keyed by version, so installs fetch the change only under a new one. Tests, docs and this file ship outside the plugin and take no bump.
 
+After a push that bumps the version, ask with AskUserQuestion how the maintainer wants to update, offering the two routes `capturing` gives a terminal job: run `claude plugin marketplace update mp-ported-skills && claude plugin update mp-ported-skills@mp-ported-skills` through Bash, or copy it with a leading `! ` to this machine's clipboard. Write the command in both descriptions: the maintainer may be on a remote client, where the clipboard is out of reach and `/plugin` does not run. The update applies from the next session.
+
 ## Tests
 
 Tests are `tests/*.test.sh`, run with `sh`. Every `git commit` a test makes in a scratch repo passes `-c commit.gpgsign=false`: the maintainer's global git config signs commits, and a signing prompt hangs a test that has no terminal.
