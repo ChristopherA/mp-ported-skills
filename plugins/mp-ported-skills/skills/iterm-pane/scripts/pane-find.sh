@@ -31,8 +31,11 @@ if [ -z "$SESSION_PARTIAL" ]; then
     exit 1
 fi
 
+ERR=$(mktemp)
+trap 'command rm -f "$ERR"' EXIT
+
 # Every session in every window and tab, one line each.
-RAW=$(osascript <<'APPLESCRIPT'
+if ! RAW=$(osascript 2>"$ERR" <<'APPLESCRIPT'
 tell application "iTerm2"
     set output to ""
     repeat with i from 1 to (count of windows)
@@ -50,7 +53,10 @@ tell application "iTerm2"
     return output
 end tell
 APPLESCRIPT
-)
+); then
+    printf "Error: could not list iTerm2 sessions: %s\n" "$(command cat "$ERR")" >&2
+    exit 1
+fi
 
 if [ -z "$RAW" ]; then
     printf "Error: no iTerm2 sessions found (is iTerm2 running?)\n" >&2

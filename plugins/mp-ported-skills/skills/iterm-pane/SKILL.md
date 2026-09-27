@@ -22,10 +22,10 @@ It prints the new pane's coordinates, `SESSION_ID WINDOW_ID TAB_NUM`, for exampl
 ## Send
 
 ```sh
-sh "${CLAUDE_SKILL_DIR}/scripts/pane-send.sh" --session S --window W --tab T --text "ls -la"  # text, then Return
-sh "${CLAUDE_SKILL_DIR}/scripts/pane-send.sh" --session S --window W --tab T --key return     # Return alone; also tab, or any key (no Return)
-sh "${CLAUDE_SKILL_DIR}/scripts/pane-send.sh" --session S --window W --tab T --control c      # Ctrl-C; also z, d, l
-sh "${CLAUDE_SKILL_DIR}/scripts/pane-send.sh" --session S --window W --tab T --escape
+sh "${CLAUDE_SKILL_DIR}/scripts/pane-send.sh" --session S --window W --tab T --text "ls -la" </dev/null  # text, then Return
+sh "${CLAUDE_SKILL_DIR}/scripts/pane-send.sh" --session S --window W --tab T --key return </dev/null     # Return alone; also tab, or any key (no Return)
+sh "${CLAUDE_SKILL_DIR}/scripts/pane-send.sh" --session S --window W --tab T --control c </dev/null      # Ctrl-C; also z, d, l
+sh "${CLAUDE_SKILL_DIR}/scripts/pane-send.sh" --session S --window W --tab T --escape </dev/null
 ```
 
 - **Claude Code can hold pasted text without submitting it.** After sending text to a Claude Code session, send `--key return` as well, or the message sits at its prompt.
@@ -34,7 +34,7 @@ sh "${CLAUDE_SKILL_DIR}/scripts/pane-send.sh" --session S --window W --tab T --e
 ## Read
 
 ```sh
-sh "${CLAUDE_SKILL_DIR}/scripts/pane-read.sh" --session S --window W --tab T --lines 20
+sh "${CLAUDE_SKILL_DIR}/scripts/pane-read.sh" --session S --window W --tab T --lines 20 </dev/null
 ```
 
 It prints the pane's contents with the terminal's trailing blank lines removed, and `--lines N` keeps the last N. Leave it off only when the whole scrollback is needed.
@@ -48,15 +48,19 @@ When polling for a command to finish, the pane shows the command itself as well 
 ## Close
 
 ```sh
-sh "${CLAUDE_SKILL_DIR}/scripts/pane-close.sh" --session S --window W --tab T --force
+sh "${CLAUDE_SKILL_DIR}/scripts/pane-close.sh" --session S --window W --tab T --force </dev/null
 ```
 
 Without `--force`, `pane-close.sh` refuses (exit 2), because it cannot yet tell whether a session in the pane is busy. Read the pane, and pass `--force` only when nothing there should keep running. Close a pane when its work is done: a pane left open is a stale session, and for SSH a stale connection.
 
 ## Find a pane again
 
-- `pane-find.sh --session <part of an id>` prints a pane's coordinates from any part of its session id, or one line per match, with the pane's name, when several match.
-- `pane-tty.sh <session id>` prints the pane's TTY, or nothing when no pane has that id.
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/pane-find.sh" --session 2E3F4A </dev/null   # any part of the session id
+sh "${CLAUDE_SKILL_DIR}/scripts/pane-tty.sh" S </dev/null                   # the pane's TTY
+```
+
+`pane-find.sh` prints the pane's coordinates, or one line per match, with the pane's name, when several match. `pane-tty.sh` prints the pane's TTY, or nothing when no pane has that id.
 
 ## Errors
 

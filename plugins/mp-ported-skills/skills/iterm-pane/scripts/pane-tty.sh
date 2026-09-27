@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-# Resolve the TTY for an iTerm2 session by its unique ID.
+# Resolve the TTY for an iTerm2 session by its id.
 #
 # Usage:
 #   pane-tty.sh SESSION_ID
@@ -9,6 +9,12 @@ set -eu
 # Outputs: the TTY path (e.g., /dev/ttys042), or nothing when no session has
 # that id or iTerm2 cannot be asked. Exit 0 either way; the caller handles
 # empty output.
+
+if [ "${1:-}" = --help ]; then
+    printf "Usage: pane-tty.sh SESSION_ID\n"
+    printf "Prints the TTY of the iTerm2 session with that id, or nothing.\n"
+    exit 0
+fi
 
 if [ $# -lt 1 ] || [ -z "$1" ]; then
     printf "Usage: pane-tty.sh SESSION_ID\n" >&2
@@ -31,7 +37,7 @@ tell application "iTerm2"
     repeat with w in windows
         repeat with t in tabs of w
             repeat with s in sessions of t
-                if unique ID of s is "${SESSION_ID}" then
+                if id of s is "${SESSION_ID}" then
                     return tty of s
                 end if
             end repeat

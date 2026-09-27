@@ -214,6 +214,12 @@ run pane-find.sh --session AAAA
 check "find, no sessions at all: exit 1" 1 "$rc"
 check "find, no sessions at all: says so" 'Error: no iTerm2 sessions found (is iTerm2 running?)' "$(err)"
 
+reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
+run pane-find.sh --session AAAA
+check "find, iTerm2 cannot be asked: exit 1" 1 "$rc"
+check "find, iTerm2 cannot be asked: says so, with osascript's reason" \
+    'Error: could not list iTerm2 sessions: execution error: iTerm got an error: Can'"'"'t get session id "X". (-1728)' "$(err)"
+
 reset; run pane-find.sh
 check "find, no --session: exit 1" 1 "$rc"
 reset; run pane-find.sh --session
@@ -225,12 +231,17 @@ check "find --help: exit 0" 0 "$rc"
 reset; answer '/dev/ttys042'
 run pane-tty.sh ABC-123
 check "tty: prints the pane's TTY" '/dev/ttys042' "$(out)"
-check "tty: looks up the session by id" 1 "$(sent | grep -c 'if unique ID of s is "ABC-123" then')"
+check "tty: looks up the session by the id the other scripts use" 1 "$(sent | grep -c 'if id of s is "ABC-123" then')"
 
 reset; answer ''
 run pane-tty.sh ABC-123
 check "tty, no such session: empty output" '' "$(out)"
 check "tty, no such session: exit 0" 0 "$rc"
+
+reset; run pane-tty.sh --help
+check "tty --help: exit 0" 0 "$rc"
+check "tty --help: usage" 'Usage: pane-tty.sh SESSION_ID' "$(out | head -1)"
+check "tty --help: osascript never runs" '' "$(sent)"
 
 reset; run pane-tty.sh
 check "tty, no id: exit 1" 1 "$rc"
@@ -267,6 +278,12 @@ check "open --command: prints the coordinates" 'NEW-1 7 2' "$(out)"
 check "open --command: typed into the new pane" 1 \
     "$(sent | grep -c 'tell session id "NEW-1" of tab 2 of window id 7 to write text "ls -la"')"
 
+reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
+run pane-open.sh
+check "open, iTerm2 fails: exit 1" 1 "$rc"
+check "open, iTerm2 fails: says so, with osascript's reason" \
+    'Error: could not open a pane: execution error: iTerm got an error: Can'"'"'t get session id "X". (-1728)' "$(err)"
+
 reset; FAKE_PS_TTY='??'
 run pane-open.sh
 check "open, no TTY above the caller: exit 1" 1 "$rc"
@@ -280,7 +297,8 @@ check "open --help: exit 0" 0 "$rc"
 
 # --- the skill's content ---
 for f in "$scripts"/*.sh; do
-    sh -n "$f" 2>/dev/null; check "sh -n $(basename "$f")" 0 "$?"
+    sh -n "$f" 2>/dev/null; rc=$?
+    check "sh -n ${f##*/}" 0 "$rc"
 done
 # A default-profile path, a named agent role, a private host or a pane-state
 # file: the upstream skill's setup, which this port leaves behind.

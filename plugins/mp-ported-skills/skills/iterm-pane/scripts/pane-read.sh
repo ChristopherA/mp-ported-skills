@@ -12,14 +12,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SESSION_ID=""
 WINDOW_ID=""
 TAB_NUM=""
-LINES=0
+PANE_LINES=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --session) pane_need_value "$@"; SESSION_ID="$2"; shift 2 ;;
         --window)  pane_need_value "$@"; WINDOW_ID="$2"; shift 2 ;;
         --tab)     pane_need_value "$@"; TAB_NUM="$2"; shift 2 ;;
-        --lines)   pane_need_value "$@"; LINES="$2"; shift 2 ;;
+        --lines)   pane_need_value "$@"; PANE_LINES="$2"; shift 2 ;;
         --help)
             printf "Usage: pane-read.sh --session ID --window ID --tab NUM [--lines N]\n"
             printf "Reads pane contents. Use --lines N to get only the last N lines.\n"
@@ -29,8 +29,8 @@ while [ $# -gt 0 ]; do
 done
 
 pane_check_coords
-case "$LINES" in
-    ''|*[!0-9]*) printf "Error: invalid --lines: %s\n" "$LINES" >&2; exit 1 ;;
+case "$PANE_LINES" in
+    ''|*[!0-9]*) printf "Error: invalid --lines: %s\n" "$PANE_LINES" >&2; exit 1 ;;
 esac
 
 CONTENTS=$(pane_osa "tell application \"iTerm2\" to tell $(pane_target) to get contents")
@@ -38,8 +38,8 @@ CONTENTS=$(pane_osa "tell application \"iTerm2\" to tell $(pane_target) to get c
 # Strip trailing blank lines: the terminal buffer pads with empty lines.
 TRIMMED=$(printf "%s" "$CONTENTS" | awk '{ lines[NR] = $0 } END { last = NR; while (last > 0 && lines[last] ~ /^[[:space:]]*$/) last--; for (i = 1; i <= last; i++) print lines[i] }')
 
-if [ "$LINES" -gt 0 ]; then
-    printf "%s\n" "$TRIMMED" | tail -n "$LINES"
+if [ "$PANE_LINES" -gt 0 ]; then
+    printf "%s\n" "$TRIMMED" | tail -n "$PANE_LINES"
 else
     printf "%s\n" "$TRIMMED"
 fi

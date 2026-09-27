@@ -61,7 +61,9 @@ fi
 
 # Find the iTerm2 session on the caller's TTY, split it, and return the new
 # session's coordinates.
-RESULT=$(osascript <<APPLESCRIPT
+ERR=$(mktemp)
+trap 'command rm -f "$ERR"' EXIT
+if ! RESULT=$(osascript 2>"$ERR" <<APPLESCRIPT
 tell application "iTerm2"
     set targetTTY to "${CALLER_TTY}"
     set foundSession to missing value
@@ -87,7 +89,10 @@ tell application "iTerm2"
     return (id of newSession) & " " & (id of foundWindow) & " " & foundTabNum
 end tell
 APPLESCRIPT
-)
+); then
+    printf "Error: could not open a pane: %s\n" "$(command cat "$ERR")" >&2
+    exit 1
+fi
 
 printf "%s\n" "$RESULT"
 
