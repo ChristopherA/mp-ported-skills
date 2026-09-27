@@ -230,8 +230,9 @@ gather() {
             | map(.p |= if . then "\(.[:1] | ascii_upcase)\(.[1:])" else . end)')
         hand=$(printf '%s' "$hand_rows" | jq -r '
             map("#\(.n) \(.t)" + (if .p then " (\(.p))" else "" end)) | join("; ")')
-        hand_step=$(printf '%s' "$hand_rows" | jq -r '
-            first // empty | "6 by hand" + (if .p then " (\(.p))" else "" end) + ": #\(.n) \(.t)"')
+        # The top two, one per line: the second is the runner-up when case 6 wins.
+        hand_steps=$(printf '%s' "$hand_rows" | jq -r '
+            .[:2][] | "6 by hand" + (if .p then " (\(.p))" else "" end) + ": #\(.n) \(.t)"')
 
         # Ready-for-human tickets a session left in motion: capturing labels the
         # one it worked on, which git cannot see. Not already fixed.
@@ -288,7 +289,7 @@ gather() {
         # The open list can lag a push that closed the ticket by a few seconds.
         [ -n "$stale" ] && add_case "4 tracker and repo disagree: close $stale (as of the last read: confirm with gh issue view first)"
         [ "$n_map" -gt 0 ] && add_case "5 /wayfinder $you_type: $maps"
-        [ -n "$hand_step" ] && add_case "$hand_step"
+        [ -n "$hand_steps" ] && add_case "$hand_steps"
         if [ -n "$cases" ]; then add_case "7 nothing else in motion: $ideas"
         else add_case "7 nothing in motion"; add_case "$ideas"; fi
     fi

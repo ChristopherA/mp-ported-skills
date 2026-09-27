@@ -18,7 +18,7 @@ It reads git (no fetch) and, when `docs/agents/issue-tracker.md` names GitHub, t
 3. **Incoming work**: unlabelled issues, `needs-triage`, or `needs-info` with a reply since the last triage notes. `/triage`.
 4. **Tracker and repo disagree**: an open ticket a commit on the default branch already closes. Fix the tracker, since every later session starts from it.
 5. **An open `wayfinder:map`**: continue `/wayfinder`.
-6. **Hand work**: a `ready-for-human` ticket, not `in-motion`, with every blocker closed. Do it by hand. The highest priority line wins (High, Medium, none, Low), then the lowest number.
+6. **Hand work**: a `ready-for-human` ticket, not `in-motion`, with every blocker closed. Do it by hand. The highest priority line wins (High, Medium, none, Low), then the lowest number. When this case wins, the second such ticket, if any, is the runner-up.
 7. **Nothing in motion**: say so plainly. Runner-ups: `/grill-with-docs` on a new idea, or `/improve-codebase-architecture`.
 
 When the SessionStart hook already put this state in context, use it; run the script only when it is absent or the user asks again later.
@@ -37,7 +37,7 @@ Done when the case stands confirmed or you have moved it.
 
 - **Next step**: one command or action, and why this case won.
 - **In-motion parent**: the parent is the work in flight and its next child is the step, with the child's command: `/implement #N` for `ready-for-agent`, done by hand for `ready-for-human`, with its title. When every open child is blocked, the step is the blockers `state.sh` names.
-- **Runner-up**: the `runner-up:` line: the next case that applies, or the case 7 suggestions.
+- **Runner-up**: the `runner-up:` line: the next case that applies, the second hand ticket when case 6 wins, or the case 7 suggestions.
 - **User-invoked commands**: every command the cases name (`/implement`, `/triage`, `/wayfinder`, `/grill-with-docs`, `/improve-codebase-architecture`, and `/setup-matt-pocock-skills` when no tracker is configured) is user-invoked in `mattpocock-skills`, and `state.sh` marks each one. A user-invoked skill is left out of your skill list, so its absence there does not mean it is missing. Tell the user to type it. Never call it missing, and never offer a model-invocable skill in its place.
 - **Sources**: which were reached. State only what a source returned; when a source was not reached, name it instead of filling in its value (no "no open PRs" when `gh` failed). When that source is the tracker (`gh` missing, offline, unauthenticated), also frame the step as git's view only.
 

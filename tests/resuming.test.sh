@@ -175,9 +175,11 @@ Blocked by: #80')")"
 out=$(run)
 check "case 6: highest-priority hand ticket" "6 by hand (Medium): #82 t82" "$(next "$out")"
 has "case 6: ranked, parked and blocked left out" "by hand, blockers closed: #82 t82 (Medium); #80 t80 (x); #81 t81 (Low)" "$out"
-check "case 6: runner-up falls to case 7" "$case7_later" "$(runner "$out")"
+check "case 6: runner-up is the second hand ticket" "6 by hand: #80 t80 (x)" "$(runner "$out")"
 issues "$(list "$(issue 80 ready-for-human 0 'No priority line here.' | jq -c '.title = "t80 (x)"')")"
-check "case 6: no priority, title in parentheses" "6 by hand: #80 t80 (x)" "$(next "$(run)")"
+out=$(run)
+check "case 6: no priority, title in parentheses" "6 by hand: #80 t80 (x)" "$(next "$out")"
+check "case 6: one hand ticket, runner-up falls to case 7" "$case7_later" "$(runner "$out")"
 issues "$(list "$(issue 81 ready-for-human 0 '**Priority: Low.** Later.')" "$(issue 87 ready-for-agent)")"
 out=$(run)
 check "case 6: runner-up to case 2" "6 by hand (Low): #81 t81" "$(runner "$out")"
