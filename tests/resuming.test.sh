@@ -144,6 +144,12 @@ out=$(run)
 check "case 5: wayfinder map" "5 /wayfinder (you type it; user-invoked): #20 t20" "$(next "$out")"
 check "case 5: runner-up falls to case 7" "$case7_later" "$(runner "$out")"
 
+# No commit on main closes a ticket yet, so the closed-by-commit list is empty.
+issues "$(list "$(issue 31 ready-for-agent)")"
+out=$(run)
+has "no closing commits: ready ticket still found" "ready, blockers closed: #31 t31" "$out"
+check "no closing commits: no jq error" "" "$(printf '%s\n' "$out" | grep jq)"
+
 g commit -q --allow-empty -m 'Fix the thing' -m 'Closes #30'
 g push -q
 issues "$(list "$(issue 20 wayfinder:map)" "$(issue 30 ready-for-agent)")"

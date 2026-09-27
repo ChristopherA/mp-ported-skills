@@ -204,7 +204,9 @@ gather() {
                         else "unlabelled" end)]
             | sort_by(.n)')
         open_nums=$(printf '%s' "$rows" | jq -c '[.[].n]')
-        fixed_nums=$(printf '%s' "$fixed" | jq -Rc 'split(" ") | map(select(. != "") | tonumber)')
+        # -n, not -R on stdin: with no closing commits the input is empty, -R
+        # emits nothing, and every --argjson fx below fails.
+        fixed_nums=$(jq -nc --arg f "$fixed" '$f | split(" ") | map(select(. != "") | tonumber)')
         count() { printf '%s' "$rows" | jq --arg r "$1" '[.[] | select(.role == $r)] | length'; }
 
         # Open tickets the default branch already closes.
