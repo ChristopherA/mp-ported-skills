@@ -31,3 +31,7 @@ Tests are `tests/*.test.sh`, run with `sh`. Every `git commit` a test makes in a
 A check that two files match tests `cmp -s`'s exit status, as `same` in `tests/status-line-copy.test.sh` does. `cmp` reports a file that is a prefix of the other on stderr, so a check on its captured stdout reads empty, and passes, for files that differ.
 
 Each test sets or unsets every environment variable the scripts it runs read, so it gives the same result in any session. The maintainer's sessions set `MP_SESSION_TITLE=1`, which changes what the status line prints, and one test failed only there.
+
+## Checking what a hook did
+
+The terminal and a screenshot show a session's title and state, not what set them. To learn whether a `SessionStart` hook ran and what it printed, read the session's transcript, `$CLAUDE_CONFIG_DIR/projects/<cwd with / as ->/<session id>.jsonl`. Each hook run is an `attachment` record carrying `hookName` (`SessionStart:<source>`), `command` and `stdout`, and the title in force is the last `custom-title` record. A forked or branched session's transcript opens with copies of its parent's records, timestamps included, so a hook run belongs to the new session only when its timestamp is after the fork.
