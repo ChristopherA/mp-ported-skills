@@ -5,7 +5,7 @@
 # PATH that serves fixture JSON: no issue-tracker config (hook silent), `gh`
 # failing (hook silent, report says unreached), a hung `gh` (hook silent
 # within its budget, and within the hook's timeout on the default budget),
-# each of the six weighing cases, a ticket labelled in-motion, the next
+# each of the seven weighing cases, a ticket labelled in-motion or parked, the next
 # child of an in-motion parent, and label strings read from
 # triage-labels.md. Hook cases run the command string from
 # hooks.json, as Claude Code does. Touches nothing outside its own mktemp
@@ -38,7 +38,7 @@ has() { # <name> <needle> <haystack>
 next() { printf '%s\n' "$1" | sed -n 's/^next: //p'; }
 runner() { printf '%s\n' "$1" | sed -n 's/^runner-up: //p'; }
 ideas="/grill-with-docs on a new idea, or /improve-codebase-architecture (you type these; they are user-invoked)"
-case6_later="6 nothing else in motion: $ideas"
+case7_later="7 nothing else in motion: $ideas"
 
 # --- fake gh ----------------------------------------------------------------
 mkdir -p "$work/bin" "$work/gh"
@@ -128,20 +128,20 @@ out=$(FAKE_GH_SLEEP=$((hook_timeout + 5)) perl -e 'alarm shift; exec @ARGV' -- "
 check "gh hung: default budget ends within the hook timeout" "0" "$?"
 check "gh hung: default budget, hook silent" "" "$out"
 
-# --- the six cases ----------------------------------------------------------
+# --- the seven cases --------------------------------------------------------
 out=$(run)
-check "case 6: nothing in motion" "6 nothing in motion" "$(next "$out")"
-check "case 6: runner-up names the suggestions" "$ideas" "$(runner "$out")"
+check "case 7: nothing in motion" "7 nothing in motion" "$(next "$out")"
+check "case 7: runner-up names the suggestions" "$ideas" "$(runner "$out")"
 out=$(hook)
-has "case 6: hook states it" "next: 6 nothing in motion" "$out"
-has "case 6: hook carries the runner-up" "runner-up: $ideas" "$out"
+has "case 7: hook states it" "next: 7 nothing in motion" "$out"
+has "case 7: hook carries the runner-up" "runner-up: $ideas" "$out"
 has "hook: instruction line" "Do not ask what they are working on." "$out"
 has "hook: user-invoked commands are for the user to type" "never call them missing or swap in a model-invocable skill" "$out"
 
 issues "$(list "$(issue 20 wayfinder:map)" "$(issue 21 wayfinder:task)")"
 out=$(run)
 check "case 5: wayfinder map" "5 /wayfinder (you type it; user-invoked): #20 t20" "$(next "$out")"
-check "case 5: runner-up falls to case 6" "$case6_later" "$(runner "$out")"
+check "case 5: runner-up falls to case 7" "$case7_later" "$(runner "$out")"
 
 g commit -q --allow-empty -m 'Fix the thing' -m 'Closes #30'
 g push -q
@@ -161,7 +161,30 @@ printf '[{"user":{"login":"reporter"}},{"user":{"login":"me"}}]' >"$FAKE_GH/comm
 issues "$(list "$(issue 40 needs-info | jq -c '.comments = 2')" "$(issue 41 needs-info | jq -c '.comments = 2')")"
 check "case 3: needs-info replied" "3 /triage (you type it; user-invoked): 0 unlabelled, 0 needs-triage, replied needs-info: #40" "$(next "$(run)")"
 issues "$(list "$(issue 41 needs-info | jq -c '.comments = 2')")"
-check "case 6: needs-info awaiting reporter" "6 nothing in motion" "$(next "$(run)")"
+check "case 7: needs-info awaiting reporter" "7 nothing in motion" "$(next "$(run)")"
+
+# Hand work: unblocked, unparked ready-for-human tickets, by the body's
+# priority line (High, Medium, none, Low), lowest number first within one.
+issues "$(list "$(issue 80 ready-for-human 0 'No priority line here.' | jq -c '.title = "t80 (x)"')" \
+    "$(issue 81 ready-for-human 0 '**Priority: Low.** Later.')" \
+    "$(issue 82 ready-for-human 0 '**Priority: Medium.** Soon.')" \
+    "$(issue 83 ready-for-human,parked 0 '**Priority: High.** Waits on a trigger.')" \
+    "$(issue 84 ready-for-human 1 '**Priority: High.** Blocked natively.')" \
+    "$(issue 85 ready-for-human 0 '**Priority: High.** Blocked in the body.
+Blocked by: #80')")"
+out=$(run)
+check "case 6: highest-priority hand ticket" "6 by hand (Medium): #82 t82" "$(next "$out")"
+has "case 6: ranked, parked and blocked left out" "by hand, blockers closed: #82 t82 (Medium); #80 t80 (x); #81 t81 (Low)" "$out"
+check "case 6: runner-up falls to case 7" "$case7_later" "$(runner "$out")"
+issues "$(list "$(issue 80 ready-for-human 0 'No priority line here.' | jq -c '.title = "t80 (x)"')")"
+check "case 6: no priority, title in parentheses" "6 by hand: #80 t80 (x)" "$(next "$(run)")"
+issues "$(list "$(issue 81 ready-for-human 0 '**Priority: Low.** Later.')" "$(issue 87 ready-for-agent)")"
+out=$(run)
+check "case 6: runner-up to case 2" "6 by hand (Low): #81 t81" "$(runner "$out")"
+issues "$(list "$(issue 81 ready-for-human 0 '**Priority: Low.** Later.')" "$(issue 87 ready-for-agent,parked)")"
+out=$(run)
+check "case 2: skips a parked ticket" "6 by hand (Low): #81 t81" "$(next "$out")"
+has "case 2: parked is not ready" "ready, blockers closed: none" "$out"
 
 issues "$(list "$(issue 31 needs-triage)" "$(issue 50 ready-for-agent 1)" \
     "$(issue 51 ready-for-agent 0 'Blocked by: #31')" "$(issue 52 ready-for-agent 0 'Blocked by: #9')" \
@@ -195,6 +218,10 @@ check "in-motion parent: next child ready-for-agent" "1 work in flight: in motio
 check "in-motion parent: runner-up unchanged" "2 /implement #52 (you type it; user-invoked): #52 t52" "$(runner "$out")"
 list "$(issue 26 ready-for-human)" "$(issue 28 ready-for-agent)" >"$FAKE_GH/sub-24.json"
 check "in-motion parent: next child ready-for-human" "1 work in flight: in motion #24 t24; next child #26 (ready-for-human, by hand): t26" "$(next "$(run)")"
+list "$(issue 26 ready-for-human,parked)" "$(issue 28 ready-for-agent)" >"$FAKE_GH/sub-24.json"
+check "in-motion parent: skips a parked child" "1 work in flight: in motion #24 t24; next child #28 (ready-for-agent, /implement #28, you type it; user-invoked): t28" "$(next "$(run)")"
+list "$(issue 26 ready-for-human,parked)" >"$FAKE_GH/sub-24.json"
+check "in-motion parent: only a parked child" "1 work in flight: in motion #24 t24; every open child blocked: #26 parked" "$(next "$(run)")"
 list "$(closed 26 ready-for-human)" "$(closed 28 ready-for-agent)" >"$FAKE_GH/sub-24.json"
 check "in-motion parent: children all closed" "1 work in flight: in motion #24 t24" "$(next "$(run)")"
 command rm -f "$FAKE_GH/sub-24.json"
