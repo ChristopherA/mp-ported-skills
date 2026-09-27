@@ -42,6 +42,10 @@ Run `git status` and compare it with what this session changed. Show the user an
 - **One first next step**, from this repo's tracker only: the `in-motion` ticket when one is labelled, or, when it has open sub-issues, its next child as `resuming` case 1 defines it; otherwise a ticket with the `ready-for-agent` role's label string from `docs/agents/triage-labels.md`, with every blocker closed and not labelled `parked`, lowest number first, and why that one. `resuming`'s cases 1 and 2 define this rule, so an edit to one is made to both. When this repo has no tracker, there is no next ticket; list tickets this session left open in other repos as work for a session started in that repo.
 - **Safe to clear**, only when moves 1-5 actually happened. Otherwise say what is missing.
 
+Then gather the **before-clear jobs**: small actions that finish this session's work, such as a push, closing a ticket, or a plugin update after a version bump. Ask them as one self-contained multi-select AskUserQuestion, each job an option whose description says what it does and whom it reaches. Run the ones ticked. More than four jobs take a second question. With no jobs, skip the question.
+
+A job the user might run at the terminal, such as a plugin update, takes two options, each with the full command in its description, since nothing tells you whether the user is at this machine or on a remote client: **run it** through Bash, which works from any client, and on a permission denial say so and stop; or **copy** it as a `!` command to this machine's clipboard with `pbcopy`, which reaches only a user at this machine. `/plugin` itself runs only in the local terminal.
+
 End with this session's context reading, from:
 
 ```sh

@@ -136,6 +136,7 @@ out=$(hook)
 has "case 7: hook states it" "next: 7 nothing in motion" "$out"
 has "case 7: hook carries the runner-up" "runner-up: $ideas" "$out"
 has "hook: instruction line" "Do not ask what they are working on." "$out"
+has "hook: asks the step as a question" "ask it as one AskUserQuestion" "$out"
 has "hook: user-invoked commands are for the user to type" "never call them missing or swap in a model-invocable skill" "$out"
 
 issues "$(list "$(issue 20 wayfinder:map)" "$(issue 21 wayfinder:task)")"

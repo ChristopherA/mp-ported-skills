@@ -3,7 +3,7 @@ name: resuming
 description: Recommend one next step, with its reason and a runner-up, from the tracker and git. Use at session start, after /clear or /compact, or when the user asks what's next.
 ---
 
-The tracker and git hold where the work stands, so read them and **recommend**: one next step, its reason, and a runner-up. The user asked you precisely because they don't remember; the answer comes from the sources. This skill is read-only: it writes nothing. Arguments, when any follow here, narrow the question: $ARGUMENTS
+The tracker and git hold where the work stands, so read them and **recommend**: one next step, its reason, and a runner-up. The user asked you precisely because they don't remember; the answer comes from the sources. This skill is read-only: it writes nothing until the user picks a step. Arguments, when any follow here, narrow the question: $ARGUMENTS
 
 ## 1. Read
 
@@ -40,5 +40,7 @@ Done when the case stands confirmed or you have moved it.
 - **Runner-up**: the `runner-up:` line: the next case that applies, the second hand ticket when case 6 wins, or the case 7 suggestions.
 - **User-invoked commands**: every command the cases name (`/implement`, `/triage`, `/wayfinder`, `/grill-with-docs`, `/improve-codebase-architecture`, and `/setup-matt-pocock-skills` when no tracker is configured) is user-invoked in `mattpocock-skills`, and `state.sh` marks each one. A user-invoked skill is left out of your skill list, so its absence there does not mean it is missing. Tell the user to type it. Never call it missing, and never offer a model-invocable skill in its place.
 - **Sources**: which were reached. State only what a source returned; when a source was not reached, name it instead of filling in its value (no "no open PRs" when `gh` failed). When that source is the tracker (`gh` missing, offline, unauthenticated), also frame the step as git's view only.
+
+**Ask** the recommendation as one self-contained AskUserQuestion: the step and why it won in the question text, the step as the first option marked `(Recommended)`, the runner-up as the second, and in each option's description what picking it does. Picking hand work, a tracker fix or work in flight starts it in this session. Picking a user-invoked command repeats it for the user to type.
 
 On a no, the runner-up becomes the recommendation, in the same shape, with a new runner-up.
