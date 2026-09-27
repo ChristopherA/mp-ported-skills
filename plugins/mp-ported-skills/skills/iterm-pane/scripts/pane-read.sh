@@ -35,8 +35,9 @@ esac
 
 CONTENTS=$(pane_osa "tell application \"iTerm2\" to tell $(pane_target) to get contents")
 
-# Strip trailing blank lines: the terminal buffer pads with empty lines.
-TRIMMED=$(printf "%s" "$CONTENTS" | awk '{ lines[NR] = $0 } END { last = NR; while (last > 0 && lines[last] ~ /^[[:space:]]*$/) last--; for (i = 1; i <= last; i++) print lines[i] }')
+# iTerm2 pads each line with trailing spaces and the buffer with blank lines;
+# strip both, so a caller can match a whole line.
+TRIMMED=$(printf "%s" "$CONTENTS" | awk '{ sub(/[[:space:]]+$/, ""); lines[NR] = $0 } END { last = NR; while (last > 0 && lines[last] ~ /^[[:space:]]*$/) last--; for (i = 1; i <= last; i++) print lines[i] }')
 
 if [ "$PANE_LINES" -gt 0 ]; then
     printf "%s\n" "$TRIMMED" | tail -n "$PANE_LINES"

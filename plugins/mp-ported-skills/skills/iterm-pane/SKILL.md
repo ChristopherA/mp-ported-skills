@@ -37,7 +37,7 @@ sh "${CLAUDE_SKILL_DIR}/scripts/pane-send.sh" --session S --window W --tab T --e
 sh "${CLAUDE_SKILL_DIR}/scripts/pane-read.sh" --session S --window W --tab T --lines 20 </dev/null
 ```
 
-It prints the pane's contents with the terminal's trailing blank lines removed, and `--lines N` keeps the last N. Leave it off only when the whole scrollback is needed.
+It prints the pane's contents with iTerm2's padding removed (trailing spaces on each line, blank lines at the end), so a whole-line match works, and `--lines N` keeps the last N. Leave it off only when the whole scrollback is needed.
 
 When polling for a command to finish, the pane shows the command itself as well as its output. Three traps follow:
 

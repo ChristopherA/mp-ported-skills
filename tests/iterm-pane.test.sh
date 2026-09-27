@@ -112,6 +112,15 @@ check "read: exit 0" 0 "$rc"
 check "read: asks the named pane for its contents" \
     'tell application "iTerm2" to tell session id "ABC-123" of tab 2 of window id 7 to get contents' "$(sent)"
 
+reset; answer 'prompt % echo hi 
+hi 
+prompt %  
+'
+run pane-read.sh $pane
+check "read: iTerm2's trailing padding stripped from each line" 'prompt % echo hi
+hi
+prompt %' "$(out)"
+
 reset; answer 'a
 b
 c

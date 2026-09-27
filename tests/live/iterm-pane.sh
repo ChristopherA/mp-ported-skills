@@ -14,7 +14,10 @@ set -u
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 scripts="$root/plugins/mp-ported-skills/skills/iterm-pane/scripts"
 
-if [ "$(uname)" != Darwin ] || ! pgrep -x iTerm2 >/dev/null 2>&1; then
+# Ask AppleScript, which does not launch the app: pgrep cannot see iTerm2
+# from inside a Claude Code session.
+if [ "$(uname)" != Darwin ] ||
+    [ "$(osascript -e 'application "iTerm2" is running' 2>/dev/null)" != true ]; then
     echo "iterm-pane live: SKIP (iTerm2 is not running)"
     exit 0
 fi
