@@ -36,7 +36,10 @@ done
 pane_check_coords
 
 if [ "$FORCE" = false ]; then
-    STATE=$(sh "$SCRIPT_DIR/pane-classify.sh" --session "$SESSION_ID" --window "$WINDOW_ID" --tab "$TAB_NUM" </dev/null)
+    if ! STATE=$(sh "$SCRIPT_DIR/pane-classify.sh" --session "$SESSION_ID" --window "$WINDOW_ID" --tab "$TAB_NUM" </dev/null); then
+        printf "pane-close.sh: could not read the pane's state, so it stays open\n" >&2
+        exit 1
+    fi
     case "$STATE" in
         shell) ;;
         gone)

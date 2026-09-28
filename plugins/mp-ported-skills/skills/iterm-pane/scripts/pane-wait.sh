@@ -56,9 +56,14 @@ case "$INTERVAL" in
     ''|*[!0-9]*|0) printf "Error: invalid --interval: %s\n" "$INTERVAL" >&2; exit 1 ;;
 esac
 
+last=""
 deadline=$(( $(date +%s) + TIMEOUT ))
 while :; do
-    state=$(sh "$SCRIPT_DIR/pane-classify.sh" --session "$SESSION_ID" --window "$WINDOW_ID" --tab "$TAB_NUM" </dev/null)
+    if ! state=$(sh "$SCRIPT_DIR/pane-classify.sh" --session "$SESSION_ID" --window "$WINDOW_ID" --tab "$TAB_NUM" </dev/null); then
+        printf "pane-wait.sh: could not read the pane's state; last state: %s\n" "${last:-none}" >&2
+        exit 1
+    fi
+    last=$state
     case ",$STATES," in
         *",$state,"*) printf '%s\n' "$state"; exit 0 ;;
     esac

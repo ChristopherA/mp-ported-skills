@@ -64,15 +64,15 @@ sh "${CLAUDE_SKILL_DIR}/scripts/pane-wait.sh" --session S --window W --tab T --s
 
 | State | The pane shows |
 |---|---|
-| `working` | Claude Code is thinking (a spinner above its prompt) or streaming a reply |
+| `working` | Claude Code is thinking (a spinner above its prompt) or streaming a reply; or another program is running, since no shell prompt is last |
 | `waiting` | Claude Code is idle at its input prompt, including with a draft typed but not sent |
 | `asking` | a question, a tool permission prompt, or the folder-trust prompt |
-| `shell` | no live Claude Code prompt at the bottom: a shell, or another program |
+| `shell` | Claude Code is not running and a shell prompt (a line ending in `%`, `$`, `#`, `>` or `❯`) is last |
 | `gone` | the pane no longer exists |
 
 It reads the bottom of the screen, never the model name, so it works on any model. `--file PATH` (`-` for stdin) classifies a saved `pane-read.sh` capture instead of a live pane.
 
-- **Streaming has no spinner.** While a reply streams, the screen has the same shape as a finished one. The difference is the end-of-turn line (`✻ Worked for 42s · done`): a user message with none below it is still `working`. A slash command that starts no turn (`/model`) reads as `waiting`.
+- **Streaming has no spinner.** While a reply streams, the screen has the same shape as a finished one. The difference is how the turn ended: a done line (`✻ Worked for 42s · done`), an `Interrupted` or an `API Error` under the message. A user message with none of these below it is still `working`. A slash command that starts no turn (`/model`) reads as `waiting`.
 
 `pane-wait.sh` polls the state, not the pane's text, so an echoed command cannot satisfy it. It prints the state reached and exits 0, or on timeout prints the last state seen and exits 124. `--state` takes one state or several separated by commas; `--timeout` defaults to 300 seconds and `--interval` to 2.
 
@@ -82,7 +82,7 @@ It reads the bottom of the screen, never the model name, so it works on any mode
 sh "${CLAUDE_SKILL_DIR}/scripts/pane-close.sh" --session S --window W --tab T </dev/null
 ```
 
-Without `--force`, `pane-close.sh` classifies the pane first. It closes a pane at `shell`, prints `gone: the pane is already closed` and exits 0 for `gone`, and refuses (exit 2, naming the state) a pane that is `working`, `waiting` or `asking`. To close a Claude Code session, end it first (send `/exit`, then wait for `shell`), or pass `--force` when nothing there should keep running. Close a pane when its work is done: a pane left open is a stale session, and for SSH a stale connection.
+Without `--force`, `pane-close.sh` classifies the pane first. It closes a pane at `shell`, so a pane running a build or waiting at `Password:` stays open, prints `gone: the pane is already closed` and exits 0 for `gone`, and refuses (exit 2, naming the state) a pane that is `working`, `waiting` or `asking`. To close a Claude Code session, end it first (send `/exit`, then wait for `shell`), or pass `--force` when nothing there should keep running. Close a pane when its work is done: a pane left open is a stale session, and for SSH a stale connection.
 
 ## Find a pane again
 

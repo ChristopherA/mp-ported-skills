@@ -27,14 +27,15 @@ check() { # <name> <expected> <actual>
 
 # The fake osascript: appends its -e arguments and its stdin to $FAKE_OSA_LOG,
 # prints $FAKE_OSA_OUT (a file) and exits $FAKE_OSA_RC. A non-zero exit prints
-# iTerm2's error for a missing session to stderr, as the real one does.
+# $FAKE_OSA_MSG to stderr, by default iTerm2's error for a missing session.
 bin="$work/bin"; mkdir -p "$bin"
 command cat > "$bin/osascript" <<'EOF'
 #!/bin/sh
 for a in "$@"; do [ "$a" = -e ] || printf '%s\n' "$a" >> "$FAKE_OSA_LOG"; done
 [ -t 0 ] || command cat >> "$FAKE_OSA_LOG"
 if [ "${FAKE_OSA_RC:-0}" -ne 0 ]; then
-    printf '%s\n' "execution error: iTerm got an error: Can't get session id \"X\". (-1728)" >&2
+    msg="execution error: iTerm got an error: Can't get session id \"X\". (-1728)"
+    printf '%s\n' "${FAKE_OSA_MSG:-$msg}" >&2
     exit "$FAKE_OSA_RC"
 fi
 [ -n "${FAKE_OSA_OUT:-}" ] && command cat "$FAKE_OSA_OUT"
@@ -55,11 +56,11 @@ chmod +x "$bin/ps"
 FAKE_PS_TTY=ttys001; export FAKE_PS_TTY
 
 export FAKE_OSA_LOG="$work/osa.log"
-unset FAKE_OSA_OUT FAKE_OSA_RC 2>/dev/null || true
+unset FAKE_OSA_OUT FAKE_OSA_RC FAKE_OSA_MSG 2>/dev/null || true
 PATH="$bin:$PATH"; export PATH
 
 answer() { printf '%s' "$1" > "$work/answer"; FAKE_OSA_OUT="$work/answer"; export FAKE_OSA_OUT; }
-reset() { : > "$FAKE_OSA_LOG"; unset FAKE_OSA_OUT FAKE_OSA_RC 2>/dev/null || true; }
+reset() { : > "$FAKE_OSA_LOG"; unset FAKE_OSA_OUT FAKE_OSA_RC FAKE_OSA_MSG 2>/dev/null || true; }
 run() { # <script> <args...>: stdout, then stderr, then the exit status
     s=$1; shift
     sh "$scripts/$s" "$@" </dev/null > "$work/out" 2> "$work/err"; rc=$?
@@ -176,14 +177,10 @@ check "send, pane gone: says so" \
 fixtures="$root/tests/fixtures/pane-states"
 for f in "$fixtures"/*.txt; do
     name=${f##*/}
+    state=${name%.txt}; state=${state%%-*}
     reset; run pane-classify.sh --file "$f"
-    state=${name%.txt}; state=${state%%-*}
     check "classify $name" "$state" "$(out)"
-done
-for f in "$fixtures"/*.txt; do
     sh "$scripts/pane-classify.sh" --file - < "$f" > "$work/out" 2>/dev/null
-    name=${f##*/}
-    state=${name%.txt}; state=${state%%-*}
     check "classify $name from stdin" "$state" "$(out)"
 done
 # The captures come from Opus and Fable; none of the rules reads the model.
@@ -194,6 +191,37 @@ check "classify: no rule names a model" '' \
 { command cat "$fixtures/waiting-after-reply-opus.txt"; printf '%s\n' 'user@workstation project % claude --resume' 'user@workstation project %'; } > "$work/old-session.txt"
 reset; run pane-classify.sh --file "$work/old-session.txt"
 check "classify: shell below an old session's [Opus tag" shell "$(out)"
+
+# classify_text <text>: classify a capture built here, from stdin.
+classify_text() { printf '%s\n' "$1" | sh "$scripts/pane-classify.sh" --file - 2>&1; }
+box='───────────────────────── project ─
+❯
+─────────────────────────
+  [Model|medium] 35% of zone'
+check "classify: a program running with no prompt last is working, not shell" working \
+    "$(classify_text 'user@workstation project % make
+building...')"
+check "classify: a sudo password prompt is working, not shell" working "$(classify_text 'Password:')"
+check "classify: an empty capture is working, not shell" working "$(classify_text '')"
+check "classify: a prompt starting with ❯ is a shell" shell "$(classify_text '~/src/project
+❯ ls
+a b
+❯')"
+check "classify: a turn interrupted with Esc is waiting" waiting "$(classify_text "❯ Write a story
+  ⎿  Interrupted · What should Claude do instead?
+
+$box")"
+check "classify: a turn ended by an API error is waiting" waiting "$(classify_text "❯ hi
+  ⎿  API Error: 529 Overloaded
+
+$box")"
+check "classify: extra footer lines under the box are still the session" waiting \
+    "$(classify_text "$(command cat "$fixtures/waiting-opus.txt")
+  one
+  two
+  three
+  four
+  five")"
 
 # The live path reads the pane through pane-read.sh.
 reset; FAKE_OSA_OUT="$fixtures/asking-trust.txt"; export FAKE_OSA_OUT
@@ -206,6 +234,12 @@ reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
 run pane-classify.sh $pane
 check "classify, pane closed: gone" gone "$(out)"
 check "classify, pane closed: exit 0" 0 "$rc"
+
+reset; FAKE_OSA_RC=1; FAKE_OSA_MSG='execution error: iTerm got an error: AppleEvent timed out. (-1712)'; export FAKE_OSA_RC FAKE_OSA_MSG
+run pane-classify.sh $pane
+check "classify, iTerm2 cannot be asked: exit 1" 1 "$rc"
+check "classify, iTerm2 cannot be asked: osascript's reason" \
+    'pane-read.sh: execution error: iTerm got an error: AppleEvent timed out. (-1712)' "$(err)"
 
 reset; run pane-classify.sh --file "$work/missing.txt"
 check "classify, missing file: exit 1" 1 "$rc"
@@ -229,6 +263,12 @@ reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
 run pane-wait.sh $pane --state gone --timeout 0
 check "wait for gone: reached when the pane closes" gone "$(out)"
 
+reset; FAKE_OSA_RC=1; FAKE_OSA_MSG='execution error: AppleEvent timed out. (-1712)'; export FAKE_OSA_RC FAKE_OSA_MSG
+run pane-wait.sh $pane --state waiting --timeout 0
+check "wait, pane cannot be read: exit 1" 1 "$rc"
+check "wait, pane cannot be read: says so" \
+    "pane-wait.sh: could not read the pane's state; last state: none" "$(err | tail -1)"
+
 reset; run pane-wait.sh $pane
 check "wait, no --state: named" 'Error: --state is required' "$(err)"
 reset; run pane-wait.sh $pane --state idle
@@ -240,7 +280,6 @@ reset; run pane-wait.sh $pane --state waiting --interval 0
 check "wait, zero --interval: refused" 'Error: invalid --interval: 0' "$(err)"
 
 # --- close ---
-tell='tell application "iTerm2" to tell session id "ABC-123" of tab 2 of window id 7 to'
 for st in working waiting asking; do
     reset; FAKE_OSA_OUT=$(ls "$fixtures/$st"-*.txt | head -1); export FAKE_OSA_OUT
     run pane-close.sh $pane
@@ -259,6 +298,18 @@ reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
 run pane-close.sh $pane
 check "close without --force, gone: exit 0" 0 "$rc"
 check "close without --force, gone: says so" 'gone: the pane is already closed' "$(out)"
+
+reset; answer 'user@workstation project % make
+building...'
+run pane-close.sh $pane
+check "close without --force, a program running: exit 2" 2 "$rc"
+check "close without --force, a program running: pane untouched" 0 "$(sent | grep -c 'to close')"
+
+reset; FAKE_OSA_RC=1; FAKE_OSA_MSG='execution error: AppleEvent timed out. (-1712)'; export FAKE_OSA_RC FAKE_OSA_MSG
+run pane-close.sh $pane
+check "close without --force, pane cannot be read: exit 1" 1 "$rc"
+check "close without --force, pane cannot be read: says so" \
+    "pane-close.sh: could not read the pane's state, so it stays open" "$(err | tail -1)"
 
 reset; run pane-close.sh $pane --force
 check "close --force: closes the pane without reading it" "$tell close" "$(sent)"
