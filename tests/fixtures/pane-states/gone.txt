@@ -1,0 +1,1 @@
+pane-read.sh: no pane with session D070D2B2-B616-4289-9216-CCF366B22FBA in tab 1 of window 7709 (closed, or wrong coordinates)

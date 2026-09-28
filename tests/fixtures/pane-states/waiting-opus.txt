@@ -1,0 +1,24 @@
+
+ ▐▛███▛█   Claude Code v2.1.283
+▝▜██████▀  Opus 5.5 with medium effort · Claude Pro
+ ▝▝   ▝▝   ~/…/project
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+───────────────────────── project · main · workstation ─
+❯ Try "fix lint errors"
+────────────────────────────────────────────────────────
+
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

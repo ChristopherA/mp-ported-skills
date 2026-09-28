@@ -1,0 +1,8 @@
+Last login: Sun Sep 27 17:32:50 on ttys000
+user@workstation ~ % cd '/Users/user/src/project' && claude --permission-mode 'default' -- 'Create a file named hello.txt in this folder containing the word hello, using the Write tool.'
+claude profile: example → /Users/user/.claude-example
+
+Resume this session with:
+claude --resume "project · main · workstation"
+user@workstation project %
+user@workstation project %

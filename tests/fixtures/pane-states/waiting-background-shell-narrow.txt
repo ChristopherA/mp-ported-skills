@@ -1,0 +1,49 @@
+
+           Claude Code
+           v2.1.283
+ ▐▛███▛█   Opus 5.5 with
+▝▜██████▀  mediu…
+ ▝▝   ▝▝   Claude Pro
+           ~/…/project
+
+
+❯ Run: sleep 20 && echo
+  finished-sleeping
+
+  Ran 1 shell command
+
+⏺ The command is running in
+  the background, because
+  this harness blocks sleep
+  in the foreground. It
+  should finish in about 20
+  seconds, and I'll get a
+  notification with its
+  output when it does.
+
+✻ Cooked for 5s · done 5:32
+  PM · 1 shell still
+  running
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ project · main · workst… ─
+❯
+───────────────────────────
+  [Opus 5.5|medium] 35% …
+  ⏵⏵ auto mode on · 1 she
