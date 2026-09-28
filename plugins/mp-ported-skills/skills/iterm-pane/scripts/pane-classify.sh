@@ -9,12 +9,19 @@ set -eu
 #   shell    Claude Code is not running and a shell prompt is last
 #   gone     the pane no longer exists
 #
+# With --detail, an asking pane adds a second line naming the open prompt:
+#   trust       the folder-trust prompt shown before a session starts
+#   question    a question the session asked (AskUserQuestion)
+#   permission  a tool permission prompt
+#   other       any other dialog
+#
 # It reads the bottom of the screen and never the model name, so a session
 # on any model classifies the same way.
 #
 # Usage:
 #   pane-classify.sh --session ID --window ID --tab NUM
 #   pane-classify.sh --file PATH      # a saved pane-read.sh capture; - for stdin
+#   either form with --detail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/pane-common.sh"
@@ -23,6 +30,7 @@ SESSION_ID=""
 WINDOW_ID=""
 TAB_NUM=""
 FILE=""
+DETAIL=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -30,10 +38,12 @@ while [ $# -gt 0 ]; do
         --window)  pane_need_value "$@"; WINDOW_ID="$2"; shift 2 ;;
         --tab)     pane_need_value "$@"; TAB_NUM="$2"; shift 2 ;;
         --file)    pane_need_value "$@"; FILE="$2"; shift 2 ;;
+        --detail)  DETAIL=1; shift ;;
         --help)
             printf "Usage: pane-classify.sh --session ID --window ID --tab NUM\n"
             printf "       pane-classify.sh --file PATH   (- for stdin)\n"
             printf "\nPrints one of: working, waiting, asking, shell, gone.\n"
+            printf "With --detail, asking adds a line: trust, question, permission or other.\n"
             exit 0 ;;
         *) printf "Unknown option: %s\n" "$1" >&2; exit 1 ;;
     esac
@@ -44,12 +54,30 @@ done
 # stale redraws of that box above the live one, so only the last box counts,
 # and only while no shell prompt has appeared below it.
 classify() {
-    awk '
+    awk -v detail="$DETAIL" '
     function is_rule_end(s) { sub(/[ \t]+$/, "", s); return s ~ /─$/ }
     function is_pure_rule(s) { gsub(/[ \t]/, "", s); if (s == "") return 0; gsub(/─/, "", s); return s == "" }
     # A shell prompt: an unindented line ending in a prompt character. The
     # footer lines under a Claude Code box are indented, so never match.
     function is_shell_prompt(s) { return s ~ /^❯ ?$/ || s ~ /^[^ \t].*(%|\$|#|>|❯) ?$/ }
+    # Which prompt the dialog ending at line e holds. The dialog starts at the
+    # last rule above its "Esc to cancel" line, so the words of a prompt
+    # quoted in scrollback above it never count. The trust prompt opens with
+    # "Accessing workspace:", so a command that quotes its wording inside a
+    # permission dialog stays a permission.
+    function ask_kind(e,    i, top, head, trust, perm) {
+        if (line[e] ~ /Enter to select/) return "question"
+        top = 0
+        for (i = e - 1; i >= 1; i--) if (is_pure_rule(line[i])) { top = i; break }
+        for (i = top + 1; i < e; i++) {
+            if (head == "" && line[i] ~ /[^ \t]/) head = line[i]
+            if (line[i] ~ /trust this folder/) trust = 1
+            if (line[i] ~ /Do you want to/) perm = 1
+        }
+        if (head ~ /^ *Accessing workspace:/ && trust && line[e] ~ /Enter to confirm/) return "trust"
+        if (perm) return "permission"
+        return "other"
+    }
     BEGIN { nbsp = "\302\240" }
     # Claude Code puts a no-break space after "❯"; read it as a space.
     { gsub(nbsp, " "); line[NR] = $0 }
@@ -64,7 +92,11 @@ classify() {
         for (i = n; i > 1; i--) if (line[i] ~ /^❯/ && is_rule_end(line[i - 1])) { prompt_at = i; break }
 
         # asking: a dialog below the last prompt box, or with none at all.
-        for (i = prompt_at + 1; i <= n; i++) if (line[i] ~ /Esc to cancel/) { print "asking"; exit }
+        for (i = prompt_at + 1; i <= n; i++) if (line[i] ~ /Esc to cancel/) {
+            print "asking"
+            if (detail) print ask_kind(i)
+            exit
+        }
 
         # With no box, or a shell prompt below the box, Claude Code is not
         # running there. A pane with no prompt last runs some other program,

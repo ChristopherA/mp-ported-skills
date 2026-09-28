@@ -250,8 +250,8 @@ check "classify: no rule names a model" '' \
 reset; run pane-classify.sh --file "$work/old-session.txt"
 check "classify: shell below an old session's [Opus tag" shell "$(out)"
 
-# classify_text <text>: classify a capture built here, from stdin.
-classify_text() { printf '%s\n' "$1" | sh "$scripts/pane-classify.sh" --file - 2>&1; }
+# classify_text <text> [args...]: classify a capture built here, from stdin.
+classify_text() { t=$1; shift; printf '%s\n' "$t" | sh "$scripts/pane-classify.sh" --file - "$@" 2>&1; }
 box='───────────────────────── project ─
 ❯
 ─────────────────────────
@@ -292,6 +292,46 @@ reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
 run pane-classify.sh $pane
 check "classify, pane closed: gone" gone "$(out)"
 check "classify, pane closed: exit 0" 0 "$rc"
+
+# --- classify --detail: which prompt an asking pane holds ---
+for pair in asking-trust:trust asking-question-opus:question asking-permission-opus:permission; do
+    reset; run pane-classify.sh --detail --file "$fixtures/${pair%%:*}.txt"
+    check "classify --detail ${pair%%:*}" "asking
+${pair#*:}" "$(out)"
+done
+reset; run pane-classify.sh --detail --file "$fixtures/waiting-opus.txt"
+check "classify --detail: a state other than asking prints the state alone" waiting "$(out)"
+check "classify --detail: an unknown dialog is other" 'asking
+other' "$(classify_text '────────
+ Pick one
+ ❯ 1. A
+
+ Esc to cancel' --detail)"
+# The trust prompt's words above the open dialog's rule do not make it a
+# trust prompt, even when the dialog also ends in "Enter to confirm".
+check "classify --detail: trust wording above the dialog is not the dialog" 'asking
+other' "$(classify_text '❯ Is "Yes, I trust this folder" safe?
+────────
+ Pick one
+ ❯ 1. A
+
+ Enter to confirm · Esc to cancel' --detail)"
+# A permission dialog whose command quotes the trust prompt is still a
+# permission: the trust prompt opens with "Accessing workspace:".
+check "classify --detail: trust wording inside a permission dialog is permission" 'asking
+permission' "$(classify_text '────────
+ Do you want to proceed?
+ echo "Yes, I trust this folder"
+ ❯ 1. Yes
+
+ Enter to confirm · Esc to cancel' --detail)"
+reset; FAKE_OSA_OUT="$fixtures/asking-trust.txt"; export FAKE_OSA_OUT
+run pane-classify.sh $pane --detail
+check "classify --detail, live pane: trust" 'asking
+trust' "$(out)"
+reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
+run pane-classify.sh $pane --detail
+check "classify --detail, pane closed: gone alone" gone "$(out)"
 
 reset; FAKE_OSA_RC=1; FAKE_OSA_MSG='execution error: iTerm got an error: AppleEvent timed out. (-1712)'; export FAKE_OSA_RC FAKE_OSA_MSG
 run pane-classify.sh $pane

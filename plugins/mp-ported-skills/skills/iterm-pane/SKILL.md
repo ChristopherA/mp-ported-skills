@@ -27,6 +27,8 @@ sh "${CLAUDE_SKILL_DIR}/scripts/pane-launch.sh" --dir /path/to/project --permiss
 
 It opens a pane, changes into `--dir` and starts plain `claude` there, and prints the pane's coordinates as `pane-open.sh` does. `--dir` is required; a missing one, or one that is not a directory, exits 1 before any pane opens. `--permission-mode`, `--message` (the session's first message) and `--direction` are optional. The values are single-quoted in the pane's shell, so a message holding `!`, `$`, backticks or either quote reaches `claude` as written. It writes no state file, and it does not wait for the session to come up: read the pane to see that it has.
 
+- **A folder Claude Code has not trusted stops at the trust prompt.** `claude` opens on "Is this a project you created or one you trust?" with `No, exit` selected, and `--message` waits behind it, so the session looks started but idle. After a launch, `pane-wait.sh --state waiting,asking`, then `pane-classify.sh --detail`: on `trust`, tell the user which folder the pane is asking about and leave the prompt for them. Never answer it: trusting a folder changes the user's config, and a Return sent to the pane confirms `No, exit`.
+
 ## Send
 
 ```sh
@@ -83,6 +85,8 @@ sh "${CLAUDE_SKILL_DIR}/scripts/pane-wait.sh" --session S --window W --tab T --s
 | `gone` | the pane no longer exists |
 
 It reads the bottom of the screen, never the model name, so it works on any model. `--file PATH` (`-` for stdin) classifies a saved `pane-read.sh` capture instead of a live pane.
+
+`--detail` adds a second line when the state is `asking`, naming the open prompt: `trust` (the folder-trust prompt), `question` (a question the session asked), `permission` (a tool permission prompt) or `other`. Every other state prints alone, so the first line is always the state.
 
 - **Streaming has no spinner.** While a reply streams, the screen has the same shape as a finished one. The difference is how the turn ended: a done line (`✻ Worked for 42s · done`), an `Interrupted` or an `API Error` under the message. A user message with none of these below it is still `working`. A slash command that starts no turn (`/model`) reads as `waiting`.
 
