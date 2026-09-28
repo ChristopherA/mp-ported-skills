@@ -19,6 +19,14 @@ It prints the new pane's coordinates, `SESSION_ID WINDOW_ID TAB_NUM`, for exampl
 - `--command "cmd"` types a first command into the new pane. `--profile "Name"` uses an iTerm2 profile.
 - It splits the pane on this session's TTY, so it lands in the right window whichever one is in front.
 
+## Launch a Claude Code session
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/pane-launch.sh" --dir /path/to/project --permission-mode acceptEdits --message "Run the tests" </dev/null
+```
+
+It opens a pane, changes into `--dir` and starts plain `claude` there, and prints the pane's coordinates as `pane-open.sh` does. `--dir` is required; a missing one, or one that is not a directory, exits 1 before any pane opens. `--permission-mode`, `--message` (the session's first message) and `--direction` are optional. The values are single-quoted in the pane's shell, so a message holding `!`, `$`, backticks or either quote reaches `claude` as written. It writes no state file, and it does not wait for the session to come up: read the pane to see that it has.
+
 ## Send
 
 ```sh

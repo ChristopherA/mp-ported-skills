@@ -304,6 +304,92 @@ check "open, flag with no value: named" 'Error: --direction needs a value' "$(er
 reset; run pane-open.sh --help
 check "open --help: exit 0" 0 "$rc"
 
+# --- launch ---
+# typed: the line pane-launch.sh typed into the new pane, unescaped from the
+# AppleScript string it was sent in.
+typed() {
+    sent | sed -n 's/^tell application "iTerm2" to tell session id "NEW-1" of tab 2 of window id 7 to write text "\(.*\)"$/\1/p' |
+        sed 's/\\"/"/g; s/\\\\/\\/g'
+}
+# in_pane: run the typed line as the pane's interactive zsh would, history
+# expansion included, with a fake claude that records its directory and each
+# argument on its own line.
+in_pane() {
+    command rm -f "$work/claude.args"
+    typed > "$work/line"
+    PATH="$work/pane-bin:$PATH" zsh -f -i < "$work/line" >/dev/null 2>&1
+    command cat "$work/claude.args" 2>/dev/null
+}
+mkdir -p "$work/pane-bin" "$work/proj dir"
+command cat > "$work/pane-bin/claude" <<EOF
+#!/bin/sh
+pwd > "$work/claude.args"
+for a in "\$@"; do printf '[%s]\n' "\$a" >> "$work/claude.args"; done
+EOF
+chmod +x "$work/pane-bin/claude"
+proj="$work/proj dir"
+
+reset; answer 'NEW-1 7 2'
+run pane-launch.sh --dir "$proj"
+check "launch: prints the new pane's coordinates only" 'NEW-1 7 2' "$(out)"
+check "launch: exit 0" 0 "$rc"
+check "launch: splits vertically by default" 1 "$(sent | grep -c 'split vertically with default profile')"
+check "launch: starts plain claude in the directory" "$proj" "$(in_pane)"
+
+reset; answer 'NEW-1 7 2'
+run pane-launch.sh --dir "$proj" --direction horizontal --permission-mode acceptEdits
+check "launch --direction horizontal: split horizontally" 1 "$(sent | grep -c 'split horizontally with default profile')"
+check "launch --permission-mode: passed to claude" "$proj
+[--permission-mode]
+[acceptEdits]" "$(in_pane)"
+
+msg='Say "hi" & it'"'"'s $HOME, `date`, !! and !x done'
+reset; answer 'NEW-1 7 2'
+run pane-launch.sh --dir "$proj" --message "$msg"
+check "launch --message: reaches claude intact" "$proj
+[$msg]" "$(in_pane)"
+
+reset; answer 'NEW-1 7 2'
+run pane-launch.sh --message "$msg" --permission-mode plan --dir "$proj"
+check "launch, every option: mode then message" "$proj
+[--permission-mode]
+[plan]
+[$msg]" "$(in_pane)"
+
+reset; run pane-launch.sh
+check "launch, no --dir: exit 1" 1 "$rc"
+check "launch, no --dir: named" 'Error: --dir is required' "$(err)"
+check "launch, no --dir: no pane opens" '' "$(sent)"
+
+reset; run pane-launch.sh --dir "$work/missing"
+check "launch, missing --dir: exit 1" 1 "$rc"
+check "launch, missing --dir: named" "Error: not a directory: $work/missing" "$(err)"
+check "launch, missing --dir: no pane opens" '' "$(sent)"
+
+reset; run pane-launch.sh --dir "$work/answer"
+check "launch, --dir is a file: exit 1" 1 "$rc"
+check "launch, --dir is a file: no pane opens" '' "$(sent)"
+
+reset; run pane-launch.sh --dir "$proj" --direction diagonal
+check "launch, bad direction: exit 1" 1 "$rc"
+check "launch, bad direction: no pane opens" '' "$(sent)"
+
+reset; run pane-launch.sh --dir "$proj" --worktree x
+check "launch, unknown option: exit 1" 1 "$rc"
+check "launch, unknown option: no pane opens" '' "$(sent)"
+
+reset; run pane-launch.sh --dir
+check "launch, flag with no value: named" 'Error: --dir needs a value' "$(err)"
+reset; run pane-launch.sh --help
+check "launch --help: exit 0" 0 "$rc"
+check "launch --help: usage" "Usage: pane-launch.sh" "$(out | head -1 | cut -d' ' -f1-2)"
+
+# No state file: a launch leaves the working and temp directories as they were.
+before=$(ls -A "$work" "${TMPDIR:-/tmp}" 2>/dev/null)
+reset; answer 'NEW-1 7 2'
+run pane-launch.sh --dir "$proj" --message hi
+check "launch: writes no file outside the pane" "$before" "$(ls -A "$work" "${TMPDIR:-/tmp}" 2>/dev/null)"
+
 # --- the skill's content ---
 for f in "$scripts"/*.sh; do
     sh -n "$f" 2>/dev/null; rc=$?
