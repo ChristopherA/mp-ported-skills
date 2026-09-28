@@ -314,7 +314,7 @@ rc=$?
 if [ $rc = 0 ]; then
     cat "$tmp/out"
     if [ $hook = 1 ]; then
-        echo "On your first reply, whatever the user wrote, recommend one next step from this state in the resuming skill's shape (the step, its reason, and the runner-up line as the runner-up) and ask it as one AskUserQuestion, the step first and marked (Recommended), then answer anything else they asked. Do not ask what they are working on. Commands marked user-invoked are installed but hidden from your skill list: tell the user to type them, and never call them missing or swap in a model-invocable skill."
+        echo "On your first reply, whatever the user wrote, recommend one next step from this state in the resuming skill's shape (the step, its reason, and the runner-up line as the runner-up) and ask it as one AskUserQuestion, the step first and marked (Recommended), then answer anything else they asked. Do not ask what they are working on. Commands marked user-invoked are installed but hidden from your skill list: tell the user to type them, giving each full command on its own in a fenced code block so it can be copied, and never call them missing or swap in a model-invocable skill."
     fi
 elif [ $hook = 0 ]; then
     cat "$tmp/out"
