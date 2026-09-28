@@ -22,7 +22,7 @@ This covers wrappers only. A skill that just names a Matt command for the user t
 
 ## Releasing
 
-A change under `plugins/mp-ported-skills/` bumps `version` in its `.claude-plugin/plugin.json`, in its own commit titled `Bump plugin to X.Y.Z`, after the change's commit: the plugin cache is keyed by version, so installs fetch the change only under a new one. Tests, docs and this file ship outside the plugin and take no bump.
+A change under `plugins/mp-ported-skills/` bumps `version` in its `.claude-plugin/plugin.json`, in its own commit titled `Bump plugin to X.Y.Z`, after the change's commit: the plugin cache is keyed by version, so installs fetch the change only under a new one. Tests, docs and this file ship outside the plugin and take no bump. A new skill bumps the minor number; a script, fix or doc change inside an existing skill bumps the patch number (`iterm-pane` came in as 0.7.0, its launcher as 0.7.2).
 
 After a push that bumps the version, ask with AskUserQuestion how the maintainer wants to update, offering the two routes `capturing` gives a terminal job: run `claude plugin marketplace update mp-ported-skills && claude plugin update mp-ported-skills@mp-ported-skills` through Bash, or copy it with a leading `! ` to this machine's clipboard. Running it comes first: the maintainer may be on a remote client, where `!` commands and `/plugin` do not run and the clipboard is out of reach. Write the command in both descriptions. Then the maintainer types `/reload-plugins`, which works from a remote client too, to load the new version in this session.
 
