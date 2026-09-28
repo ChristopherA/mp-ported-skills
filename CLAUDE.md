@@ -42,6 +42,8 @@ A pattern `pane-classify.sh` matches comes from a live capture in `tests/fixture
 
 A live test that needs a particular model starts the session with `claude --model <id>`. Typing `/model` in a running session also saves the model to the profile's `settings.json` as the default, so it changes every later session on that profile.
 
+A live test that runs a session unattended, with `--permission-mode auto` (a `claude --bg` session, or a pane nobody answers), runs it on a model that supports auto mode. Haiku 4.5 does not: the session prints `auto mode unavailable for this model`, falls back to manual mode, and blocks at a permission prompt on its first Bash command.
+
 ## jq in scripts
 
 Build a JSON value from a shell string with `jq -n --arg`, as `fixed_nums` in `resuming`'s `state.sh` does. `jq -R` on empty stdin prints nothing, so a later `--argjson` of that value fails, and a script that goes on after the failure reports empty results as if they were real.
