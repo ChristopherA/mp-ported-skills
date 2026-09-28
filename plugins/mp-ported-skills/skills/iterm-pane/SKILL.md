@@ -53,13 +53,36 @@ When polling for a command to finish, the pane shows the command itself as well 
 - **A string built at runtime matches too.** `bash -c 'work; echo "=== done ==="'` shows `=== done ===` on the prompt line even though no echo has run yet. Poll a result instead: a file the work writes, its size, or a value only success produces, such as a marker generated fresh for each poll.
 - **`tee` hides an interactive prompt.** In `script | tee out.log`, `tee` buffers the output, so a later `Password:` or `[y/N]` never reaches the pane, and the pane looks hung. Write to a file instead (`script > out.log 2>&1`), or run `sudo -v` first.
 
+## Session state
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/pane-classify.sh" --session S --window W --tab T </dev/null
+sh "${CLAUDE_SKILL_DIR}/scripts/pane-wait.sh" --session S --window W --tab T --state waiting,asking --timeout 600 </dev/null
+```
+
+`pane-classify.sh` prints exactly one state:
+
+| State | The pane shows |
+|---|---|
+| `working` | Claude Code is thinking (a spinner above its prompt) or streaming a reply |
+| `waiting` | Claude Code is idle at its input prompt, including with a draft typed but not sent |
+| `asking` | a question, a tool permission prompt, or the folder-trust prompt |
+| `shell` | no live Claude Code prompt at the bottom: a shell, or another program |
+| `gone` | the pane no longer exists |
+
+It reads the bottom of the screen, never the model name, so it works on any model. `--file PATH` (`-` for stdin) classifies a saved `pane-read.sh` capture instead of a live pane.
+
+- **Streaming has no spinner.** While a reply streams, the screen has the same shape as a finished one. The difference is the end-of-turn line (`✻ Worked for 42s · done`): a user message with none below it is still `working`. A slash command that starts no turn (`/model`) reads as `waiting`.
+
+`pane-wait.sh` polls the state, not the pane's text, so an echoed command cannot satisfy it. It prints the state reached and exits 0, or on timeout prints the last state seen and exits 124. `--state` takes one state or several separated by commas; `--timeout` defaults to 300 seconds and `--interval` to 2.
+
 ## Close
 
 ```sh
-sh "${CLAUDE_SKILL_DIR}/scripts/pane-close.sh" --session S --window W --tab T --force </dev/null
+sh "${CLAUDE_SKILL_DIR}/scripts/pane-close.sh" --session S --window W --tab T </dev/null
 ```
 
-Without `--force`, `pane-close.sh` refuses (exit 2), because it cannot yet tell whether a session in the pane is busy. Read the pane, and pass `--force` only when nothing there should keep running. Close a pane when its work is done: a pane left open is a stale session, and for SSH a stale connection.
+Without `--force`, `pane-close.sh` classifies the pane first. It closes a pane at `shell`, prints `gone: the pane is already closed` and exits 0 for `gone`, and refuses (exit 2, naming the state) a pane that is `working`, `waiting` or `asking`. To close a Claude Code session, end it first (send `/exit`, then wait for `shell`), or pass `--force` when nothing there should keep running. Close a pane when its work is done: a pane left open is a stale session, and for SSH a stale connection.
 
 ## Find a pane again
 

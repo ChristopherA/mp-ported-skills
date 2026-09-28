@@ -60,15 +60,19 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 check "send and read: the command's output appears" yes "$seen"
 
-sh "$scripts/pane-close.sh" $pane </dev/null 2>/dev/null
-check "close without --force: refused" 2 "$?"
-sh "$scripts/pane-close.sh" $pane --force </dev/null
-check "close --force: exit 0" 0 "$?"
+check "classify: a pane at a shell" shell "$(sh "$scripts/pane-classify.sh" $pane </dev/null)"
+check "wait: a shell pane is already at shell" shell \
+    "$(sh "$scripts/pane-wait.sh" $pane --state shell --timeout 0 </dev/null)"
+sh "$scripts/pane-close.sh" $pane </dev/null
+check "close without --force, shell: exit 0" 0 "$?"
 
 sleep 0.5
 err=$(sh "$scripts/pane-read.sh" $pane </dev/null 2>&1 >/dev/null)
 check "read after close: pane reported gone" \
     "pane-read.sh: no pane with session $1 in tab $3 of window $2 (closed, or wrong coordinates)" "$err"
+check "classify after close: gone" gone "$(sh "$scripts/pane-classify.sh" $pane </dev/null)"
+check "close after close: reported gone" 'gone: the pane is already closed' \
+    "$(sh "$scripts/pane-close.sh" $pane </dev/null)"
 
 echo "iterm-pane live: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

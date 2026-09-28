@@ -70,7 +70,7 @@ sent() { command cat "$FAKE_OSA_LOG"; }
 pane='--session ABC-123 --window 7 --tab 2'
 
 # --- arguments, for every script that targets one pane ---
-for s in pane-read.sh pane-send.sh pane-close.sh; do
+for s in pane-read.sh pane-send.sh pane-close.sh pane-classify.sh pane-wait.sh; do
     reset; run "$s" --help
     check "$s --help: exit 0" 0 "$rc"
     check "$s --help: usage" "Usage: $s" "$(out | head -1 | cut -d' ' -f1-2)"
@@ -171,15 +171,97 @@ run pane-send.sh $pane --text hi
 check "send, pane gone: says so" \
     'pane-send.sh: no pane with session ABC-123 in tab 2 of window 7 (closed, or wrong coordinates)' "$(err)"
 
+# --- classify ---
+# Every live capture classifies as the state its file name says.
+fixtures="$root/tests/fixtures/pane-states"
+for f in "$fixtures"/*.txt; do
+    name=${f##*/}
+    reset; run pane-classify.sh --file "$f"
+    state=${name%.txt}; state=${state%%-*}
+    check "classify $name" "$state" "$(out)"
+done
+for f in "$fixtures"/*.txt; do
+    sh "$scripts/pane-classify.sh" --file - < "$f" > "$work/out" 2>/dev/null
+    name=${f##*/}
+    state=${name%.txt}; state=${state%%-*}
+    check "classify $name from stdin" "$state" "$(out)"
+done
+# The captures come from Opus and Fable; none of the rules reads the model.
+check "classify: no rule names a model" '' \
+    "$(grep -nE 'Opus|Sonnet|Haiku|Fable' "$scripts/pane-classify.sh")"
+
+# A shell whose scrollback still holds a finished session and its model tag.
+{ command cat "$fixtures/waiting-after-reply-opus.txt"; printf '%s\n' 'user@workstation project % claude --resume' 'user@workstation project %'; } > "$work/old-session.txt"
+reset; run pane-classify.sh --file "$work/old-session.txt"
+check "classify: shell below an old session's [Opus tag" shell "$(out)"
+
+# The live path reads the pane through pane-read.sh.
+reset; FAKE_OSA_OUT="$fixtures/asking-trust.txt"; export FAKE_OSA_OUT
+run pane-classify.sh $pane
+check "classify, live pane: read through pane-read" asking "$(out)"
+check "classify, live pane: asks the named pane for its contents" \
+    'tell application "iTerm2" to tell session id "ABC-123" of tab 2 of window id 7 to get contents' "$(sent)"
+
+reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
+run pane-classify.sh $pane
+check "classify, pane closed: gone" gone "$(out)"
+check "classify, pane closed: exit 0" 0 "$rc"
+
+reset; run pane-classify.sh --file "$work/missing.txt"
+check "classify, missing file: exit 1" 1 "$rc"
+reset; run pane-classify.sh --file - $pane
+check "classify, --file and coordinates: refused" 'Error: give --file or the pane coordinates, not both' "$(err)"
+
+# --- wait ---
+reset; FAKE_OSA_OUT="$fixtures/waiting-opus.txt"; export FAKE_OSA_OUT
+run pane-wait.sh $pane --state asking,waiting --timeout 5
+check "wait, state reached: prints it" waiting "$(out)"
+check "wait, state reached: exit 0" 0 "$rc"
+
+reset; FAKE_OSA_OUT="$fixtures/working-streaming-opus.txt"; export FAKE_OSA_OUT
+run pane-wait.sh $pane --state waiting --timeout 1 --interval 1
+check "wait, timeout: exit 124" 124 "$rc"
+check "wait, timeout: prints the last state seen" working "$(out)"
+check "wait, timeout: says so" \
+    'pane-wait.sh: timed out after 1s waiting for waiting; last state: working' "$(err)"
+
+reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
+run pane-wait.sh $pane --state gone --timeout 0
+check "wait for gone: reached when the pane closes" gone "$(out)"
+
+reset; run pane-wait.sh $pane
+check "wait, no --state: named" 'Error: --state is required' "$(err)"
+reset; run pane-wait.sh $pane --state idle
+check "wait, unknown state: named" 'Error: unknown state: idle (use working, waiting, asking, shell, gone)' "$(err)"
+check "wait, bad arguments: osascript never runs" '' "$(sent)"
+reset; run pane-wait.sh $pane --state waiting --timeout soon
+check "wait, bad --timeout: named" 'Error: invalid --timeout: soon' "$(err)"
+reset; run pane-wait.sh $pane --state waiting --interval 0
+check "wait, zero --interval: refused" 'Error: invalid --interval: 0' "$(err)"
+
 # --- close ---
-reset; run pane-close.sh $pane
-check "close without --force: exit 2" 2 "$rc"
-check "close without --force: refused, and why" \
-    'REFUSED: pane-close.sh cannot yet tell whether a session in the pane is busy. Check the pane, then use --force.' "$(err)"
-check "close without --force: pane untouched" '' "$(sent)"
+tell='tell application "iTerm2" to tell session id "ABC-123" of tab 2 of window id 7 to'
+for st in working waiting asking; do
+    reset; FAKE_OSA_OUT=$(ls "$fixtures/$st"-*.txt | head -1); export FAKE_OSA_OUT
+    run pane-close.sh $pane
+    check "close without --force, $st: exit 2" 2 "$rc"
+    check "close without --force, $st: refused, and why" \
+        "REFUSED: a Claude Code session in the pane is $st. End it, or use --force." "$(err)"
+    check "close without --force, $st: pane untouched" 0 "$(sent | grep -c 'to close')"
+done
+
+reset; FAKE_OSA_OUT="$fixtures/shell-after-exit-opus.txt"; export FAKE_OSA_OUT
+run pane-close.sh $pane
+check "close without --force, shell: closes the pane" 1 "$(sent | grep -cx "$tell close")"
+check "close without --force, shell: exit 0" 0 "$rc"
+
+reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
+run pane-close.sh $pane
+check "close without --force, gone: exit 0" 0 "$rc"
+check "close without --force, gone: says so" 'gone: the pane is already closed' "$(out)"
 
 reset; run pane-close.sh $pane --force
-check "close --force: closes the pane" "$tell close" "$(sent)"
+check "close --force: closes the pane without reading it" "$tell close" "$(sent)"
 check "close --force: exit 0" 0 "$rc"
 
 reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
