@@ -7,6 +7,8 @@ A **phase boundary** is where the user picks Continue, `/clear`, `/handoff`, a s
 
 **This repo** is the working directory, and its tracker is the one its `docs/agents/issue-tracker.md` names. When that file is absent, this repo has no tracker: say so once and name `/setup-matt-pocock-skills` (you type it; user-invoked). Unfinished work with no ticket then has no home and stays unfiled. A ticket this session filed or touched in another repo belongs to that repo: moves 1 and 4 act on it there, per that repo's `docs/agents/issue-tracker.md`.
 
+**User-invoked commands**: `/setup-matt-pocock-skills`, `/to-questionnaire`, `/handoff` and `/setup-mp-ported-skills`, wherever this skill names them, are left out of your skill list and are for the user to type. Tell the user to type the one you name, and give the full command on its own in a fenced code block, so it can be copied from a remote client.
+
 ## 1. Sweep
 
 Walk the whole session for what was decided, learned or promised and is not yet durable. Route each item to its home now, as you find it:
@@ -15,7 +17,7 @@ Walk the whole session for what was decided, learned or promised and is not yet 
 - **Unfinished work**: a ticket, published to this repo's tracker per `docs/agents/issue-tracker.md`, or none when this repo has no tracker. This session originated it, so it lands ready: `ready-for-agent`, or `ready-for-human` when it needs human judgment or access. `needs-triage` is the on-ramp for work arriving from others.
 - **A `ready-for-human` ticket this session worked on and left open**: label it `in-motion` and remove that label from every other open ticket, so `resuming` names it first and git's silence cannot hide it. Create the label per `docs/agents/issue-tracker.md` when the tracker lacks it. When the session finished or set aside the ticket that holds the label, remove it.
 - **Open decision**: `clarifying`.
-- **Something only another person knows**: name it and suggest the user run `/to-questionnaire`.
+- **Something only another person knows**: name it and suggest the user run `/to-questionnaire` (you type it; user-invoked).
 - **Already durable** (a commit, a ticket, an ADR, a research file, a `prototype/` branch): point at it and move on.
 
 Done when every item has a home or a named reason it has none. If nothing needs capturing, say so plainly.

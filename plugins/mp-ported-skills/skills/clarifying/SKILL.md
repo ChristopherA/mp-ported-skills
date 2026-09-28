@@ -39,7 +39,7 @@ Done when the frontier is empty: every item is settled, blocked on something nam
 
 ## 4. Route elsewhere
 
-Name the elsewhere items and who holds each answer, and suggest the user run `/to-questionnaire` with them. It is user-invoked, so the handoff is theirs to make.
+Name the elsewhere items and who holds each answer, and suggest the user run `/to-questionnaire` with them. It is user-invoked, so the handoff is theirs to make. Tell the user to type it, and give the full command on its own in a fenced code block, so it can be copied from a remote client.
 
 ## 5. Summarize and stop
 
