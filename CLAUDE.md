@@ -34,6 +34,12 @@ A check that two files match tests `cmp -s`'s exit status, as `same` in `tests/s
 
 Each test sets or unsets every environment variable the scripts it runs read, so it gives the same result in any session. The maintainer's sessions set `MP_SESSION_TITLE=1`, which changes what the status line prints, and one test failed only there.
 
+A live test that starts `claude` in a pane runs it in a folder inside this repo's parent. The maintainer's shell picks the Claude Code config from a marker file in a parent folder, so a scratch folder elsewhere starts the session under the default config and at the folder-trust prompt, and the test observes a setup no real launch has.
+
+## jq in scripts
+
+Build a JSON value from a shell string with `jq -n --arg`, as `fixed_nums` in `resuming`'s `state.sh` does. `jq -R` on empty stdin prints nothing, so a later `--argjson` of that value fails, and a script that goes on after the failure reports empty results as if they were real.
+
 ## Checking what a hook did
 
 The terminal and a screenshot show a session's title and state, not what set them. To learn whether a `SessionStart` hook ran and what it printed, read the session's transcript, `$CLAUDE_CONFIG_DIR/projects/<cwd with / as ->/<session id>.jsonl`. Each hook run is an `attachment` record carrying `hookName` (`SessionStart:<source>`), `command` and `stdout`, and the title in force is the last `custom-title` record. A forked or branched session's transcript opens with copies of its parent's records, timestamps included, so a hook run belongs to the new session only when its timestamp is after the fork.
