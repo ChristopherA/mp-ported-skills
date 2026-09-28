@@ -6,7 +6,11 @@ set -eu
 #
 # Usage:
 #   pane-launch.sh --dir PATH [--permission-mode MODE] [--message TEXT]
-#                  [--direction vertical|horizontal]
+#                  [--direction vertical|horizontal] [--config-dir PATH]
+#
+# --config-dir starts claude with CLAUDE_CONFIG_DIR set to PATH. The pane's
+# shell is a fresh login shell and does not inherit the caller's environment,
+# so without it the session runs under whatever config that shell picks.
 #
 # --message is the session's first message. The line is typed into the
 # pane's interactive shell, so every value is single-quoted there: history
@@ -19,6 +23,7 @@ DIR=""
 PERMISSION_MODE=""
 MESSAGE=""
 DIRECTION="vertical"
+CONFIG_DIR=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -26,8 +31,9 @@ while [ $# -gt 0 ]; do
         --permission-mode) pane_need_value "$@"; PERMISSION_MODE="$2"; shift 2 ;;
         --message)         pane_need_value "$@"; MESSAGE="$2"; shift 2 ;;
         --direction)       pane_need_value "$@"; DIRECTION="$2"; shift 2 ;;
+        --config-dir)      pane_need_value "$@"; CONFIG_DIR="$2"; shift 2 ;;
         --help)
-            printf "Usage: pane-launch.sh --dir PATH [--permission-mode MODE] [--message TEXT] [--direction vertical|horizontal]\n"
+            printf "Usage: pane-launch.sh --dir PATH [--permission-mode MODE] [--message TEXT] [--direction vertical|horizontal] [--config-dir PATH]\n"
             printf "Opens an iTerm2 split pane and starts claude in PATH. Outputs: SESSION_ID WINDOW_ID TAB_NUM\n"
             exit 0 ;;
         *) printf "Unknown option: %s\n" "$1" >&2; exit 1 ;;
@@ -46,6 +52,13 @@ fi
 # would resolve against the wrong one. CDPATH is cleared so cd cannot pick
 # another directory of the same name.
 DIR=$(CDPATH= cd -- "$DIR" && pwd)
+if [ -n "$CONFIG_DIR" ]; then
+    if [ ! -d "$CONFIG_DIR" ]; then
+        printf "Error: not a directory: %s\n" "$CONFIG_DIR" >&2
+        exit 1
+    fi
+    CONFIG_DIR=$(CDPATH= cd -- "$CONFIG_DIR" && pwd)
+fi
 
 # A shell string literal: single quotes, each ' inside closed, escaped and
 # reopened.
@@ -53,7 +66,9 @@ sh_quote() {
     printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
-LINE="cd $(sh_quote "$DIR") && claude"
+CLAUDE="claude"
+[ -z "$CONFIG_DIR" ] || CLAUDE="CLAUDE_CONFIG_DIR=$(sh_quote "$CONFIG_DIR") claude"
+LINE="cd $(sh_quote "$DIR") && $CLAUDE"
 [ -z "$PERMISSION_MODE" ] || LINE="$LINE --permission-mode $(sh_quote "$PERMISSION_MODE")"
 # -- keeps a message that starts with - from reading as a flag.
 [ -z "$MESSAGE" ] || LINE="$LINE -- $(sh_quote "$MESSAGE")"

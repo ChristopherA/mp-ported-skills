@@ -544,17 +544,22 @@ typed() {
 }
 # in_pane: run the typed line as the pane's interactive zsh would, history
 # expansion included, with a fake claude that records its directory and each
-# argument on its own line.
+# argument on its own line, and its CLAUDE_CONFIG_DIR in claude.config. A
+# pane's login shell does not inherit the caller's environment, so this shell
+# does not inherit CLAUDE_CONFIG_DIR either.
 in_pane() {
-    command rm -f "$work/claude.args"
+    command rm -f "$work/claude.args" "$work/claude.config"
     typed > "$work/line"
-    PATH="$work/pane-bin:$PATH" zsh -f -i < "$work/line" >/dev/null 2>&1
+    env -u CLAUDE_CONFIG_DIR PATH="$work/pane-bin:$PATH" zsh -f -i < "$work/line" >/dev/null 2>&1
     command cat "$work/claude.args" 2>/dev/null
 }
+# pane_config: the CLAUDE_CONFIG_DIR the last in_pane's claude ran under.
+pane_config() { command cat "$work/claude.config" 2>/dev/null; }
 mkdir -p "$work/pane-bin" "$work/proj dir"
 command cat > "$work/pane-bin/claude" <<EOF
 #!/bin/sh
 pwd > "$work/claude.args"
+printf '%s' "\${CLAUDE_CONFIG_DIR-unset}" > "$work/claude.config"
 for a in "\$@"; do printf '[%s]\n' "\$a" >> "$work/claude.args"; done
 EOF
 chmod +x "$work/pane-bin/claude"
@@ -566,6 +571,38 @@ check "launch: prints the new pane's coordinates only" 'NEW-1 7 2' "$(out)"
 check "launch: exit 0" 0 "$rc"
 check "launch: splits vertically by default" 1 "$(sent | grep -c 'split vertically with default profile')"
 check "launch: starts plain claude in the directory" "$proj" "$(in_pane)"
+check "launch: no config dir set in the pane" unset "$(pane_config)"
+
+# --config-dir reaches claude as CLAUDE_CONFIG_DIR, made absolute, and adds no
+# argument. The caller's own CLAUDE_CONFIG_DIR is not passed on unasked.
+# launch_as: pane-launch.sh from $work with CLAUDE_CONFIG_DIR set to $1.
+launch_as() {
+    c=$1; shift
+    (cd "$work" && CLAUDE_CONFIG_DIR=$c && export CLAUDE_CONFIG_DIR &&
+        sh "$scripts/pane-launch.sh" "$@" </dev/null >/dev/null 2>&1)
+}
+mkdir -p "$work/it's config"
+reset; answer 'NEW-1 7 2'
+run pane-launch.sh --dir "$proj" --config-dir "$work/it's config" --message hi
+check "launch --config-dir: claude's arguments unchanged" "$proj
+[--]
+[hi]" "$(in_pane)"
+check "launch --config-dir: set in the pane" "$work/it's config" "$(pane_config)"
+
+reset; answer 'NEW-1 7 2'
+launch_as "$work/caller" --dir "$proj" --config-dir "it's config"
+in_pane >/dev/null
+check "launch, relative --config-dir: made absolute, over the caller's" "$work/it's config" "$(pane_config)"
+
+reset; answer 'NEW-1 7 2'
+launch_as "$work/caller" --dir "$proj"
+in_pane >/dev/null
+check "launch, caller has a config dir: not passed on" unset "$(pane_config)"
+
+reset; run pane-launch.sh --dir "$proj" --config-dir "$work/missing"
+check "launch, missing --config-dir: exit 1" 1 "$rc"
+check "launch, missing --config-dir: named" "Error: not a directory: $work/missing" "$(err)"
+check "launch, missing --config-dir: no pane opens" '' "$(sent)"
 
 reset; answer 'NEW-1 7 2'
 run pane-launch.sh --dir "$proj" --direction horizontal --permission-mode acceptEdits
