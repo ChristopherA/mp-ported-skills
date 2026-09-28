@@ -71,7 +71,7 @@ sent() { command cat "$FAKE_OSA_LOG"; }
 pane='--session ABC-123 --window 7 --tab 2'
 
 # --- arguments, for every script that targets one pane ---
-for s in pane-read.sh pane-send.sh pane-close.sh pane-classify.sh pane-wait.sh; do
+for s in pane-read.sh pane-send.sh pane-slash.sh pane-close.sh pane-classify.sh pane-wait.sh; do
     reset; run "$s" --help
     check "$s --help: exit 0" 0 "$rc"
     check "$s --help: usage" "Usage: $s" "$(out | head -1 | cut -d' ' -f1-2)"
@@ -170,6 +170,64 @@ check "send, nothing to send: says so" \
 reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
 run pane-send.sh $pane --text hi
 check "send, pane gone: says so" \
+    'pane-send.sh: no pane with session ABC-123 in tab 2 of window 7 (closed, or wrong coordinates)' "$(err)"
+
+# --- slash ---
+# pane-slash.sh runs beside a stub pane-send.sh that logs each call's
+# arguments, one call per line, so these tests see what it asks to send.
+sl="$work/slash"; mkdir -p "$sl"
+command cp "$scripts/pane-slash.sh" "$scripts/pane-common.sh" "$sl/"
+command cat > "$sl/pane-send.sh" <<'EOF'
+#!/bin/sh
+printf '%s' send >> "$FAKE_OSA_LOG"
+for a in "$@"; do printf ' [%s]' "$a" >> "$FAKE_OSA_LOG"; done
+printf '\n' >> "$FAKE_OSA_LOG"
+exit "${FAKE_SEND_RC:-0}"
+EOF
+slash() { sh "$sl/pane-slash.sh" "$@" </dev/null > "$work/out" 2> "$work/err"; rc=$?; }
+coords='[--session] [ABC-123] [--window] [7] [--tab] [2]'
+
+reset; slash $pane compact
+check "slash, bare name: the text, then Return as a separate send" \
+    "send $coords [--text] [/compact]
+send $coords [--key] [return]" "$(sent)"
+check "slash: exit 0" 0 "$rc"
+
+reset; slash $pane /compact
+check "slash, leading /: not doubled" \
+    "send $coords [--text] [/compact]
+send $coords [--key] [return]" "$(sent)"
+
+reset; slash $pane rename 'a "b"' "it's" '$HOME !! `id`' 'c\d'
+check "slash, arguments: joined by spaces, each reaching the sender unchanged" \
+    "send $coords [--text] [/rename a \"b\" it's \$HOME !! \`id\` c\\d]
+send $coords [--key] [return]" "$(sent)"
+
+reset; slash $pane -- /compact --keep
+check "slash, --: what follows is the command, flags included" \
+    "send $coords [--text] [/compact --keep]
+send $coords [--key] [return]" "$(sent)"
+
+for name in '' / ' '; do
+    reset; slash $pane "$name"
+    check "slash, no command name ('$name'): exit 1" 1 "$rc"
+    check "slash, no command name ('$name'): says so" 'Error: a command name is required' "$(err)"
+    check "slash, no command name ('$name'): nothing sent" '' "$(sent)"
+done
+reset; slash $pane
+check "slash, no command at all: exit 1" 1 "$rc"
+check "slash, no command at all: nothing sent" '' "$(sent)"
+
+reset; FAKE_SEND_RC=1; export FAKE_SEND_RC
+slash $pane /exit
+check "slash, text not sent: exit 1" 1 "$rc"
+check "slash, text not sent: no Return after it" 1 "$(sent | grep -c .)"
+unset FAKE_SEND_RC
+
+# Through the real sender: the pane's gone message passes through.
+reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
+run pane-slash.sh $pane /exit
+check "slash, pane gone: says so" \
     'pane-send.sh: no pane with session ABC-123 in tab 2 of window 7 (closed, or wrong coordinates)' "$(err)"
 
 # --- classify ---

@@ -39,6 +39,18 @@ sh "${CLAUDE_SKILL_DIR}/scripts/pane-send.sh" --session S --window W --tab T --e
 - **Claude Code can hold pasted text without submitting it.** After sending text to a Claude Code session, send `--key return` as well, or the message sits at its prompt.
 - **Never send a heredoc.** Text is typed into the pane's shell line by line, so each line is interpreted as it arrives, and zsh's `!` history expansion fires before quoting takes effect: a body line holding `<!DOCTYPE` or any unquoted `!` breaks the heredoc. Write the content to a file with the Write tool, then send one line that uses the file.
 
+## Slash command
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/pane-slash.sh" --session S --window W --tab T compact keep the plan </dev/null
+```
+
+It types `/compact keep the plan` through `pane-send.sh`, then sends Return as a separate key. The leading `/` is optional and never doubled. The arguments are joined with spaces and reach the pane as written, `!`, `$`, backticks and quotes included. Put `--` before a command whose arguments start with `-`. A missing command name exits 1 and sends nothing.
+
+- **It types after anything already at the prompt.** A draft left in the input box becomes part of the command, so check that the pane is `waiting` with an empty prompt first.
+- **One Return may not submit.** Read the pane afterwards. If the text is still in the input box, send `--key return` again. Slash commands have submitted on the first Return. Prose messages sent the same way have needed a second one.
+- **`/model X` saves X as the default model** in the profile's `settings.json`, which changes every later session on that profile, not just this one.
+
 ## Read
 
 ```sh
@@ -82,7 +94,7 @@ It reads the bottom of the screen, never the model name, so it works on any mode
 sh "${CLAUDE_SKILL_DIR}/scripts/pane-close.sh" --session S --window W --tab T </dev/null
 ```
 
-Without `--force`, `pane-close.sh` classifies the pane first. It closes a pane at `shell`, so a pane running a build or waiting at `Password:` stays open, prints `gone: the pane is already closed` and exits 0 for `gone`, and refuses (exit 2, naming the state) a pane that is `working`, `waiting` or `asking`. To close a Claude Code session, end it first (send `/exit`, then wait for `shell`), or pass `--force` when nothing there should keep running. Close a pane when its work is done: a pane left open is a stale session, and for SSH a stale connection.
+Without `--force`, `pane-close.sh` classifies the pane first. It closes a pane at `shell`, so a pane running a build or waiting at `Password:` stays open, prints `gone: the pane is already closed` and exits 0 for `gone`, and refuses (exit 2, naming the state) a pane that is `working`, `waiting` or `asking`. To close a Claude Code session, end it first (`pane-slash.sh ... exit`, then wait for `shell`), or pass `--force` when nothing there should keep running. Close a pane when its work is done: a pane left open is a stale session, and for SSH a stale connection.
 
 ## Find a pane again
 
