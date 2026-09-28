@@ -347,6 +347,7 @@ msg='Say "hi" & it'"'"'s $HOME, `date`, !! and !x done'
 reset; answer 'NEW-1 7 2'
 run pane-launch.sh --dir "$proj" --message "$msg"
 check "launch --message: reaches claude intact" "$proj
+[--]
 [$msg]" "$(in_pane)"
 
 reset; answer 'NEW-1 7 2'
@@ -354,7 +355,20 @@ run pane-launch.sh --message "$msg" --permission-mode plan --dir "$proj"
 check "launch, every option: mode then message" "$proj
 [--permission-mode]
 [plan]
+[--]
 [$msg]" "$(in_pane)"
+
+reset; answer 'NEW-1 7 2'
+run pane-launch.sh --dir "$proj" --message '-p hi'
+check "launch --message starting with -: a message, not a flag" "$proj
+[--]
+[-p hi]" "$(in_pane)"
+
+# A relative --dir resolves against the caller's directory, not CDPATH's.
+mkdir -p "$work/elsewhere/proj dir"
+reset; answer 'NEW-1 7 2'
+(cd "$work" && CDPATH="$work/elsewhere" sh "$scripts/pane-launch.sh" --dir 'proj dir' </dev/null >/dev/null 2>&1)
+check "launch, relative --dir with CDPATH set: the caller's directory" "$proj" "$(in_pane)"
 
 reset; run pane-launch.sh
 check "launch, no --dir: exit 1" 1 "$rc"
