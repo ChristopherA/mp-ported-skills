@@ -117,14 +117,15 @@ classify() {
         }
         # After the anchor, the latest spinner ("✢ Sprouting…") or turn end
         # decides. A turn ends with a done line ("✻ Worked for 42s · done"),
-        # or with an interrupt or API error under the message. A message with
-        # none of these under it is a reply still streaming: no spinner shows
-        # while text streams.
+        # or with an interrupt or API error under the message. A narrow pane
+        # cuts "Interrupted" short ("⎿  Interrup· What should"), so match its
+        # stem. A message with none of these under it is a reply still
+        # streaming: no spinner shows while text streams.
         seen = ""
         for (i = anchor_at + 1; i < prompt_at - 1; i++) {
             if (line[i] ~ /^(✢|✳|✶|✻|✽|·|\*) [A-Z][a-z]+…/) seen = "working"
             else if (line[i] ~ /^(✢|✳|✶|✻|✽|·|\*) [A-Z][a-z]+ for [0-9]/) seen = "waiting"
-            else if (line[i] ~ /^ +⎿ +(Interrupted|API Error)/) seen = "waiting"
+            else if (line[i] ~ /^ +⎿ +(Interrup|API Error)/) seen = "waiting"
         }
         if (seen != "") { print seen; exit }
         print (kind == "message") ? "working" : "waiting"

@@ -5,7 +5,7 @@ Full `pane-read.sh` output from live Claude Code sessions in iTerm2 panes, for t
 | State | What the pane shows |
 |---|---|
 | `working` | Claude is thinking (spinner above the prompt) or streaming a reply. While a reply streams, no spinner is on screen; the text above the prompt grows between reads. |
-| `waiting` | Claude is idle at its input prompt: fresh, after a reply, with a background shell still running, or with a draft typed but not sent (`waiting-unsent-text`). |
+| `waiting` | Claude is idle at its input prompt: fresh, after a reply, with a background shell still running, or with a draft typed but not sent (`waiting-unsent-text`). After Esc while a reply streams, `⎿  Interrupted` sits under the partial reply (`waiting-interrupted-*`); Esc while the spinner still shows drops the turn and puts the message back in the input box as a draft (`waiting-interrupted-thinking-*`). A launch with an unknown model id ends the turn with an error message and an ordinary done line, not `⎿  API Error` (`waiting-api-error-bad-model`). |
 | `asking` | A question (`asking-question-*`), a tool permission prompt (`asking-permission-*`), or the folder-trust prompt shown before a session starts (`asking-trust`). |
 | `shell` | Claude has exited and the pane is at a shell prompt. After `/exit` the scrollback keeps only the launch command and the resume hint, not the session's text. |
 | `gone` | The pane was closed. `gone.txt` is `pane-read.sh`'s stderr; it also exits 1. |
