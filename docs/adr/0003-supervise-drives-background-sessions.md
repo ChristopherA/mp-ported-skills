@@ -10,6 +10,7 @@ The maintainer builds by hand in a loop: `/next`, `/implement #N`, `/capturing`,
 ## Consequences
 
 - Tickets run one after another. Running them in parallel worktrees (`--bg` with `-w`) is untested, and would bring in the branch-first session title (#43).
-- A permission prompt the session cannot clear stops it until a human opens it with `claude attach <id>`, so sessions launch with `--permission-mode auto`.
-- There is no command that sends input to a running background session, so a follow-up means `stop`, then `--resume`, and a resume issued before the stop finishes starts a copy under a new id.
+- A permission prompt the session cannot clear stops it until a human opens it with `claude attach <id>`, so sessions launch with `--permission-mode auto`, on a model that supports it. Haiku 4.5 does not: its session falls back to manual mode and blocks on its first Bash command.
+- There is no command that sends input to a running background session, so a follow-up means `stop`, then `--resume`, and a resume starts a copy under a new id when it is issued before the stop finishes, when it passes any flag, or when the session is still live, which includes a finished session showing `idle` and `done`.
+- The supervisor takes the next step from `state.sh`'s `next:` line and launches `/implement #N` in a fresh session, rather than answering `/next`'s question: `/next` cannot start a user-invoked command, and its pending question never reaches the transcript (#54).
 - The supervisor depends on the plain `claude` CLI and on Claude Code's background-session commands, which may change between releases.
