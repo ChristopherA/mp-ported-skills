@@ -34,6 +34,8 @@ A check that two files match tests `cmp -s`'s exit status, as `same` in `tests/s
 
 Each test sets or unsets every environment variable the scripts it runs read, so it gives the same result in any session. The maintainer's sessions set `MP_SESSION_TITLE=1`, which changes what the status line prints, and one test failed only there.
 
+To set a variable for one script run, set and export it in a subshell, as `launch_as` in `tests/iterm-pane.test.sh` does, not as a prefix to a helper function such as `run`. `/bin/sh` on macOS is bash in POSIX mode, where `X=1 f` leaves `X` set after the function returns, so every later check in the file runs with it.
+
 A live test that starts `claude` in a pane runs it in a folder inside this repo's parent. The maintainer's shell picks the Claude Code config from a marker file in a parent folder, so a scratch folder elsewhere starts the session under the default config and at the folder-trust prompt, and the test observes a setup no real launch has.
 
 A live test that needs a particular model starts the session with `claude --model <id>`. Typing `/model` in a running session also saves the model to the profile's `settings.json` as the default, so it changes every later session on that profile.
