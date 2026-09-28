@@ -46,6 +46,15 @@
 # Both skip any record file that is malformed or from another tool, so one bad
 # file beside the session's record does not hide it.
 #
+#   status-line.sh --pane-zone [<file>]
+#
+# reads a reading back from a pane's text, on stdin or from a file, and prints
+# it in --zone's short form, so a supervisor outside the session compares the
+# two directly. It takes the last line 2 on screen, since the scrollback holds
+# older ones, and strips colour codes. With no reading it prints nothing and
+# exits 1; a file it cannot read exits 2. It lives here so a change to line 2's format changes its parser in
+# the same file.
+#
 # Environment:
 #   MP_SMART_ZONE_K             smart zone in thousands of tokens (default 150)
 #   MP_SESSION_TITLE            1 when the profile has session titles on
@@ -90,6 +99,23 @@ case ${1:-} in
           else "context: \($t / 1000 | floor)k tokens, \($pct)% of a \($z)k smart zone, \(.remaining_pct)% of window remaining" end
         else empty end' 2>/dev/null
     exit 0 ;;
+# === --pane-zone: line 2 read back from a pane ===
+# Matches a whole line of line 2's shape, "[label] N% of zone" or a bare
+# "N% of zone", so the same words quoted in the conversation do not count.
+# Exits 1 with no reading, unlike --zone, so a supervisor can branch on it,
+# and 2 on a file it cannot read, so that never passes for an empty pane.
+--pane-zone)
+    if [ -n "${2:-}" ] && [ ! -r "$2" ]; then
+        echo "status-line.sh --pane-zone: cannot read $2" >&2; exit 2
+    fi
+    esc=$(printf '\033')
+    cat -- "${2:--}" | LC_ALL=C awk -v esc="$esc" '
+      { gsub(esc "\\[[0-9;]*[A-Za-z]", ""); sub(/\r$/, "") }
+      /^[ \t]*(\[[^]]*\][ \t]+)?[0-9]+% of zone[ \t]*$/ {
+          r = $0; sub(/% of zone.*/, "", r); sub(/.*[^0-9]/, "", r); last = r
+      }
+      END { if (last == "") exit 1; print last "% of zone" }'
+    exit ;;
 esac
 
 # === Render ===

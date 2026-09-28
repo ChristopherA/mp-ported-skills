@@ -1,12 +1,13 @@
 #!/bin/sh
-# status-line.test.sh -- tests for the status line: render mode, --context
-# and --zone.
+# status-line.test.sh -- tests for the status line: render mode, --context,
+# --zone and --pane-zone.
 #
 # Render mode against captured-shape JSON payloads, with session titles off
 # and on (line 1 against scratch repos on and off their default branch,
 # detached, with a workstream and a persona), and --context and --zone
 # against the record the wrapper writes, with that record's format pinned
-# and malformed or foreign records beside it skipped.
+# and malformed or foreign records beside it skipped, and --pane-zone
+# against rendered output embedded in pane text.
 # Copying the status line into a profile is tested in
 # status-line-copy.test.sh and setup-mp-ported-skills.test.sh. Touches no
 # real profile and nothing under /tmp outside its own mktemp directory.
@@ -221,6 +222,46 @@ out=$(sh "$scripts/status-line.sh" --zone "$proj" bad1 2>&1 </dev/null); rc=$?
 check "malformed session record: nothing" "" "$out"
 check "malformed session record: exit 0" "0" "$rc"
 check "record then garbage: nothing" "" "$(sh "$scripts/status-line.sh" --zone "$proj" bad6 </dev/null)"
+
+# --- --pane-zone ------------------------------------------------------------
+# Pane text around a rendered status line, as a pane read returns it: the
+# conversation above, the prompt box and mode line below.
+pane() { # <status line output>
+    printf '> fix the tests\n\n⏺ Done. 12% of zone would be fine.\n\n'
+    printf '%s\n' "$1"
+    printf '────────────────────\n❯ \n────────────────────\n  ⏵⏵ auto mode on\n'
+}
+command rm -f "$WORKSTREAM_KIT_CONTEXT_DIR"/*
+for band in "6 green 32" "20 yellow 33" "30 red 31"; do
+    set -- $band
+    sid="pz-$2"
+    rendered=$(payload "$1" 1000000 "$sid" | jq -c '.effort = {level: "medium"}' | sh "$scripts/status-line.sh")
+    zone=$(sh "$scripts/status-line.sh" --zone "$proj" "$sid" </dev/null)
+    has "--pane-zone $2: colour codes present" "$(printf '\033[0;%sm' "$3")" "$rendered"
+    check "--pane-zone $2: matches --zone" "$zone" "$(pane "$rendered" | sh "$scripts/status-line.sh" --pane-zone)"
+done
+pane "$rendered" > "$work/pane.txt"
+check "--pane-zone from a file" "200% of zone" "$(sh "$scripts/status-line.sh" --pane-zone "$work/pane.txt" </dev/null)"
+out=$(pane "$(payload 4 1000000 | sh "$scripts/status-line.sh")"; pane "$(payload 8 1000000 | sh "$scripts/status-line.sh")")
+check "--pane-zone: the last reading wins" "53% of zone" "$(printf '%s\n' "$out" | sh "$scripts/status-line.sh" --pane-zone)"
+check "--pane-zone: a quoted reading is not line 2" "53% of zone" \
+    "$(printf '%s\n⏺ 99%% of zone\n' "$out" | sh "$scripts/status-line.sh" --pane-zone)"
+check "--pane-zone: no model label" "26% of zone" \
+    "$(pane "$(payload 4 1000000 | jq -c 'del(.model)' | sh "$scripts/status-line.sh")" | sh "$scripts/status-line.sh" --pane-zone)"
+check "--pane-zone: carriage returns" "26% of zone" \
+    "$(pane "$(payload 4 1000000 | sh "$scripts/status-line.sh")" | sed 's/$/\r/' | sh "$scripts/status-line.sh" --pane-zone)"
+out=$(pane "" | sh "$scripts/status-line.sh" --pane-zone); rc=$?
+check "--pane-zone: none on screen, nothing" "" "$out"
+check "--pane-zone: none on screen, exit 1" "1" "$rc"
+out=$(printf '' | sh "$scripts/status-line.sh" --pane-zone); rc=$?
+check "--pane-zone: empty input, exit 1" "1 " "$rc $out"
+out=$(sh "$scripts/status-line.sh" --pane-zone "$work/no-such-file" 2>&1 </dev/null); rc=$?
+check "--pane-zone: missing file, exit 2" "2" "$rc"
+has "--pane-zone: missing file, says so" "cannot read" "$out"
+check "--pane-zone: a live capture" "37% of zone" \
+    "$(sh "$scripts/status-line.sh" --pane-zone "$root/tests/fixtures/pane-states/working-streaming-fable.txt" </dev/null)"
+out=$(sh "$scripts/status-line.sh" --pane-zone "$root/tests/fixtures/pane-states/gone.txt" </dev/null); rc=$?
+check "--pane-zone: a capture with no status line" "1 " "$rc $out"
 
 echo "status-line: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
