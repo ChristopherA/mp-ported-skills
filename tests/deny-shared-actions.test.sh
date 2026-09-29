@@ -27,6 +27,15 @@ check() { # <name> <expected> <actual>
     fi
 }
 
+# Every variable the hook reads, set or unset here. The hook runs
+# `git config` to resolve aliases, so git reads no global or system config
+# and no repo but the scratch one below, and the checks run from a folder
+# outside any repo.
+unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+outside=$(mktemp -d)
+cd "$outside" || exit 1
+
 entry='.hooks.PreToolUse[] | select(.hooks[0].command | test("deny-shared-actions"))'
 hook_cmd=$(jq -r "$entry | .hooks[0].command" "$hooks")
 
@@ -86,6 +95,17 @@ check "gh api ref update" "deny" "$(decision 0 auto 'gh api -X PATCH repos/o/r/g
 check "gh api graphql mutation" "deny" \
     "$(decision 0 auto "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'")"
 
+check "gh api contents PUT (a commit)" "deny" "$(decision 0 auto 'gh api -X PUT repos/o/r/contents/f.txt -f message=m -f content=Zg==')"
+check "gh api git trees POST" "deny" "$(decision 0 auto 'gh api repos/o/r/git/trees -f base_tree=abc')"
+check "git subtree push" "deny" "$(decision 0 auto 'git subtree push --prefix=dist origin gh-pages')"
+check "git send-pack" "deny" "$(decision 0 auto 'git send-pack origin main')"
+check "git-push by path" "deny" "$(decision 0 auto '/usr/libexec/git-core/git-push origin')"
+check "piped into sh" "deny" "$(decision 0 auto 'echo git push | sh')"
+check "here-string into bash" "deny" "$(decision 0 auto 'bash <<< "git push"')"
+check "gh pr create piped into bash" "deny" "$(decision 0 auto 'printf "gh pr create --fill" | bash')"
+check "gh -R before pr create" "deny" "$(decision 0 auto 'gh -R o/r pr create --fill')"
+check "gh --repo=o/r before issue close" "deny" "$(decision 0 auto 'gh --repo=o/r issue close 3')"
+
 # A git alias in the repo's own config is resolved, since the hook runs
 # in the session's working directory.
 scratch=$(mktemp -d)
@@ -108,6 +128,9 @@ check "gh api read with -X GET and a field" "" "$(decision 0 auto 'gh api -X GET
 check "gh api graphql query" "" "$(decision 0 auto "gh api graphql -f query='{ viewer { login } }'")"
 check "bash -c without a shared action" "" "$(decision 0 auto 'bash -c "git status && echo push"')"
 check "command -v git" "" "$(decision 0 auto 'command -v git')"
+check "sh running a script file" "" "$(decision 0 auto 'sh tests/some.test.sh')"
+check "piped into sh without a shared action" "" "$(decision 0 auto 'echo git status | sh')"
+check "gh api contents read" "" "$(decision 0 auto 'gh api repos/o/r/contents/README.md')"
 
 # Criterion 3 waits on #58 (docs/adr/0004): the hook sees only the command
 # text, so any script that runs git push itself is a route around it until
@@ -150,6 +173,8 @@ check "non-Bash tool" "" "$(run 0 auto Write 'git push' | jq -r '.hookSpecificOu
 # The matcher and timeout Claude Code applies before the script's own check.
 check "matcher: Bash only" "Bash" "$(jq -r "$entry | .matcher" "$hooks")"
 check "timeout set" "5" "$(jq -r "$entry | .hooks[0].timeout" "$hooks")"
+
+cd / && command rm -rf "$outside"
 
 echo "deny-shared-actions: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -26,22 +26,29 @@
 # The scan splits the command on separators, parens and backticks, drops
 # quotes and backslashes, and skips words that run what follows them:
 # VAR=value, shell keywords, env, command, builtin, exec, time, nohup,
-# nice, timeout, xargs, eval and `sh -c` (bash, zsh and the rest too). It
-# matches the program by basename, so `/usr/bin/git push` counts, and
-# resolves a git alias given with `-c alias.X=...` or found in git config.
+# nice, timeout, xargs, eval and `sh -c` (bash, zsh and the rest too),
+# and checks the whole command when it pipes into a shell. It matches the
+# program by basename, so `/usr/bin/git push` counts, treats
+# `git send-pack` and `git subtree push` as pushes, and resolves a git
+# alias given with `-c alias.X=...` or found in git config.
 # It does not parse quoting, so a separator inside a quoted string splits
 # too: `git commit -m "a; git push"` is refused. In an unattended session
 # that false refusal costs a detour through the supervisor, where a miss
 # would publish.
 #
-# The hook sees only the command text, never what a script it names goes
-# on to run, so `sh some-script.sh` that pushes gets through. Narrowing
+# Known gaps: a command built from variables (`g=git; $g push`), a
+# wrapper not listed above (`sudo`, `find -exec`), and a GraphQL mutation
+# read from a file. The hook sees only the command text, never what a
+# script it names goes on to run, so `sh some-script.sh` that pushes gets
+# through. Narrowing
 # that to #58's grant script waits on #58 (docs/adr/0004).
 #
 # Reads the PreToolUse payload on stdin. Prints a deny decision and exits 0
 # when the command matches one of the refused forms; otherwise prints
 # nothing and exits 0.
 
+# Like a missing variable, a missing jq or a payload jq cannot read lets the
+# command through: this hook is a backstop, not the deciding layer.
 [ "${CLAUDE_CODE_SESSION_ATTENDED:-1}" = 0 ] || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 input=$(cat)
@@ -62,6 +69,7 @@ cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null) |
 split=$(printf '%s' "$cmd" | sed -E 's/(&&|\|\||[;&|()`])/\n/g')
 
 matched=""
+piped=""
 oldIFS=$IFS
 IFS='
 '
@@ -130,8 +138,10 @@ for seg in $split; do
             done
             ;;
         sh | bash | zsh | dash | ksh)
-            # Only `-c` runs its argument as a command; `sh script.sh` runs
-            # a file this hook cannot see into.
+            # `-c` and a here-string run their argument as a command; a
+            # shell with no argument reads its commands from a pipe, checked
+            # below against the whole command; `sh script.sh` runs a file
+            # this hook cannot see into.
             shell_c=""
             shift
             while [ $# -gt 0 ]; do
@@ -139,16 +149,21 @@ for seg in $split; do
                 --*) shift ;;
                 -*c*) shell_c=yes; shift ;;
                 -*) shift ;;
+                '<<<') shell_c=yes; shift; break ;;
                 *) break ;;
                 esac
             done
-            [ -n "$shell_c" ] || set --
+            if [ -z "$shell_c" ]; then
+                [ $# -gt 0 ] || piped=yes
+                set --
+            fi
             ;;
         *) break ;;
         esac
     done
     [ $# -gt 0 ] || continue
     case "${1##*/}" in
+    git-push | git-send-pack) matched="git push" ;;
     git)
         shift
         while [ $# -gt 0 ]; do
@@ -165,8 +180,10 @@ for seg in $split; do
         done
         [ -n "$matched" ] && break
         sub=${1:-}
-        if [ "$sub" = push ]; then
+        if [ "$sub" = push ] || [ "$sub" = send-pack ]; then
             matched="git push"
+        elif [ "$sub" = subtree ] && [ "${2:-}" = push ]; then
+            matched="git subtree push"
         elif [ -n "$sub" ]; then
             # An alias from git config, read in the session's working
             # directory, where the command runs.
@@ -177,14 +194,22 @@ for seg in $split; do
         ;;
     gh)
         shift
+        # A repo given before the subcommand: `gh -R o/r pr create`.
+        while [ $# -gt 0 ]; do
+            case "$1" in
+            -R | --repo) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
+            --repo=* | -R?*) shift ;;
+            *) break ;;
+            esac
+        done
         case "${1:-}/${2:-}" in
         pr/create) matched="gh pr create" ;;
         pr/merge) matched="gh pr merge" ;;
         issue/close) matched="gh issue close" ;;
         api/*)
             # A write through the REST or GraphQL API reaches the same
-            # actions: a POST, PUT, PATCH or DELETE on pulls, issues, merges
-            # or git refs, or a GraphQL mutation. gh sends POST by default
+            # actions: a POST, PUT, PATCH or DELETE on pulls, issues, merges,
+            # contents or the git data API, or a GraphQL mutation. gh sends POST by default
             # once a field or input is given.
             shift
             method="" fields="" target="" graphql=""
@@ -196,7 +221,7 @@ for seg in $split; do
                 -f | -F | --field | --raw-field | --input) fields=yes; if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
                 -f* | -F* | --field=* | --raw-field=* | --input=*) fields=yes; shift ;;
                 graphql) graphql=yes; shift ;;
-                *pulls* | *issues* | *merges* | *git/refs*) target=yes; shift ;;
+                *pulls* | *issues* | *merges* | *contents* | */git/*) target=yes; shift ;;
                 *) shift ;;
                 esac
             done
@@ -214,6 +239,19 @@ for seg in $split; do
 done
 set +f
 IFS=$oldIFS
+
+# A shell reading commands from a pipe (`echo git push | sh`) runs text
+# this scan saw only as another command's arguments, so check the whole
+# command for the words of a refused form.
+if [ -z "$matched" ] && [ -n "$piped" ]; then
+    words=$(printf '%s' "$cmd" | tr -c 'A-Za-z0-9_-' '\n')
+    has() { printf '%s\n' "$words" | grep -qx -- "$1"; }
+    if has git && has push; then
+        matched="git push (piped into a shell)"
+    elif has gh && { { has pr && { has create || has merge; }; } || { has issue && has close; }; }; then
+        matched="gh (piped into a shell)"
+    fi
+fi
 
 [ -n "$matched" ] || exit 0
 
