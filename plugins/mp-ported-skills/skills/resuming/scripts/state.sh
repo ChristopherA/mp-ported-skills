@@ -184,9 +184,21 @@ gather() {
         # as high, medium or low; null when there is none.
         body_blockers='def priority: [(.body // "") | splits("\r?\n") | select(test("\\S"))][0] // ""
             | (capture("^\\s*\\*\\*Priority: *(?<p>high|medium|low)"; "i") | .p | ascii_downcase) // null;'
-        # Issue numbers a body's `Blocked by:` lines name.
-        body_blockers="$body_blockers"'def body_blockers: [(.body // "") | splits("\r?\n")
-            | select(test("^\\s*blocked by:"; "i")) | scan("#([0-9]+)") | .[0] | tonumber];'
+        # Issue numbers a body names as blockers: on `Blocked by:` lines, and in
+        # bullets under a `Blocked by` heading (any level or case) up to the
+        # next heading, the form tickets split from a spec use. Lines in a code
+        # fence, closed only by its own marker, are examples, not blockers.
+        body_blockers="$body_blockers"'def body_blockers: reduce ((.body // "") | splits("\r?\n")) as $line
+            ({fence: null, under: false, nums: []};
+             ($line | capture("^\\s*(?<m>```|~~~)").m // null) as $m
+             | if .fence then (if $m == .fence then .fence = null else . end)
+             elif $m then .fence = $m
+             elif ($line | test("^\\s*#+\\s")) then
+                 .under = ($line | test("^\\s*#+\\s*blocked by\\s*(:.*)?$"; "i"))
+                 | if .under then .nums += [$line | scan("#([0-9]+)") | .[0] | tonumber] else . end
+             elif ($line | test("^\\s*blocked by:"; "i")) or (.under and ($line | test("^\\s*[-*+]\\s")))
+             then .nums += [$line | scan("#([0-9]+)") | .[0] | tonumber]
+             else . end) | .nums;'
 
         # Open issues only (the endpoint also lists PRs), with what the cases need.
         rows=$(printf '%s' "$issues" | jq -c --arg tr "$t_triage" --arg ti "$t_info" \

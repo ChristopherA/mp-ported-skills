@@ -196,6 +196,42 @@ out=$(run)
 check "case 2: skips a parked ticket" "6 by hand (Low): #81 t81" "$(next "$out")"
 has "case 2: parked is not ready" "ready, blockers closed: none" "$out"
 
+# Blockers as bullets under a Blocked by heading, any level or case, up to the
+# next heading.
+issues "$(list "$(issue 31 needs-triage)" \
+    "$(issue 54 ready-for-agent 0 '## Blocked by
+
+- #31')" \
+    "$(issue 55 ready-for-agent 0 '### blocked BY
+* #31')" \
+    "$(issue 56 ready-for-agent 0 '## Blocked by
+
+- #9
+
+## Notes
+
+- #31 is related')" \
+    "$(issue 57 ready-for-agent 0 '## Blocked by
+
+None - can start immediately')" \
+    "$(issue 58 ready-for-agent 0 'Quotes the forms in a code block:
+
+```
+## Blocked by
+
+- #31
+Blocked by: #31
+```')" \
+    "$(issue 59 ready-for-agent 0 '```
+~~~
+```
+
+## Blocked by
+
+- #31')" \
+    "$(issue 60 ready-for-agent 0 '## Blocked by: #31')")"
+check "heading blockers: bullets under the heading block, up to the next heading, outside code blocks" "#56 t56; #57 t57; #58 t58" "$(run | sed -n 's/^ready, blockers closed: //p')"
+
 issues "$(list "$(issue 31 needs-triage)" "$(issue 50 ready-for-agent 1)" \
     "$(issue 51 ready-for-agent 0 'Blocked by: #31')" "$(issue 52 ready-for-agent 0 'Blocked by: #9')" \
     "$(issue 53 ready-for-agent)")"
@@ -241,6 +277,10 @@ printf '[{"number":26,"state":"open"},{"number":9,"state":"closed"}]' >"$FAKE_GH
 check "in-motion parent: open children all blocked" "1 work in flight: in motion #24 t24; every open child blocked: #27 by #26, #28 by #52" "$(next "$(run)")"
 printf 'not json' >"$FAKE_GH/deps-27.json"
 check "in-motion parent: blocker list unread" "1 work in flight: in motion #24 t24; every open child blocked: #27 by an unread blocker, #28 by #52" "$(next "$(run)")"
+list "$(issue 28 ready-for-agent 0 '## Blocked by
+
+- #52')" "$(issue 29 ready-for-human)" >"$FAKE_GH/sub-24.json"
+check "in-motion parent: skips a child blocked under a heading" "1 work in flight: in motion #24 t24; next child #29 (ready-for-human, by hand): t29" "$(next "$(run)")"
 list "$(issue 27 enhancement)" >"$FAKE_GH/sub-24.json"
 check "in-motion parent: next child not ready" "1 work in flight: in motion #24 t24; next child #27 (not ready): t27" "$(next "$(run)")"
 touch "$FAKE_GH/sub-24.fail"
