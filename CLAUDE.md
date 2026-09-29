@@ -48,6 +48,10 @@ A live test that needs a particular model starts the session with `claude --mode
 
 A live test that runs a session unattended, with `--permission-mode auto` (a `claude --bg` session, or a pane nobody answers), runs it on a model that supports auto mode. Haiku 4.5 does not: the session prints `auto mode unavailable for this model`, falls back to manual mode, and blocks at a permission prompt on its first Bash command.
 
+A live run of a skill that launches `/implement` workers is the maintainer's to type. From an agent session in auto mode, the classifier allowed `claude --bg` sessions on plain prompts but refused `launch.sh` starting an `/implement` worker ("Create Unsafe Agents").
+
+A test that puts a fake command on `PATH` makes it executable and checks, before any call that could reach the real one, that `command -v` finds the fake, as `tests/supervise.test.sh` does for `claude`. A fake written without `chmod +x` is skipped silently: its launch tests ran the real `claude --bg`, which only its folder-trust check stopped.
+
 ## jq in scripts
 
 Build a JSON value from a shell string with `jq -n --arg`, as `fixed_nums` in `resuming`'s `state.sh` does. `jq -R` on empty stdin prints nothing, so a later `--argjson` of that value fails, and a script that goes on after the failure reports empty results as if they were real.
