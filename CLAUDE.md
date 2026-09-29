@@ -44,6 +44,8 @@ A live test that starts `claude --bg` in a new scratch folder trusts the folder 
 
 A pattern `pane-classify.sh` matches comes from a live capture in `tests/fixtures/pane-states/`, recorded in a wide pane and in a narrow one. Claude Code cuts text to fit a narrow pane: the interrupt marker `⎿  Interrupted` rendered as `⎿  Interrup·` at 27 columns, and a pattern built from the full word read that idle session as `working`.
 
+A live test of a change to the plugin passes `--plugin-dir <checkout>/plugins/mp-ported-skills` to `claude`, as `tests/live/deny-shared-actions.sh` does: a plain session loads the installed release, which does not hold the change. To read a background session's result, it puts a unique token in the prompt and finds the transcript under `$CLAUDE_CONFIG_DIR/projects/` by that token. The session's `jobs/<id>/` folder may already be gone.
+
 A live test that needs a particular model starts the session with `claude --model <id>`. Typing `/model` in a running session also saves the model to the profile's `settings.json` as the default, so it changes every later session on that profile.
 
 A live test that runs a session unattended, with `--permission-mode auto` (a `claude --bg` session, or a pane nobody answers), runs it on a model that supports auto mode. Haiku 4.5 does not: the session prints `auto mode unavailable for this model`, falls back to manual mode, and blocks at a permission prompt on its first Bash command.
