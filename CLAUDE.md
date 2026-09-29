@@ -32,6 +32,8 @@ Tests are `tests/*.test.sh`, run with `sh`. Every `git commit` a test makes in a
 
 A check that two files match tests `cmp -s`'s exit status, as `same` in `tests/status-line-copy.test.sh` does. `cmp` reports a file that is a prefix of the other on stderr, so a check on its captured stdout reads empty, and passes, for files that differ.
 
+A check on a line that lists several items, such as `ready, blockers closed:`, compares the whole list with `check`, not `has`. A substring passes when extra items follow it: two tickets that should have read as blocked were listed as ready while a `has` check still passed.
+
 Each test sets or unsets every environment variable the scripts it runs read, so it gives the same result in any session. The maintainer's sessions set `MP_SESSION_TITLE=1`, which changes what the status line prints, and one test failed only there.
 
 To set a variable for one script run, set and export it in a subshell, as `launch_as` in `tests/iterm-pane.test.sh` does, not as a prefix to a helper function such as `run`. `/bin/sh` on macOS is bash in POSIX mode, where `X=1 f` leaves `X` set after the function returns, so every later check in the file runs with it.
