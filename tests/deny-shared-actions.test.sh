@@ -52,16 +52,67 @@ check "env-prefixed git push" "deny" "$(decision 0 auto 'env FOO=bar git push')"
 check "leading VAR=value before git push" "deny" "$(decision 0 auto 'FOO=bar git push')"
 check "leading VAR=value before gh pr create" "deny" "$(decision 0 auto 'FOO=bar gh pr create --title x')"
 
+# Forms that reach the same program another way: a path, a transparent
+# wrapper, a nested shell, a substitution, or a git alias.
+check "command git push" "deny" "$(decision 0 auto 'command git push')"
+check "absolute path to git" "deny" "$(decision 0 auto '/usr/bin/git push')"
+check "backslash-escaped git" "deny" "$(decision 0 auto '\\git push')"
+check "quoted program name" "deny" "$(decision 0 auto '"git" push')"
+check "backtick substitution" "deny" "$(decision 0 auto 'x=`git push`')"
+check "\$() substitution" "deny" "$(decision 0 auto 'echo $(git push 2>&1)')"
+check "bash -c" "deny" "$(decision 0 auto 'bash -c "git push"')"
+check "sh -c" "deny" "$(decision 0 auto "sh -c 'git push origin HEAD'")"
+check "bash -lc with a compound command" "deny" "$(decision 0 auto 'bash -lc "cd repo && git push"')"
+check "eval" "deny" "$(decision 0 auto 'eval "git push"')"
+check "time" "deny" "$(decision 0 auto 'time git push')"
+check "nohup" "deny" "$(decision 0 auto 'nohup git push &')"
+check "xargs" "deny" "$(decision 0 auto 'echo origin | xargs git push')"
+check "xargs with flags" "deny" "$(decision 0 auto 'echo origin | xargs -n 1 -I {} git push {}')"
+check "exec" "deny" "$(decision 0 auto 'exec git push')"
+check "builtin command chain" "deny" "$(decision 0 auto 'builtin command env git push')"
+check "env -u NAME" "deny" "$(decision 0 auto 'env -u GIT_DIR git push')"
+check "brace group" "deny" "$(decision 0 auto '{ git push; }')"
+check "if/then" "deny" "$(decision 0 auto 'if true; then git push; fi')"
+check "negated" "deny" "$(decision 0 auto '! git push')"
+check "git push HEAD:main" "deny" "$(decision 0 auto 'git push origin HEAD:main')"
+check "git push -u" "deny" "$(decision 0 auto 'git push -u origin some-branch')"
+check "git push --dry-run" "deny" "$(decision 0 auto 'git push --dry-run')"
+check "git -c alias defined inline" "deny" "$(decision 0 auto 'git -c alias.p=push p')"
+check "command gh pr create" "deny" "$(decision 0 auto 'command gh pr create --fill')"
+check "gh api merge (PUT)" "deny" "$(decision 0 auto 'gh api -X PUT repos/o/r/pulls/5/merge')"
+check "gh api --method=PATCH issue" "deny" "$(decision 0 auto 'gh api --method=PATCH repos/o/r/issues/5 -f state=closed')"
+check "gh api implicit POST to pulls" "deny" "$(decision 0 auto 'gh api repos/o/r/pulls -f title=x -f head=b -f base=main')"
+check "gh api ref update" "deny" "$(decision 0 auto 'gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=abc')"
+check "gh api graphql mutation" "deny" \
+    "$(decision 0 auto "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'")"
+
+# A git alias in the repo's own config is resolved, since the hook runs
+# in the session's working directory.
+scratch=$(mktemp -d)
+git -C "$scratch" init -q
+git -C "$scratch" config alias.ship 'push origin HEAD'
+check "git alias from repo config" "deny" "$(cd "$scratch" && decision 0 auto 'git ship')"
+check "git alias that does not push" "" \
+    "$(git -C "$scratch" config alias.st status; cd "$scratch" && decision 0 auto 'git st')"
+command rm -rf "$scratch"
+
 # The refusal names the grant file and the supervisor.
 check "refusal names the grant file and the supervisor" \
     "A background session in auto mode cannot run 'git push' on its own (#66): main has no branch protection, and the auto-mode classifier makes a judgment call here, not a rule. Route this through a standing grant in docs/agents/supervision.md (#58), driven by the supervisor, or leave it for the maintainer's own interactive session." \
     "$(reason 0 auto 'git push')"
 
-# The granted route: a shared action the ticket does not name goes through,
-# so #58's grant check, when built, is the only thing that can still stop
-# it here.
+# A command that is not a shared action goes through.
 check "gh pr view (not a shared action)" "" "$(decision 0 auto 'gh pr view 5')"
-check "a script that itself runs git push is not inspected" "" \
+check "gh api read (GET)" "" "$(decision 0 auto 'gh api repos/o/r/pulls/5')"
+check "gh api read with -X GET and a field" "" "$(decision 0 auto 'gh api -X GET repos/o/r/issues -f state=open')"
+check "gh api graphql query" "" "$(decision 0 auto "gh api graphql -f query='{ viewer { login } }'")"
+check "bash -c without a shared action" "" "$(decision 0 auto 'bash -c "git status && echo push"')"
+check "command -v git" "" "$(decision 0 auto 'command -v git')"
+
+# Criterion 3 waits on #58 (docs/adr/0004): the hook sees only the command
+# text, so any script that runs git push itself is a route around it until
+# #58 names the grant script and this hook narrows to it.
+check "a script that runs git push is not inspected (waits on #58)" "" \
     "$(decision 0 auto 'sh scripts/granted-push.sh')"
 
 # Commands that only resemble a refused form.
@@ -72,10 +123,12 @@ check "a git-named command that is not git" "" "$(decision 0 auto 'mygit push')"
 check "gh issue list is not gh issue close" "" "$(decision 0 auto 'gh issue list')"
 check "env with no git/gh is unaffected" "" "$(decision 0 auto 'env NODE_ENV=test npm test')"
 
-# Known, documented gap: sh -c/eval indirection is not recognized, since
-# this splitter does not parse shell quoting (docs/adr/0004). This case
-# pins that boundary so it reads as a deliberate limit, not a regression.
-check "sh -c indirection is a known gap, not covered" "" "$(decision 0 auto 'sh -c "git push"')"
+# Accepted over-refusal: the splitter does not parse quoting, so a
+# separator inside a quoted string starts a new segment (docs/adr/0004).
+# In an unattended session a false refusal costs a detour through the
+# supervisor; a miss publishes.
+check "quoted text holding a separated git push is refused" "deny" \
+    "$(decision 0 auto 'git commit -m "wip; git push later"')"
 
 # The maintainer's own interactive session: attended, whatever the
 # permission mode.
