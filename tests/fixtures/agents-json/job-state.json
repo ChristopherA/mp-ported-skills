@@ -1,0 +1,26 @@
+{
+  "state": "blocked",
+  "detail": "Printing current date and time",
+  "tempo": "blocked",
+  "template": "bg",
+  "respawnFlags": [
+    "--permission-mode",
+    "auto",
+    "--model",
+    "claude-sonnet-5"
+  ],
+  "providerEnv": {
+    "CLAUDE_CONFIG_DIR": "/work/config"
+  },
+  "intent": "/mattpocock-skills:implement #56",
+  "name": "implement ticket 56",
+  "nameSource": "auto",
+  "sessionId": "c2a368ee-c513-484c-83d3-581830e209a5",
+  "resumeSessionId": "c2a368ee-c513-484c-83d3-581830e209a5",
+  "daemonShort": "c2a368ee",
+  "cliVersion": "2.1.284",
+  "cwd": "/work/project",
+  "createdAt": "2026-09-29T06:01:24.529Z",
+  "updatedAt": "2026-09-29T06:01:38.134Z",
+  "backend": "daemon"
+}

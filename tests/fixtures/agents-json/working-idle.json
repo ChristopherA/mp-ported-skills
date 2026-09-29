@@ -1,0 +1,31 @@
+[
+  {
+    "pid": 59879,
+    "cwd": "/work/other",
+    "kind": "interactive",
+    "startedAt": 1790405462044,
+    "sessionId": "6f669fad-eccc-4760-8610-874a5b6262d3",
+    "name": "other-session",
+    "status": "busy"
+  },
+  {
+    "pid": 56177,
+    "cwd": "/work/project",
+    "kind": "interactive",
+    "startedAt": 1790525865911,
+    "sessionId": "8b1ac03c-a84a-41b5-a5d1-4b0181a1d0ce",
+    "name": "project-session",
+    "status": "busy"
+  },
+  {
+    "pid": 85224,
+    "id": "9121ff49",
+    "cwd": "/work/project",
+    "kind": "background",
+    "startedAt": 1790661723876,
+    "sessionId": "9121ff49-5e25-43f0-bf48-307db0776c36",
+    "name": "Unattended run: nobody can answer questions, so ask none and skip any recommendation question. Run the shell command `date` with the Bash tool, then reply with its output. Do not edit any file.",
+    "status": "idle",
+    "state": "working"
+  }
+]

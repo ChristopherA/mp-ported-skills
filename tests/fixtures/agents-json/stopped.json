@@ -1,0 +1,30 @@
+[
+  {
+    "pid": 59879,
+    "cwd": "/work/other",
+    "kind": "interactive",
+    "startedAt": 1790405462044,
+    "sessionId": "6f669fad-eccc-4760-8610-874a5b6262d3",
+    "name": "other-session",
+    "status": "waiting",
+    "waitingFor": "input needed"
+  },
+  {
+    "pid": 56177,
+    "cwd": "/work/project",
+    "kind": "interactive",
+    "startedAt": 1790525865911,
+    "sessionId": "8b1ac03c-a84a-41b5-a5d1-4b0181a1d0ce",
+    "name": "project-session",
+    "status": "busy"
+  },
+  {
+    "id": "c2a368ee",
+    "cwd": "/work/project",
+    "kind": "background",
+    "startedAt": 1790661684529,
+    "sessionId": "c2a368ee-c513-484c-83d3-581830e209a5",
+    "name": "bash date command",
+    "state": "stopped"
+  }
+]
