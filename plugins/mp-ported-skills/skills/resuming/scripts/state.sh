@@ -56,7 +56,8 @@ ideas="/grill-with-docs on a new idea, or /improve-codebase-architecture (you ty
 # test of the frontier rule in docs/agents/issue-tracker.md) and not parked,
 # and its command; "; every open child blocked: ..." with the blockers, or
 # "parked", when none qualifies; nothing when #n has no open sub-issues.
-# Reads $open_nums, $body_blockers and the label strings.
+# Reads $open_nums, $body_blockers and the label strings. The weigh step reads
+# the child's number back from "; next child #N", so keep that wording.
 next_child() {
     subs=$(gh api "repos/{owner}/{repo}/issues/$1/sub_issues?per_page=100" 2>/dev/null) &&
         printf '%s' "$subs" | jq -e 'type == "array"' >/dev/null 2>&1 ||
@@ -214,11 +215,11 @@ gather() {
             [.[] | select(.n as $n | $fx | index($n))] | map("#\(.n) \(.t)") | join("; ")')
 
         # Ready-for-agent tickets with every blocker closed, not already fixed.
-        ready=$(printf '%s' "$rows" | jq -r --argjson open "$open_nums" --argjson fx "$fixed_nums" '
+        ready_rows=$(printf '%s' "$rows" | jq -c --argjson open "$open_nums" --argjson fx "$fixed_nums" '
             [.[] | select(.role == "agent" and .dep == 0 and (.l | index("parked") | not)
                             and ([.line[] | select(. as $b | $open | index($b))] | length == 0)
-                            and (.n as $n | $fx | index($n) | not))]
-            | map("#\(.n) \(.t)") | join("; ")')
+                            and (.n as $n | $fx | index($n) | not))]')
+        ready=$(printf '%s' "$ready_rows" | jq -r 'map("#\(.n) \(.t)") | join("; ")')
 
         # Hand work: ready-for-human tickets not in motion or parked, with every
         # blocker closed and not already fixed, ranked by priority line (high,
@@ -243,12 +244,19 @@ gather() {
                             and (.n as $n | $fx | index($n) | not))]')
         moving=$(printf '%s' "$moving_rows" | jq -r 'map("#\(.n) \(.t)") | join("; ")')
         # A parent's work in flight is its next child, so each carries that step.
-        in_motion=
+        in_motion= children=
         for n in $(printf '%s' "$moving_rows" | jq -r '.[].n'); do
+            child=$(next_child "$n")
+            children="$children $(printf '%s' "$child" | sed -n 's/^; next child #\([0-9]*\).*/\1/p')"
             in_motion="$in_motion; $(printf '%s' "$moving_rows" |
-                jq -r --argjson n "$n" '.[] | select(.n == $n) | "#\(.n) \(.t)"')$(next_child "$n")"
+                jq -r --argjson n "$n" '.[] | select(.n == $n) | "#\(.n) \(.t)"')$child"
         done
         [ -n "$in_motion" ] && inflight="$inflight, in motion ${in_motion#; }"
+        # Case 2's ticket: the first ready one case 1 has not already named as
+        # a next child, so next: and runner-up: never name the same ticket.
+        children_nums=$(jq -nc --arg c "$children" '$c | split(" ") | map(select(. != "") | tonumber)')
+        pick=$(printf '%s' "$ready_rows" | jq -r --argjson cn "$children_nums" '
+            [.[] | select(.n as $n | $cn | index($n) | not)] | first // empty | "#\(.n) \(.t)"')
 
         # needs-info with a reply: the last comment is not the tracker user's.
         replied=
@@ -284,7 +292,7 @@ gather() {
         [ -n "$inflight" ] || add_case "undecided: git shows nothing in flight; the tracker was not read"
         add_case "none known: the tracker was not read"
     else
-        [ -n "$ready" ] && add_case "2 /implement ${ready%% *} $you_type: ${ready%%;*}"
+        [ -n "$pick" ] && add_case "2 /implement ${pick%% *} $you_type: $pick"
         if [ "$n_unl" -gt 0 ] || [ "$n_triage" -gt 0 ] || [ -n "$replied" ]; then
             add_case "3 /triage $you_type: $n_unl unlabelled, $n_triage $t_triage, replied $t_info: ${replied:-none}"
         fi

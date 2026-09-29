@@ -246,6 +246,18 @@ check "in-motion parent: next child not ready" "1 work in flight: in motion #24 
 touch "$FAKE_GH/sub-24.fail"
 check "in-motion parent: sub-issues unread" "1 work in flight: in motion #24 t24; sub-issues not read" "$(next "$(run)")"
 command rm -f "$FAKE_GH/sub-24.fail" "$FAKE_GH/sub-24.json" "$FAKE_GH/deps-27.json"
+
+# The next child is also the lowest ready ticket: case 2 names the next one.
+issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)")"
+list "$(issue 52 ready-for-agent)" >"$FAKE_GH/sub-24.json"
+out=$(run)
+check "next child also ready: next is the child" "1 work in flight: in motion #24 t24; next child #52 (ready-for-agent, /implement #52, you type it; user-invoked): t52" "$(next "$out")"
+check "next child also ready: runner-up is the next ready ticket" "2 /implement #53 (you type it; user-invoked): #53 t53" "$(runner "$out")"
+has "next child also ready: still listed as ready" "ready, blockers closed: #52 t52; #53 t53" "$out"
+issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)")"
+out=$(run)
+check "next child the only ready ticket: runner-up falls to case 7" "$case7_later" "$(runner "$out")"
+command rm -f "$FAKE_GH/sub-24.json"
 issues "$saved_issues"
 
 prs '[{"number":60,"title":"fork pr","headRefName":"x","isCrossRepository":true}]'
