@@ -1,6 +1,6 @@
 #!/bin/sh
-# supervise.test.sh -- tests for the supervise skill's step.sh, launch.sh and
-# watch.sh.
+# supervise.test.sh -- tests for the supervise skill's step.sh, launch.sh,
+# watch.sh and actions.sh.
 #
 # step.sh reads canned state.sh output. watch.sh reads the recorded
 # `claude agents --json --all` fixtures in tests/fixtures/agents-json/, once
@@ -9,8 +9,9 @@
 # tests/fixtures/transcripts/ installed under the config dir's projects/ where
 # a test needs one. launch.sh runs against the same fake `claude`,
 # which records its arguments, working directory and CLAUDE_CONFIG_DIR, and
-# writes the job's state.json the daemon would. Touches nothing outside its
-# own mktemp directory.
+# writes the job's state.json the daemon would. actions.sh reads a job's
+# state.json and the shared-actions transcript fixture, against a scratch repo
+# with a bare remote. Touches nothing outside its own mktemp directory.
 #
 # Usage: sh tests/supervise.test.sh
 
@@ -342,6 +343,129 @@ rc=$?
 check "launch: no job state exits 2" "2" "$rc"
 check "launch: no job state stops the session" "stop c2a368ee" "$(command cat "$fake/calls" 2>/dev/null)"
 check "launch: no job state says why" "Error: no job state for session c2a368ee under $cfg/jobs after 1s, so its profile is unconfirmed; stopped it" "$out"
+
+# --- actions.sh ------------------------------------------------------------
+# A Project with a remote: the worker's start commit is on origin/main, and
+# its own commit reached origin only on a branch it pushed.
+repo_git() { # <folder> <git args...> -- git there, unsigned, with a test identity
+    repo_dir=$1; shift
+    git -C "$repo_dir" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@"
+}
+remote="$work/remote.git"
+repo="$work/worker-repo"
+git init -q --bare "$remote"
+git init -q -b main "$repo"
+repo_git "$repo" commit -q --allow-empty -m start
+repo_git "$repo" remote add origin "$remote"
+repo_git "$repo" push -q origin main 2>/dev/null
+start=$(git -C "$repo" rev-parse HEAD)
+repo_git "$repo" commit -q --allow-empty -m "worker's commit"
+repo_git "$repo" push -q origin HEAD:66-topic 2>/dev/null
+pushed="branch origin/66-topic ungranted: holds the worker's commits"
+
+sid=c2a368ee-c513-484c-83d3-581830e209a5
+job() { # [jq filter] -- install job c2a368ee's state.json
+    command rm -rf "$cfg/jobs"
+    mkdir -p "$cfg/jobs/c2a368ee"
+    jq "${1:-.}" "$fixtures/job-state.json" >"$cfg/jobs/c2a368ee/state.json"
+}
+actions() { # [start] -- actions.sh's output for job c2a368ee in $repo
+    sh "$scripts/actions.sh" --id c2a368ee --dir "$repo" --start "${1:-$start}" </dev/null
+}
+bash_call() { # <id> <command> [is_error] -- a Bash call and its result, as transcript rows
+    jq -cn --arg id "$1" --arg c "$2" \
+        '{type: "assistant", message: {role: "assistant", content: [{type: "tool_use", id: $id, name: "Bash", input: {command: $c}}]}}'
+    jq -cn --arg id "$1" --argjson e "${3:-false}" \
+        '{type: "user", message: {role: "user", content: [{type: "tool_result", tool_use_id: $id, is_error: $e, content: "ok"}]}}'
+}
+# The children entry as the #66 worker's job recorded it.
+job '.children = [{"id": "72", "href": "https://github.com/ChristopherA/mp-ported-skills/pull/72", "kind": "pr"}]'
+transcript shared-actions -work-project "$sid"
+check "actions: the #66 run, every shared action ungranted" "pr 72 ungranted: https://github.com/ChristopherA/mp-ported-skills/pull/72
+$pushed
+command refused ungranted: git push origin HEAD:main 2>&1
+command succeeded ungranted: git push -u origin 66-deny-shared-actions-to-background-workers 2>&1 -- push 66-deny-shared-actions-to-background-workers
+command failed ungranted: gh pr create --repo ChristopherA/mp-ported-skills --title \"Deny shared actions to background workers\" --body-file \"\$CLAUDE_JOB_DIR/tmp/pr-body.md\" --head 66-deny-shared-actions-to-background-workers --base main 2>&1
+command succeeded ungranted: gh pr create --repo ChristopherA/mp-ported-skills --title \"Deny shared actions to background workers\" --body-file /work/config/jobs/76153f47/tmp/pr-body.md --head 66-deny-shared-actions-to-background-workers --base main 2>&1 -- pr 72 created" "$(actions)"
+
+# A script that pushes names no push in its text; the push Claude Code
+# recorded on the result still lists it.
+job
+jq -c 'select(.message.content | any(.id == "toolu_01XdkrXwv1TnYznyvLWKGaRN" or .tool_use_id == "toolu_01XdkrXwv1TnYznyvLWKGaRN"))
+    | .message.content |= map(if .type == "tool_use" then .input.command = "sh scripts/ship.sh" else . end)' \
+    "$transcripts/shared-actions.jsonl" >"$cfg/projects/-work-project/$sid.jsonl"
+check "actions: a push recorded on the result, whatever the command" "$pushed
+command succeeded ungranted: sh scripts/ship.sh -- push 66-deny-shared-actions-to-background-workers" "$(actions)"
+
+# gh writes the hook lets through are listed; reads, and a commit message
+# that names one, are not.
+{
+    bash_call w1 'gh issue comment 74 --body "done"'
+    bash_call w2 'gh -R o/r pr review 72 --approve' true
+    bash_call w3 'cd /work/project && gh issue edit 74 --add-label ready'
+    bash_call r1 'gh issue view 74 --json title,body,comments'
+    bash_call r2 'gh pr list --state all'
+    bash_call r3 'git commit -m "then gh issue close 74"'
+} >"$cfg/projects/-work-project/$sid.jsonl"
+check "actions: gh writes the hook allows" "$pushed
+command succeeded ungranted: gh issue comment 74 --body \"done\"
+command failed ungranted: gh -R o/r pr review 72 --approve
+command succeeded ungranted: cd /work/project && gh issue edit 74 --add-label ready" "$(actions)"
+
+# A subagent's calls are in its own transcript beside the worker's.
+transcript just-launched -work-project "$sid"
+mkdir -p "$cfg/projects/-work-project/$sid/subagents"
+jq -c 'select(.message.content | any(.id == "toolu_01U84F8dsqTtkMoD2YxRkZgs" or .tool_use_id == "toolu_01U84F8dsqTtkMoD2YxRkZgs")) | .isSidechain = true' \
+    "$transcripts/shared-actions.jsonl" >"$cfg/projects/-work-project/$sid/subagents/agent-a1.jsonl"
+check "actions: a subagent's push is listed" "$pushed
+command refused ungranted: git push origin HEAD:main 2>&1" "$(actions)"
+
+# A multi-line command is listed by its first line.
+transcript just-launched -work-project "$sid"
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cd /work/project\ngit push"}}]}}' >>"$cfg/projects/-work-project/$sid.jsonl"
+check "actions: a call with no result yet, by its first line" "$pushed
+command no result ungranted: cd /work/project ..." "$(actions)"
+
+# Nothing shared: the worker's commits are only local, and it ran no
+# shared command.
+repo_git "$repo" commit -q --allow-empty -m "local only"
+local_start=$(git -C "$repo" rev-parse HEAD)
+repo_git "$repo" commit -q --allow-empty -m "local only 2"
+transcript turn-ended -work-project "$sid"
+check "actions: nothing shared" "none" "$(actions "$local_start")"
+
+# A source that cannot be read is named, never taken as empty, and a
+# report of notes alone does not say none.
+command rm -rf "$cfg/projects"
+check "actions: no transcript is named" "note no transcript for session $sid under $cfg/projects, so its commands were not read" \
+    "$(actions "$local_start")"
+transcript turn-ended -work-project "$sid"
+printf 'not json\n' >>"$cfg/projects/-work-project/$sid.jsonl"
+check "actions: an unreadable transcript is named" "note transcript $cfg/projects/-work-project/$sid.jsonl could not be read, so its commands were not read" \
+    "$(actions "$local_start")"
+job 'del(.sessionId)'
+check "actions: a job with no session is named" "note job state $cfg/jobs/c2a368ee/state.json names no session, so its commands were not read" \
+    "$(actions "$local_start")"
+printf 'not json\n' >"$cfg/jobs/c2a368ee/state.json"
+check "actions: an unreadable job state is named" "$pushed
+note job state $cfg/jobs/c2a368ee/state.json could not be read, so its PRs, issues and commands were not read" "$(actions)"
+command rm -rf "$cfg/jobs"
+check "actions: no job state is named" "$pushed
+note no job state for c2a368ee under $cfg/jobs, so its PRs, issues and commands were not read" "$(actions)"
+command rm -rf "$cfg/jobs" "$cfg/projects"
+
+sh "$scripts/actions.sh" --dir "$repo" --start "$start" </dev/null >/dev/null 2>&1
+check "actions: --id is required" "1" "$?"
+sh "$scripts/actions.sh" --id c2a368ee --start "$start" </dev/null >/dev/null 2>&1
+check "actions: --dir is required" "1" "$?"
+sh "$scripts/actions.sh" --id c2a368ee --dir "$repo" </dev/null >/dev/null 2>&1
+check "actions: --start is required" "1" "$?"
+sh "$scripts/actions.sh" --id c2a368ee --dir "$repo" --start nosuchrev </dev/null >/dev/null 2>&1
+check "actions: an unknown --start exits 1" "1" "$?"
+sh "$scripts/actions.sh" --id c2a368ee --dir "$work/missing" --start "$start" </dev/null >/dev/null 2>&1
+check "actions: a missing folder exits 1" "1" "$?"
+( unset CLAUDE_CONFIG_DIR; sh "$scripts/actions.sh" --id c2a368ee --dir "$repo" --start "$start" </dev/null >/dev/null 2>&1 )
+check "actions: config dir required" "1" "$?"
 
 echo "supervise: $pass passed, $fail failed"
 [ "$fail" = 0 ]
