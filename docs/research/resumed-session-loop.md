@@ -2,7 +2,7 @@
 
 Question from #77: can one supervised background session run the maintainer's loop (`/implement #N`, `/capturing`, `/clear`, next step, `/implement #M`), each command sent by stop and resume, or does each ticket need a fresh background session, as ADR 0003 assumes?
 
-Tested live on **Claude Code 2.1.286**, 2026-09-30, with `claude-sonnet-5`. The Project was a scratch git repo inside the Hub, with no remote and no tracker. The tickets were two no-op specs given as `/implement`'s arguments: create `hello.txt`, then `bye.txt`, and commit. One session was launched as `launch.sh` launches (`claude --bg --model claude-sonnet-5 --disallowedTools EnterWorktree --permission-mode auto '/mattpocock-skills:implement ...'`), and each later command was sent with `claude stop <id>`, then `claude --bg --resume <session id> '<command>'` with no other flags.
+Tested live on **Claude Code 2.1.286** with `claude-sonnet-5`. The Project was a scratch git repo beside this one, with no remote and no tracker. The tickets were two no-op specs given as `/implement`'s arguments: create `hello.txt`, then `bye.txt`, and commit. One session was launched as `launch.sh` launches (`claude --bg --model claude-sonnet-5 --disallowedTools EnterWorktree --permission-mode auto '/mattpocock-skills:implement ...'`), and each later command was sent with `claude stop <id>`, then `claude --bg --resume <session id> '<command>'` with no other flags.
 
 ## Answers
 
@@ -26,7 +26,7 @@ Tested live on **Claude Code 2.1.286**, 2026-09-30, with `claude-sonnet-5`. The 
 
 ## Stop and resume, observed
 
-- **A resume can start a copy even after `claude agents` shows no pid.** The first `/clear` resume, issued about a second after `claude stop` returned and the row dropped its `pid`, printed `session 872473df is already running in the background, so this started a copy as 17d1a711`. The same resume issued about a minute after that stop woke the original.
+- **A resume can start a copy even after `claude agents` shows no pid.** The first `/clear` resume, issued as soon as `claude stop` returned and the row had dropped its `pid`, printed `session 872473df is already running in the background, so this started a copy as 17d1a711`. The same resume issued 47 seconds later, by the two transcripts' `/clear` timestamps, woke the original.
 - **The copy lost the saved options.** Its job's `respawnFlags` were `["--model","opus"]`: no `--disallowedTools EnterWorktree`, no auto mode, and a different model from the one the supervisor chose. A copy is not only a split worker; it is one that runs without the launch's guards.
 - **What a finished stop looks like is not consistent.** After three stops of the same session: once `agents --json` showed `state: working` with no pid while `state.json` said `done`; once both said `stopped` within a second; once neither said `stopped` within 30 seconds, and the resume issued after that woke the original. The process exit (`ps -p <pid>`) was quick every time. No single reading marked "safe to resume".
 
@@ -47,12 +47,12 @@ Per ticket, the loop in each shape:
 | | Same session, `/clear` by resume | Fresh session per ticket |
 |---|---|---|
 | Stop-and-resume cycles | 3: `/capturing`, `/clear`, `/implement #M` | 1: `/capturing`; then stop, `claude rm`, and a new `claude --bg` |
-| Context at the next ticket | fresh (66.6k first call) | fresh (67.5k first call) |
+| Context at the next ticket | fresh (66.6k first call: 39.5k read from the prompt cache, 27.0k written) | fresh (67.5k first call, all written, for the first ticket's cold start) |
 | Cost | the same model turns; `/clear` runs none | the same model turns |
 | Ids the maintainer follows in the Claude app | one short id, titled with the first ticket for every ticket | one per ticket, titled with its own ticket |
 | Transcripts per session | one per ticket, under ids the job only partly records (`sessionId` keeps the first, `resumeSessionId` the latest) | one, under the job's `sessionId` |
 
-- **Cost does not decide it.** A clear by resume gives the same fresh context as a new session, and neither shape adds a model turn the other lacks.
+- **Cost does not decide it.** A clear by resume gives the same fresh context as a new session, and neither shape adds a model turn the other lacks. The cleared session's first call hit the prompt cache for 39.5k of its 66.6k tokens; the only fresh-session figure measured is a cold start, so whether a fresh session launched right after a ticket hits the same cache is untested. The difference is at most that one call's cache writes per ticket.
 - **Copy risk decides it.** Every stop and resume is a chance to start a copy (ADR 0003), and a copy here ran without the deny, auto mode or the chosen model. The same-session loop takes three of them per ticket, the fresh-session loop one.
 - **The record breaks in the same-session loop.** `actions.sh` and `record.sh` find the transcript by the job's `sessionId`, which after a clear is the first ticket's transcript. They would report the first ticket's actions and cost for every later ticket unless they learned to follow `resumeSessionId` across clears.
 - **One id is the same-session loop's only gain**, and its title names the wrong ticket.
@@ -60,3 +60,5 @@ Per ticket, the loop in each shape:
 So #59 should keep ADR 0003's shape: on `done`, resume the finished worker once with `/mp-ported-skills:capturing`, then stop and `claude rm` it, and launch the next ticket with `launch.sh` in a new session.
 
 Before #59 loops, the worktree guard above has to be settled. With it on, every ticket in the loop lands on its own unpushed branch, and the "finished ticket has not landed" stop fires after every ticket.
+
+The test's background sessions (the original and the copy) were removed with `claude rm`, and the scratch repo and its worktrees deleted. Their transcripts remain in the profile's `projects/` folder.
