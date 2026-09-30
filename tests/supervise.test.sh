@@ -161,6 +161,31 @@ check "watch: busy is working whatever the transcript says" "working
 cwd /work/project" "$(watch_file working-busy c2a368ee)"
 command rm -rf "$cfg/projects"
 
+# With --dir, a working worker whose cwd has left the Project folder (it
+# entered a worktree) is reported at once. --dir must name a real folder, so
+# these fixtures are rewritten from /work/project to one.
+project="$work/project"
+mkdir -p "$project"
+in_project() { # <fixture> -- its path, with /work/project rewritten to $project
+    jq --arg d "$project" '[.[] | .cwd |= (if . then sub("^/work/project"; $d) else . end)]' \
+        "$fixtures/$1.json" >"$work/$1.in-project.json"
+    echo "$work/$1.in-project.json"
+}
+watch_in_project() { # <fixture> <id> -- watch.sh --dir $project on that fixture
+    sh "$scripts/watch.sh" --id "$2" --dir "$project" --file "$(in_project "$1")" </dev/null
+}
+check "watch --dir: working in a worktree is moved" "moved
+cwd $project/.claude/worktrees/issue-66" "$(watch_in_project working-moved c2a368ee)"
+check "watch --dir: working in the folder is working" "working
+cwd $project" "$(watch_in_project working-busy c2a368ee)"
+check "watch --dir: done is not moved" "done
+cwd $project" "$(watch_in_project done 9121ff49)"
+check "watch: without --dir, a worktree cwd is working" "working
+cwd /work/project/.claude/worktrees/issue-66" "$(watch_file working-moved c2a368ee)"
+out=$(sh "$scripts/watch.sh" --id c2a368ee --dir "$work/missing" --file "$fixtures/working-busy.json" </dev/null 2>&1)
+check "watch --dir: missing folder exits 1" "1" "$?"
+check "watch --dir: missing folder says so" "Error: not a directory: $work/missing" "$out"
+
 # --- fake claude -----------------------------------------------------------
 fake="$work/fake"
 mkdir -p "$work/bin" "$fake"
@@ -220,6 +245,13 @@ check "poll: stopped at the first such round" "1" "$(command cat "$fake/count")"
 command rm -rf "$cfg/projects"
 
 reset_fake
+printf '%s\n' "$(in_project working-busy)" "$(in_project working-moved)" "$(in_project done)" >"$fake/seq"
+check "poll --dir: stops when the worker moves" "moved
+cwd $project/.claude/worktrees/issue-66" \
+    "$(PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id c2a368ee --dir "$project" --interval 0 --timeout 30 </dev/null)"
+check "poll --dir: stopped at the round it moved" "2" "$(command cat "$fake/count")"
+
+reset_fake
 echo "$fixtures/working-busy.json" >"$fake/seq"
 out=$(PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id c2a368ee --interval 1 --timeout 1 </dev/null)
 rc=$?
@@ -235,8 +267,6 @@ check "poll: failing agents command exits 1" "1" "$rc"
 check "poll: failing agents command is not gone" "" "$out"
 
 # --- launch.sh -------------------------------------------------------------
-project="$work/project"
-mkdir -p "$project"
 launch() { # [args...] -- launch.sh --dir $project with the fake claude
     reset_fake
     PATH="$work/bin:$PATH" sh "$scripts/launch.sh" --dir "$project" "$@" </dev/null
@@ -248,6 +278,8 @@ check "launch: prints the id" "c2a368ee" "$out"
 check "launch: flags and the command" "--bg
 --model
 claude-sonnet-5
+--disallowedTools
+EnterWorktree
 --permission-mode
 auto
 /mattpocock-skills:implement #56" "$(command cat "$fake/args")"
@@ -294,6 +326,8 @@ mismatch() { # <name> <jq filter> <expected message>
 }
 mismatch "wrong permission mode" '| .respawnFlags = ["--permission-mode", "default", "--model", "claude-sonnet-5"]' \
     "Error: session c2a368ee is not in auto mode (its flags: --permission-mode default --model claude-sonnet-5); stopped it"
+mismatch "worktrees allowed" '| .respawnFlags = ["--permission-mode", "auto", "--model", "claude-sonnet-5"]' \
+    "Error: session c2a368ee can enter a worktree: EnterWorktree is not in its disallowed tools (its flags: --permission-mode auto --model claude-sonnet-5); stopped it"
 mismatch "wrong profile" '| .providerEnv.CLAUDE_CONFIG_DIR = "/elsewhere"' \
     "Error: session c2a368ee runs under config /elsewhere, not $cfg; stopped it"
 mismatch "no profile recorded" '| del(.providerEnv)' \

@@ -4,6 +4,8 @@
   "tempo": "blocked",
   "template": "bg",
   "respawnFlags": [
+    "--disallowedTools",
+    "EnterWorktree",
     "--permission-mode",
     "auto",
     "--model",

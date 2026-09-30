@@ -2,13 +2,25 @@
 # launch.sh -- start /implement #N as a background session in a Project, and
 # confirm the session got what it was launched with.
 #
-# Runs `claude --bg --model MODEL --permission-mode auto
-# '/mattpocock-skills:implement #N'` in DIR with CLAUDE_CONFIG_DIR set
-# explicitly, so the session runs under this profile whatever the shell
-# would pick for DIR. Then reads the job's state.json, which the background
-# service writes under that config dir, and checks that the session runs
-# under the same config dir, in DIR itself (not a worktree), in auto mode. A
-# session that fails a check is stopped. Prints the session's short id.
+# Runs `claude --bg --model MODEL --disallowedTools EnterWorktree
+# --permission-mode auto '/mattpocock-skills:implement #N'` in DIR with
+# CLAUDE_CONFIG_DIR set explicitly, so the session runs under this profile
+# whatever the shell would pick for DIR. Then reads the job's state.json,
+# which the background service writes under that config dir, and checks that
+# the session runs under the same config dir, in DIR itself (not a worktree),
+# in auto mode, and without EnterWorktree. A session that fails a check is
+# stopped. Prints the session's short id.
+#
+# EnterWorktree is denied because /implement workers called it on their own,
+# after launch, and committed on a worktree branch nobody pushed. The deny
+# reaches a background session. Checked live with Claude Code 2.1.285: two
+# `claude --bg --model claude-sonnet-5 [--disallowedTools EnterWorktree]
+# --permission-mode auto` sessions, each told to call ToolSearch with
+# "select:EnterWorktree". With the flag it returned "No matching deferred
+# tools found"; without it, the EnterWorktree schema. The flagged job's
+# respawnFlags began ["--disallowedTools","EnterWorktree", ...]. The flag
+# takes a list, so it comes before another option, never right before the
+# prompt, which it would swallow as a tool name.
 #
 # Usage:
 #   launch.sh --dir DIR --ticket N [--model MODEL]
@@ -58,7 +70,8 @@ DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
 set -- "$CONFIG"/plugins/cache/*/mattpocock-skills/*/skills/*/implement/SKILL.md
 [ -f "$1" ] || fail "mattpocock-skills:implement is not installed under $CONFIG/plugins/cache; install mattpocock-skills first"
 
-out=$(cd "$DIR" && CLAUDE_CONFIG_DIR="$CONFIG" claude --bg --model "$MODEL" --permission-mode auto \
+out=$(cd "$DIR" && CLAUDE_CONFIG_DIR="$CONFIG" claude --bg --model "$MODEL" \
+    --disallowedTools EnterWorktree --permission-mode auto \
     "/mattpocock-skills:implement #$TICKET" </dev/null 2>&1)
 id=$(printf '%s\n' "$out" | sed -n 's/^backgrounded · \([0-9a-f][0-9a-f]*\)$/\1/p' | head -n 1)
 if [ -z "$id" ]; then
@@ -94,5 +107,9 @@ got=$(jq -r .cwd "$job")
 jq -e '.respawnFlags as $f | [range(0; ($f | length) - 1)]
         | any(. as $i | $f[$i] == "--permission-mode" and $f[$i + 1] == "auto")' "$job" >/dev/null ||
     reject "is not in auto mode (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
+jq -e '.respawnFlags as $f | [range(0; ($f | length) - 1)]
+        | any(. as $i | $f[$i] == "--disallowedTools"
+              and ($f[$i + 1] | split("[, ]+"; null) | index("EnterWorktree")) != null)' "$job" >/dev/null ||
+    reject "can enter a worktree: EnterWorktree is not in its disallowed tools (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
 
 echo "$id"

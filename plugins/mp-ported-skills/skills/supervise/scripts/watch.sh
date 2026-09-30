@@ -4,6 +4,8 @@
 # Reads `claude agents --json --all` and finds the background session with
 # the given short id. Prints its state on the first line:
 #   working            still running (the loop keeps polling)
+#   moved              still running, but no longer in DIR (with --dir): it
+#                      entered a worktree or another folder
 #   done               its turn ended; the session is still live
 #   blocked <what>     waiting on a human: `permission prompt`, `input needed`
 #   stopped            stopped, conversation kept
@@ -19,11 +21,14 @@
 # with a last line `note claude agents still said working`.
 #
 # Usage:
-#   watch.sh --id ID [--interval SECONDS] [--timeout SECONDS]
+#   watch.sh --id ID [--dir DIR] [--interval SECONDS] [--timeout SECONDS]
 #       poll until a state other than working; on timeout print the last
 #       one and exit 124
-#   watch.sh --id ID --file PATH
+#   watch.sh --id ID [--dir DIR] --file PATH
 #       classify one saved `claude agents --json --all` output
+#
+# DIR is the Project folder the worker was launched in. Without it, a working
+# session is working wherever it runs.
 #
 # Exits 1 when the list cannot be read, which is never reported as gone.
 
@@ -31,6 +36,7 @@ set -u
 
 ID=""
 FILE=""
+DIR=""
 INTERVAL=30
 TIMEOUT=14400
 
@@ -39,11 +45,12 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --id)       need_value "$@"; ID="$2"; shift 2 ;;
         --file)     need_value "$@"; FILE="$2"; shift 2 ;;
+        --dir)      need_value "$@"; DIR="$2"; shift 2 ;;
         --interval) need_value "$@"; INTERVAL="$2"; shift 2 ;;
         --timeout)  need_value "$@"; TIMEOUT="$2"; shift 2 ;;
         --help)
-            printf 'Usage: watch.sh --id ID [--interval S] [--timeout S] | watch.sh --id ID --file PATH\n'
-            printf 'Prints: working, done, blocked <what>, stopped, gone or unknown <state>; then cwd and needs lines.\n'
+            printf 'Usage: watch.sh --id ID [--dir DIR] [--interval S] [--timeout S] | watch.sh --id ID [--dir DIR] --file PATH\n'
+            printf 'Prints: working, moved, done, blocked <what>, stopped, gone or unknown <state>; then cwd and needs lines.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
@@ -55,6 +62,10 @@ case $TIMEOUT in '' | *[!0-9]*) fail "--timeout needs whole seconds, not '$TIMEO
 # claude agents and the job's state.json both follow the config dir, so an
 # unset one would read another profile's sessions.
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the profile being watched is unknown"
+if [ -n "$DIR" ]; then
+    [ -d "$DIR" ] || fail "not a directory: $DIR"
+    DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
+fi
 
 # classify <agents json>: the report lines for $ID, or exit 1 when the input
 # is not a JSON array.
@@ -87,12 +98,18 @@ turn_ended() {
 }
 
 # report <agents json>: classify, adding the job's needs to a blocked state.
-# A working session with status idle whose transcript says its turn ended is
-# done: the state list can go on saying working for hours after that.
+# A working session whose cwd is not DIR has moved. A working session with
+# status idle whose transcript says its turn ended is done: the state list
+# can go on saying working for hours after that.
 report() {
     out=$(classify "$1") || return 1
     case $out in
         working*)
+            cwd=$(printf '%s\n' "$out" | sed -n 's/^cwd //p')
+            if [ -n "$DIR" ] && [ -n "$cwd" ] && [ "$cwd" != "$DIR" ]; then
+                printf 'moved\ncwd %s\n' "$cwd"
+                return 0
+            fi
             session_id=$(printf '%s' "$1" | jq -r --arg id "$ID" '
                 [.[] | select(.kind == "background" and .id == $id)] | first
                 | select(.status == "idle") | .sessionId // empty')
