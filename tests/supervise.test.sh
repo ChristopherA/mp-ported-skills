@@ -5,7 +5,9 @@
 # step.sh reads canned state.sh output. watch.sh reads the recorded
 # `claude agents --json --all` fixtures in tests/fixtures/agents-json/, once
 # with --file and in its polling loop through a fake `claude` on PATH that
-# serves them in sequence. launch.sh runs against the same fake `claude`,
+# serves them in sequence, with a worker's transcript from
+# tests/fixtures/transcripts/ installed under the config dir's projects/ where
+# a test needs one. launch.sh runs against the same fake `claude`,
 # which records its arguments, working directory and CLAUDE_CONFIG_DIR, and
 # writes the job's state.json the daemon would. Touches nothing outside its
 # own mktemp directory.
@@ -17,6 +19,7 @@ set -u
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 scripts="$root/plugins/mp-ported-skills/skills/supervise/scripts"
 fixtures="$root/tests/fixtures/agents-json"
+transcripts="$root/tests/fixtures/transcripts"
 work=$(mktemp -d)
 work=$(CDPATH= cd -- "$work" && pwd -P)
 trap 'command rm -rf "$work"' EXIT
@@ -121,6 +124,43 @@ check "watch: config dir required" "1" "$?"
 jq '[.[] | if .kind == "background" then del(.cwd) else . end]' "$fixtures/done.json" >"$work/nocwd.json"
 check "watch: no cwd line without a cwd" "done" "$(sh "$scripts/watch.sh" --id 9121ff49 --file "$work/nocwd.json" </dev/null)"
 
+# The state list can go on saying working after the turn ended. The worker's
+# transcript, found by session id in any project folder, says it ended.
+transcript() { # <fixture> [folder] [session id] -- install it as a worker's transcript
+    dir="$cfg/projects/${2:--work-project}"
+    command rm -rf "$cfg/projects"
+    mkdir -p "$dir"
+    command cp "$transcripts/$1.jsonl" "$dir/${3:-9121ff49-5e25-43f0-bf48-307db0776c36}.jsonl"
+}
+transcript turn-ended
+check "watch: turn ended while the list says working" "done
+cwd /work/project
+note claude agents still said working" "$(watch_file working-idle 9121ff49)"
+# A turn can end while the worker waits on background agents; their reports
+# start the next turn.
+transcript waiting-on-agents
+check "watch: turn ended with agents pending is working" "working
+cwd /work/project" "$(watch_file working-idle 9121ff49)"
+transcript just-launched
+check "watch: just launched, prompt only, is working" "working
+cwd /work/project" "$(watch_file working-idle 9121ff49)"
+transcript mid-turn
+check "watch: transcript ending in a tool call is working" "working
+cwd /work/project" "$(watch_file working-idle 9121ff49)"
+command rm -rf "$cfg/projects"
+check "watch: no transcript is working" "working
+cwd /work/project" "$(watch_file working-idle 9121ff49)"
+# A worker that entered a worktree has its transcript in the worktree's folder.
+transcript turn-ended -work-project--claude-worktrees-issue-66
+check "watch: transcript found in a worktree's folder" "done
+cwd /work/project
+note claude agents still said working" "$(watch_file working-idle 9121ff49)"
+# status busy means mid-turn, whatever the transcript says.
+transcript turn-ended -work-project c2a368ee-c513-484c-83d3-581830e209a5
+check "watch: busy is working whatever the transcript says" "working
+cwd /work/project" "$(watch_file working-busy c2a368ee)"
+command rm -rf "$cfg/projects"
+
 # --- fake claude -----------------------------------------------------------
 fake="$work/fake"
 mkdir -p "$work/bin" "$fake"
@@ -172,6 +212,12 @@ check "poll: working until blocked" "blocked input needed
 cwd /work/project" "$(poll c2a368ee working-busy blocked-input-needed)"
 check "poll: stops at stopped" "stopped
 cwd /work/project" "$(poll c2a368ee working-busy stopped)"
+transcript turn-ended
+check "poll: stops when the transcript says the turn ended" "done
+cwd /work/project
+note claude agents still said working" "$(poll 9121ff49 working-idle working-idle)"
+check "poll: stopped at the first such round" "1" "$(command cat "$fake/count")"
+command rm -rf "$cfg/projects"
 
 reset_fake
 echo "$fixtures/working-busy.json" >"$fake/seq"

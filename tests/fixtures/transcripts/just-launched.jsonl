@@ -1,0 +1,12 @@
+{"type":"custom-title"}
+{"type":"agent-name"}
+{"type":"mode"}
+{"type":"permission-mode"}
+{"type":"atis-latch"}
+{"type":"file-history-snapshot"}
+{"type":"file-history-snapshot"}
+{"type":"attachment","isSidechain":false,"cwd":"/work/project"}
+{"type":"attachment","isSidechain":false,"cwd":"/work/project"}
+{"type":"user","isSidechain":false,"cwd":"/work/project","message":{"role":"user","content":"<prompt>"}}
+{"type":"user","isSidechain":false,"isMeta":true,"cwd":"/work/project","message":{"role":"user","content":[{"type":"text"}]}}
+{"type":"attachment","isSidechain":false,"cwd":"/work/project"}

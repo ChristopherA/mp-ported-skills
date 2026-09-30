@@ -45,7 +45,7 @@ Add `--model <id>` when the user gave one; the default is `claude-sonnet-5`, and
 sh "${CLAUDE_SKILL_DIR}/scripts/watch.sh" --id ID </dev/null
 ```
 
-Run it with the Bash tool's `run_in_background`, since a ticket outlasts a foreground call, and wait for its completion notice. It polls `claude agents --json --all` every 30 seconds while the worker is `working`, and returns at the first other state, with the worker's `cwd` on the next line and, for a blocked worker, a `needs` line naming what it waits for. After 4 hours it exits 124 with the last state (`--timeout` changes this).
+Run it with the Bash tool's `run_in_background`, since a ticket outlasts a foreground call, and wait for its completion notice. It polls `claude agents --json --all` every 30 seconds while the worker is `working`, and returns at the first other state, with the worker's `cwd` on the next line and, for a blocked worker, a `needs` line naming what it waits for. `claude agents` can go on saying `working` for hours after the worker's turn ended, so `watch.sh` also reads the worker's transcript and returns `done` when it shows the turn ended with no background agents pending, adding the line `note claude agents still said working`. After 4 hours it exits 124 with the last state (`--timeout` changes this).
 
 ## 4. Report
 

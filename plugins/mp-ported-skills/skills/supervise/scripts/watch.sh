@@ -13,7 +13,10 @@
 # `needs <text>` when its job's state.json under $CLAUDE_CONFIG_DIR names it.
 #
 # The state comes from `state`, not `status`: a session just launched shows
-# `status: idle` while its `state` is `working`.
+# `status: idle` while its `state` is `working`. But `state` can go on saying
+# working for hours after the turn ended (#73), so a working session with
+# `status: idle` whose transcript shows the turn ended is reported as done,
+# with a last line `note claude agents still said working`.
 #
 # Usage:
 #   watch.sh --id ID [--interval SECONDS] [--timeout SECONDS]
@@ -67,9 +70,36 @@ classify() {
           end'
 }
 
+# turn_ended <session id>: whether the session's transcript shows its turn
+# ended: its last conversation row is a turn_duration row with no background
+# agents pending, since their reports start another turn. The transcript is
+# looked for in every project folder, since a worker that entered a worktree
+# has its transcript moved to the worktree's folder.
+turn_ended() {
+    [ -n "$1" ] || return 1
+    for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
+        [ -f "$t" ] || continue
+        jq -e -s '[.[] | select(.type == "user" or .type == "assistant" or .type == "system")] | last
+            | .type == "system" and .subtype == "turn_duration"
+              and (.pendingBackgroundAgentCount // 0) == 0' "$t" >/dev/null 2>&1 && return 0
+    done
+    return 1
+}
+
 # report <agents json>: classify, adding the job's needs to a blocked state.
+# A working session with status idle whose transcript says its turn ended is
+# done: the state list can go on saying working for hours after that.
 report() {
     out=$(classify "$1") || return 1
+    case $out in
+        working*)
+            session_id=$(printf '%s' "$1" | jq -r --arg id "$ID" '
+                [.[] | select(.kind == "background" and .id == $id)] | first
+                | select(.status == "idle") | .sessionId // empty')
+            if turn_ended "$session_id"; then
+                out=$(printf 'done%s\nnote claude agents still said working' "${out#working}")
+            fi ;;
+    esac
     printf '%s\n' "$out"
     case $out in
         blocked*)
