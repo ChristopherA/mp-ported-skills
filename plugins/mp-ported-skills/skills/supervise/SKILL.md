@@ -12,7 +12,7 @@ The Project folder, relative to this session's folder or absolute, is the first 
 
 The supervisor drives build-loop defaults and nothing else:
 
-- **It may**: take the step `state.sh` names, launch `/implement #N` for a `ready-for-agent` ticket, watch the worker, and stop a worker that finished or failed a launch check.
+- **It may**: take the step `state.sh` names, launch `/implement #N` for a `ready-for-agent` ticket, watch the worker, send it a build-loop follow-up (Follow-ups, below), and stop a worker that finished or failed a launch check.
 - **It stops for anything that changes the spec**: any other step, a question the worker asks, a permission prompt, a ticket that needs a decision. It reports these and answers none of them. The human answers in the worker with `claude attach <id>`, or in the approval request the Claude app shows for the worker's permission prompt.
 - **Shared actions are the human's.** This version holds no standing grants: a push, PR or issue close that `/implement` reaches is reported as blocked, and the supervisor performs none itself, apart from one comment on the ticket it ran, holding the run record (step 4). A PreToolUse hook (#66) refuses a worker's own attempt at one in the forms it recognizes, so the report still lists every shared action the worker took, in case a form got past it or an older worker predates the hook.
 - **A worker stays in the Project folder for the whole run**: its commits would otherwise land on a branch nobody pushes. It is launched without the `EnterWorktree` tool, stopped at launch if the background service placed it elsewhere, and stopped the moment `watch.sh` sees it leave the folder anyway.
@@ -83,5 +83,15 @@ gh issue comment N --body-file "<scratchpad>/run-record.md"
 ```
 
 `record.sh --session <session id>` in place of `--id` records a plain interactive session, such as a hand-run `/implement` of a ticket the same size, leaving out the job's fields: that is the baseline a supervised run is compared against.
+
+## Follow-ups
+
+No command sends input to a running background session, so a follow-up to a worker, such as `/mp-ported-skills:capturing` after `done`, goes by stop and resume:
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/resume.sh" --id ID --dir "<project folder>" --prompt "<prompt>" </dev/null
+```
+
+It stops the worker, waits until `claude agents` shows it `stopped` or has shown no pid for 60 seconds (`--settle`), and resumes the job's original session id with the prompt and no flags. It refuses while another background session is live in the same checkout, naming each. A resume that starts a copy instead of waking the worker loses the launch's EnterWorktree deny, auto mode and model, so the copy is stopped and removed at once, the worker stopped again, and the resume retried, up to 3 times (`--tries`). It prints one line for each copy, then `resumed ID`; name every copy in the report. The id stays the same, so watch it again with `watch.sh`. Exit 1: nothing resumed, report the error. Exit 2: every try started a copy; each was removed, the worker is left stopped, and the error names them all.
 
 Done when the report names the ticket, the outcome, the shared actions (or `none`), either its commits or the id with `claude attach`, and the run record's comment.

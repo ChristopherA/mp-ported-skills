@@ -1,6 +1,6 @@
 #!/bin/sh
 # supervise.test.sh -- tests for the supervise skill's step.sh, launch.sh,
-# watch.sh and actions.sh.
+# watch.sh, resume.sh and actions.sh.
 #
 # step.sh reads canned state.sh output. watch.sh reads the recorded
 # `claude agents --json --all` fixtures in tests/fixtures/agents-json/, once
@@ -9,9 +9,11 @@
 # tests/fixtures/transcripts/ installed under the config dir's projects/ where
 # a test needs one. launch.sh runs against the same fake `claude`,
 # which records its arguments, working directory and CLAUDE_CONFIG_DIR, and
-# writes the job's state.json the daemon would. actions.sh reads a job's
-# state.json and the shared-actions transcript fixture, against a scratch repo
-# with a bare remote. Touches nothing outside its own mktemp directory.
+# writes the job's state.json the daemon would. resume.sh runs against it
+# too: the fake logs each stop, rm and resume in order, and answers each
+# resume with a wake or a copy, as the resume-out list says. actions.sh
+# reads a job's state.json and the shared-actions transcript fixture,
+# against a scratch repo with a bare remote. Touches nothing outside its own mktemp directory.
 #
 # Usage: sh tests/supervise.test.sh
 
@@ -37,7 +39,7 @@ check() { # <name> <expected> <actual>
 
 # Every variable the scripts read, set or unset here, so the result does not
 # depend on the session running the test.
-unset MP_SUPERVISE_WAIT MP_RESUME_BUDGET CLAUDE_PROJECT_DIR FAKE_AGENTS_FAIL FAKE_BG_OUT FAKE_NO_STATE FAKE_STATE_FILTER
+unset MP_SUPERVISE_WAIT MP_RESUME_BUDGET CLAUDE_PROJECT_DIR FAKE_AGENTS_FAIL FAKE_BG_OUT FAKE_NO_STATE FAKE_STATE_FILTER FAKE_RM_FAIL
 cfg="$work/config"
 mkdir -p "$cfg/plugins/cache/mkt/mattpocock-skills/1.2.3/skills/engineering/implement"
 touch "$cfg/plugins/cache/mkt/mattpocock-skills/1.2.3/skills/engineering/implement/SKILL.md"
@@ -200,7 +202,26 @@ case "$1" in
         f=$(sed -n "${n}p" "$fake/seq"); [ -n "$f" ] || f=$(tail -n 1 "$fake/seq")
         command cat "$f" ;;
     stop) echo "stop $2" >>"$fake/calls"; echo "stopped $2" ;;
+    rm) echo "rm $2" >>"$fake/calls"
+        [ -n "${FAKE_RM_FAIL:-}" ] && { echo "cannot remove $2" >&2; exit 1; }
+        echo "removed $2" ;;
     --bg)
+        if [ "${2:-}" = --resume ]; then
+            m=$(command cat "$fake/resumes" 2>/dev/null || echo 0); m=$((m + 1)); echo "$m" >"$fake/resumes"
+            echo "resume after $(command cat "$fake/count" 2>/dev/null || echo 0) reads" >>"$fake/calls"
+            printf '%s\n' "$@" >"$fake/resume-args"; pwd -P >"$fake/cwd"
+            echo "${CLAUDE_CONFIG_DIR-unset}" >"$fake/env"
+            r=$(sed -n "${m}p" "$fake/resume-out")
+            echo "Starting background service…"
+            case $r in
+                woke) echo "note: woke session c2a368ee with its saved options (--disallowedTools, --permission-mode, --model)."
+                      echo "backgrounded · c2a368ee" ;;
+                copy\ *) echo "note: session c2a368ee is already running in the background, so this started a copy as ${r#copy }. \`claude attach c2a368ee\` opens the original."
+                      echo "backgrounded · ${r#copy }" ;;
+                *) echo "$r" ;;
+            esac
+            exit 0
+        fi
         printf '%s\n' "$@" >"$fake/args"; pwd -P >"$fake/cwd"
         echo "${CLAUDE_CONFIG_DIR-unset}" >"$fake/env"
         if [ -n "${FAKE_BG_OUT+x}" ]; then printf '%s\n' "$FAKE_BG_OUT"; exit 0; fi
@@ -343,6 +364,168 @@ rc=$?
 check "launch: no job state exits 2" "2" "$rc"
 check "launch: no job state stops the session" "stop c2a368ee" "$(command cat "$fake/calls" 2>/dev/null)"
 check "launch: no job state says why" "Error: no job state for session c2a368ee under $cfg/jobs after 1s, so its profile is unconfirmed; stopped it" "$out"
+
+# --- resume.sh -------------------------------------------------------------
+# The worker's row after a stop, in the shapes #77 saw: still working with a
+# pid, working with no pid, and stopped. Another background session in the
+# same checkout, live or stopped, and one in another folder.
+row() { # <out> <jq filter on the worker's row>
+    jq "[.[] | if .id == \"c2a368ee\" then $2 else . end]" "$fixtures/stopped.json" >"$work/$1.json"
+}
+row pid '.state = "working" | .status = "busy" | .pid = 4242'
+row nopid '.state = "working" | .status = "idle"'
+other() { # <out> <cwd> <state>
+    jq --arg cwd "$2" --arg state "$3" \
+        '. + [{id: "7a6a0741", cwd: $cwd, kind: "background", sessionId: "7a6a0741-0000", name: "x", state: $state, pid: 99}]' \
+        "$fixtures/stopped.json" >"$work/$1.json"
+}
+other other-live /work/project working
+other other-stopped /work/project stopped
+other other-elsewhere /work/other working
+sid=c2a368ee-c513-484c-83d3-581830e209a5
+resume() { # <resume outputs, comma-separated> <agents lists...> -- then resume.sh's options after --
+    outs=$1; shift
+    reset_fake
+    mkdir -p "$cfg/jobs/c2a368ee"
+    command cp "$fixtures/job-state.json" "$cfg/jobs/c2a368ee/state.json"
+    printf '%s\n' "$outs" | tr , '\n' >"$fake/resume-out"
+    while [ $# -gt 0 ] && [ "$1" != -- ]; do
+        case $1 in /*) echo "$1" ;; *) echo "$work/$1.json" ;; esac
+        shift
+    done >"$fake/seq"
+    [ $# -gt 0 ] && shift
+    PATH="$work/bin:$PATH" sh "$scripts/resume.sh" --id c2a368ee --dir "$project" \
+        --prompt /mp-ported-skills:capturing --interval 0 --settle 0 "$@" </dev/null
+}
+calls() { command cat "$fake/calls" 2>/dev/null; }
+
+out=$(resume woke pid "$fixtures/stopped.json" 2>&1)
+rc=$?
+check "resume: exit 0" "0" "$rc"
+check "resume: prints the id it resumed" "resumed c2a368ee" "$out"
+check "resume: stop, wait for stopped, resume" "stop c2a368ee
+resume after 2 reads" "$(calls)"
+check "resume: the original session id and the prompt, no flags" "--bg
+--resume
+$sid
+/mp-ported-skills:capturing" "$(command cat "$fake/resume-args")"
+check "resume: runs in the project folder" "$project" "$(command cat "$fake/cwd")"
+check "resume: sets the config dir" "$cfg" "$(command cat "$fake/env")"
+
+# stopped may never show: a row with no pid for the settle time is enough,
+# and a pid showing again starts the settle time over.
+resume woke pid nopid -- --settle 2 --interval 1 >/dev/null 2>&1
+check "resume: no pid for the settle time" "stop c2a368ee
+resume after 4 reads" "$(calls)"
+resume woke nopid pid nopid -- --settle 1 --interval 1 >/dev/null 2>&1
+check "resume: a pid starts the settle time over" "stop c2a368ee
+resume after 4 reads" "$(calls)"
+
+out=$(resume woke pid -- --timeout 1 2>&1)
+rc=$?
+check "resume: never stopped exits 1" "1" "$rc"
+check "resume: never stopped, never resumed" "stop c2a368ee" "$(calls)"
+check "resume: never stopped says why" "Error: session c2a368ee was not stopped 1s after claude stop; not resumed" "$out"
+
+out=$(resume woke "$fixtures/done.json" 2>&1)
+rc=$?
+check "resume: gone exits 1" "1" "$rc"
+check "resume: gone, never resumed" "stop c2a368ee" "$(calls)"
+check "resume: gone says so" "Error: session c2a368ee is not in claude agents; not resumed" "$out"
+
+out=$( (export FAKE_AGENTS_FAIL=1; resume woke "$fixtures/stopped.json" 2>&1) )
+rc=$?
+check "resume: unreadable list exits 1" "1" "$rc"
+check "resume: unreadable list, never resumed" "stop c2a368ee" "$(calls)"
+
+printf 'not json\n' >"$work/garbage.json"
+out=$(resume woke garbage 2>&1)
+rc=$?
+check "resume: an unreadable list exits 1 at once" "1" "$rc"
+check "resume: an unreadable list says so" "Error: claude agents --json --all printed no list jq could read, so session c2a368ee's state is unknown; not resumed" "$out"
+( unset CLAUDE_CONFIG_DIR; resume woke "$fixtures/stopped.json" >/dev/null 2>&1 )
+check "resume: config dir required" "1" "$?"
+check "resume: no config dir, never stopped" "" "$(calls)"
+
+# Two live workers in one checkout would interleave their commits, so
+# another live background session there stops the resume.
+out=$(resume woke other-live 2>&1)
+rc=$?
+check "resume: another live session in the checkout exits 1" "1" "$rc"
+check "resume: another live session, never resumed" "stop c2a368ee" "$(calls)"
+check "resume: another live session is named" "Error: another live background session in /work/project: 7a6a0741 (working); not resumed" "$out"
+check "resume: a stopped one in the checkout is fine" "resumed c2a368ee" "$(resume woke other-stopped 2>&1)"
+check "resume: a live one elsewhere is fine" "resumed c2a368ee" "$(resume woke other-elsewhere 2>&1)"
+
+# A copy runs without the launch's guards, so it is stopped and removed at
+# once, and the resume retried on the original.
+out=$(resume "copy 17d1a711,woke" "$fixtures/stopped.json" 2>&1)
+rc=$?
+check "resume: a copy, then the original, exits 0" "0" "$rc"
+check "resume: the copy is reported" "copy 17d1a711 stopped and removed
+resumed c2a368ee" "$out"
+check "resume: the copy is stopped and removed, and the original stopped again, before the retry" "stop c2a368ee
+resume after 1 reads
+stop 17d1a711
+rm 17d1a711
+stop c2a368ee
+resume after 2 reads" "$(calls)"
+check "resume: the retry resumes the original" "$sid" "$(sed -n 3p "$fake/resume-args")"
+
+# A copy means the original was live again (an attach woke it), so the
+# retry waits for it to stop once more.
+resume "copy 17d1a711,woke" "$fixtures/stopped.json" pid "$fixtures/stopped.json" >/dev/null 2>&1
+check "resume: the retry waits for the original to stop again" "stop c2a368ee
+resume after 1 reads
+stop 17d1a711
+rm 17d1a711
+stop c2a368ee
+resume after 3 reads" "$(calls)"
+
+# A copy that could not be removed may still be listed as live in the
+# checkout; it is this run's own, so it does not block the retry.
+jq '. + [{id: "17d1a711", cwd: "/work/project", kind: "background", sessionId: "17d1a711-0000", name: "x", state: "working"}]' \
+    "$fixtures/stopped.json" >"$work/copy-left.json"
+out=$( (export FAKE_RM_FAIL=1; resume "copy 17d1a711,woke" "$fixtures/stopped.json" copy-left 2>&1) )
+rc=$?
+check "resume: a copy left listed does not block the retry" "0" "$rc"
+check "resume: a copy not removed is named" "copy 17d1a711 stopped, not removed
+resumed c2a368ee" "$out"
+out=$( (export FAKE_RM_FAIL=1; resume "copy 17d1a711,copy fc9de9b3" "$fixtures/stopped.json" -- --tries 2 2>&1) )
+check "resume: exit 2 names the copies not removed" "copy 17d1a711 stopped, not removed
+copy fc9de9b3 stopped, not removed
+Error: every resume of session c2a368ee started a copy (17d1a711 fc9de9b3); 17d1a711 fc9de9b3 stopped but not removed, and c2a368ee is left stopped" "$out"
+
+out=$(resume "copy 17d1a711,copy fc9de9b3" "$fixtures/stopped.json" -- --tries 2 2>&1)
+rc=$?
+check "resume: a copy every try exits 2" "2" "$rc"
+check "resume: every copy is removed and named" "copy 17d1a711 stopped and removed
+copy fc9de9b3 stopped and removed
+Error: every resume of session c2a368ee started a copy (17d1a711 fc9de9b3); each was removed, and c2a368ee is left stopped" "$out"
+check "resume: tries stop at --tries" "2" "$(command cat "$fake/resumes")"
+
+out=$(resume "Error: no conversation found" "$fixtures/stopped.json" 2>&1)
+rc=$?
+check "resume: unrecognized output exits 1" "1" "$rc"
+check "resume: unrecognized output is shown" "Error: claude --bg --resume printed neither a wake nor a copy:
+Starting background service…
+Error: no conversation found" "$out"
+
+# Without the job's session id there is nothing to resume, so nothing is
+# stopped.
+reset_fake
+out=$(PATH="$work/bin:$PATH" sh "$scripts/resume.sh" --id c2a368ee --dir "$project" --prompt x </dev/null 2>&1)
+rc=$?
+check "resume: no job state exits 1" "1" "$rc"
+check "resume: no job state stops nothing" "" "$(calls)"
+check "resume: no job state says why" "Error: no session id in $cfg/jobs/c2a368ee/state.json, so there is nothing to resume" "$out"
+
+for bad in "--dir $project --prompt x" "--id c2a368ee --prompt x" "--id c2a368ee --dir $project" \
+    "--id c2a368ee --dir $project --prompt x --settle 1m" "--id c2a368ee --dir $project --prompt x --tries 0"; do
+    # shellcheck disable=SC2086
+    PATH="$work/bin:$PATH" sh "$scripts/resume.sh" $bad </dev/null >/dev/null 2>&1
+    check "resume: refuses $bad" "1" "$?"
+done
 
 # --- actions.sh ------------------------------------------------------------
 # A Project with a remote: the worker's start commit is on origin/main, and
