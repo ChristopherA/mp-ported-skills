@@ -14,7 +14,7 @@ The supervisor drives build-loop defaults and nothing else:
 
 - **It may**: take the step `state.sh` names, launch `/implement #N` for a `ready-for-agent` ticket, watch the worker, and stop a worker that finished or failed a launch check.
 - **It stops for anything that changes the spec**: any other step, a question the worker asks, a permission prompt, a ticket that needs a decision. It reports these and answers none of them. The human answers in the worker with `claude attach <id>`, or in the approval request the Claude app shows for the worker's permission prompt.
-- **Shared actions are the human's.** This version holds no standing grants: a push, PR or issue close that `/implement` reaches is reported as blocked, and the supervisor performs none itself. A PreToolUse hook (#66) refuses a worker's own attempt at one in the forms it recognizes, so the report still lists every shared action the worker took, in case a form got past it or an older worker predates the hook.
+- **Shared actions are the human's.** This version holds no standing grants: a push, PR or issue close that `/implement` reaches is reported as blocked, and the supervisor performs none itself, apart from one comment on the ticket it ran, holding the run record (step 4). A PreToolUse hook (#66) refuses a worker's own attempt at one in the forms it recognizes, so the report still lists every shared action the worker took, in case a form got past it or an older worker predates the hook.
 - **A worker stays in the Project folder for the whole run**: its commits would otherwise land on a branch nobody pushes. It is launched without the `EnterWorktree` tool, stopped at launch if the background service placed it elsewhere, and stopped the moment `watch.sh` sees it leave the folder anyway.
 
 ## 1. Step
@@ -70,4 +70,16 @@ It prints one line for each PR or issue in the worker's job, each remote branch 
 - **`gone`**: the id; the session was removed and there is nothing to open.
 - **`unknown ...`**, or exit 124: the state, the id, and `claude logs ID` for its last output. Exit 1: `claude agents` could not be read, so the worker's state is unknown; report that, never that it is gone.
 
-Done when the report names the ticket, the outcome, the shared actions (or `none`), and either its commits or the id with `claude attach`.
+Then record the run, whatever the outcome, with the same `<cwd>` and `<start>` and the ticket's number:
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/record.sh" --id ID --dir "<cwd>" --start <start> --ticket N > "<scratchpad>/run-record.md" </dev/null
+```
+
+It prints the record as a Markdown list: the worker's model, launch and turn-end times, how long after the turn end this report came, API calls, tokens and cost by model, this session's own calls, tokens and cost since the launch, the peak zone reading and the call that first reached 100% of the zone, captures and clears, waits on a human and messages typed into the worker, the shared actions from `actions.sh`, and the outcome. A field whose source was not read says `unknown`, with a `note` line naming the source. The supervisor's cost is usually `unknown`, since a live session writes its cost rows only when it stops. Post it on the ticket, run in the Project folder, and include it in the report:
+
+```sh
+gh issue comment N --body-file "<scratchpad>/run-record.md"
+```
+
+Done when the report names the ticket, the outcome, the shared actions (or `none`), either its commits or the id with `claude attach`, and the run record's comment.
