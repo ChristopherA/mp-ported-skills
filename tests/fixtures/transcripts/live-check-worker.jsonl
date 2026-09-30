@@ -1,0 +1,8 @@
+{"type":"user","timestamp":"2026-09-30T05:46:18.998Z","message":{"role":"user","content":"typed text"}}
+{"type":"assistant","timestamp":"2026-09-30T05:46:23.543Z","requestId":"req_011CfZ6Ux4kcP1SMzMRwxrY5","message":{"role":"assistant","model":"claude-sonnet-5","usage":{"input_tokens":2,"cache_read_input_tokens":0,"cache_creation_input_tokens":72399,"output_tokens":177},"content":[{"type":"thinking"}]}}
+{"type":"assistant","timestamp":"2026-09-30T05:46:23.892Z","requestId":"req_011CfZ6Ux4kcP1SMzMRwxrY5","message":{"role":"assistant","model":"claude-sonnet-5","usage":{"input_tokens":2,"cache_read_input_tokens":0,"cache_creation_input_tokens":72399,"output_tokens":177},"content":[{"type":"tool_use","name":"ToolSearch"}]}}
+{"type":"user","timestamp":"2026-09-30T05:46:23.899Z","message":{"role":"user","content":[{"type":"tool_result"}]}}
+{"type":"assistant","timestamp":"2026-09-30T05:46:25.917Z","requestId":"req_011CfZ6VJEhCpTwcZ8eLg7b2","message":{"role":"assistant","model":"claude-sonnet-5","usage":{"input_tokens":2,"cache_read_input_tokens":72399,"cache_creation_input_tokens":1637,"output_tokens":22},"content":[{"type":"text","text":"typed text"}]}}
+{"type":"system","subtype":"turn_duration","timestamp":"2026-09-30T05:46:26.809Z"}
+{"type":"cost-state","totalCostUSD":0.3126218,"modelUsage":{"claude-sonnet-5":{"inputTokens":4,"outputTokens":199,"cacheReadInputTokens":72399,"cacheCreationInputTokens":74036,"costUSD":0.3126218}}}
+{"type":"cost-state","totalCostUSD":0.3126218,"modelUsage":{"claude-sonnet-5":{"inputTokens":4,"outputTokens":199,"cacheReadInputTokens":72399,"cacheCreationInputTokens":74036,"costUSD":0.3126218}}}

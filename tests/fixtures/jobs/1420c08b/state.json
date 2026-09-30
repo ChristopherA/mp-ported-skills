@@ -1,0 +1,21 @@
+{
+  "state": "done",
+  "detail": "live check: EnterWorktree schema found",
+  "template": "bg",
+  "respawnFlags": [
+    "--permission-mode",
+    "auto",
+    "--model",
+    "claude-sonnet-5"
+  ],
+  "sessionId": "1420c08b-a2df-4dac-88a2-519854173c28",
+  "daemonShort": "1420c08b",
+  "cliVersion": "2.1.285",
+  "cwd": "/work/project",
+  "providerEnv": {
+    "CLAUDE_CONFIG_DIR": "/work/config"
+  },
+  "backend": "daemon",
+  "createdAt": "2026-09-30T05:46:16.583Z",
+  "updatedAt": "2026-09-30T05:46:26.798Z"
+}

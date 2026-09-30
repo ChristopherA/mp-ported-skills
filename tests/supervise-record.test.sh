@@ -7,8 +7,11 @@
 # supervisor's transcript, with the row shapes Claude Code 2.1.285 writes,
 # against a scratch repo with a bare remote and a fake `gh` on PATH. The
 # timeline's `blocked` row copies the shape of the `working` and `done` rows a
-# live job wrote; no live job's blocked row has been recorded. Touches
-# nothing outside its own mktemp directory.
+# live job wrote; no live job's blocked row has been recorded. Then runs it
+# on recorded fixtures: a live job (tests/fixtures/jobs/1420c08b) and a
+# hand-run /implement session (tests/fixtures/transcripts/hand-run), whose
+# peak zone reading it checks against glance.sh. Touches nothing outside its
+# own mktemp directory.
 #
 # Usage: sh tests/supervise-record.test.sh
 
@@ -33,7 +36,7 @@ check() { # <name> <expected> <actual>
 
 # Every variable the scripts read, set or unset here, so the result does not
 # depend on the session running the test.
-unset MP_SMART_ZONE_K CLAUDE_CODE_SESSION_ID FAKE_GH_FAIL
+unset MP_SMART_ZONE_K CLAUDE_CODE_SESSION_ID FAKE_GH_FAIL WORKSTREAM_KIT_CONTEXT_DIR
 cfg="$work/config"
 mkdir -p "$cfg"
 export CLAUDE_CONFIG_DIR="$cfg"
@@ -235,47 +238,137 @@ check "record: no worker transcript, calls unknown" "unknown" "$(field 'API call
 check "record: no worker transcript, zone unknown" "unknown" "$(field 'peak zone' "$out")"
 check "record: no worker transcript, turn end unknown" "unknown" "$(field 'turn ended' "$out")"
 check "record: no worker transcript, named" "- note: no transcript for session $sid under $cfg/projects, so its calls, cost, zone, captures and typed messages were not read" \
-    "$(printf '%s\n' "$out" | rg '^- note: no transcript for session .*, so its calls')"
+    "$(printf '%s\n' "$out" | grep '^- note: no transcript for session .*, so its calls')"
 
 setup
 command rm -rf "$cfg/projects/-work-hub"
 out=$(record)
 check "record: no supervisor transcript" "unknown" "$(field 'supervisor since launch' "$out")"
 check "record: no supervisor transcript, named" "- note: no transcript for supervisor session $sup under $cfg/projects, so its share was not read" \
-    "$(printf '%s\n' "$out" | rg '^- note: no transcript for supervisor')"
+    "$(printf '%s\n' "$out" | grep '^- note: no transcript for supervisor')"
 out=$(PATH="$work/bin:$PATH" sh "$scripts/record.sh" --id c2a368ee --dir "$repo" --start "$start" --ticket 56 \
     --now 2026-09-29T06:15:24Z </dev/null)
 check "record: no supervisor session, named" "- note: no supervisor session id (--supervisor or CLAUDE_CODE_SESSION_ID), so its share was not read" \
-    "$(printf '%s\n' "$out" | rg '^- note: no supervisor')"
+    "$(printf '%s\n' "$out" | grep '^- note: no supervisor')"
 
 setup
 command rm -f "$cfg/jobs/c2a368ee/timeline.jsonl"
 out=$(record)
 check "record: no timeline, waits unknown" "unknown waits, 1 message typed into the worker" "$(field 'human interventions' "$out")"
 check "record: no timeline, named" "- note: no timeline for c2a368ee under $cfg/jobs, so its waits on a human were not read" \
-    "$(printf '%s\n' "$out" | rg '^- note: no timeline')"
+    "$(printf '%s\n' "$out" | grep '^- note: no timeline')"
 
 setup
 out=$( (export FAKE_GH_FAIL=1; record) )
 check "record: ticket state unread" "2 commits after $short, PR #72, ticket #56 state unknown" "$(field outcome "$out")"
 check "record: ticket state unread, named" "- note: gh issue view 56 failed, so the ticket's state was not read" \
-    "$(printf '%s\n' "$out" | rg '^- note: gh')"
+    "$(printf '%s\n' "$out" | grep '^- note: gh')"
 
 setup
 jq -c 'select(.type != "cost-state")' "$cfg/projects/-work-project/$sid.jsonl" >"$work/t"
 command mv "$work/t" "$cfg/projects/-work-project/$sid.jsonl"
 out=$(record)
 check "record: no cost-state row" "unknown" "$(field 'tokens and cost' "$out")"
-check "record: no cost-state row, named" "- note: the worker's transcript holds no cost-state row, so its tokens and cost were not read" \
-    "$(printf '%s\n' "$out" | rg '^- note: the worker')"
+check "record: no cost-state row, named" "- note: the transcript holds no cost-state row, so its tokens and cost were not read" \
+    "$(printf '%s\n' "$out" | grep '^- note: the transcript')"
 
 setup
 command rm -rf "$cfg/jobs"
 out=$(record)
 check "record: no job, named" "- note: no job state for c2a368ee under $cfg/jobs, so the worker's model, launch, session, PRs and waits were not read" \
-    "$(printf '%s\n' "$out" | rg '^- note: no job state .*, so the worker')"
+    "$(printf '%s\n' "$out" | grep '^- note: no job state .*, so the worker')"
 check "record: no job, shared actions still listed" "  - branch origin/56-topic ungranted: holds the worker's commits" \
-    "$(printf '%s\n' "$out" | rg '^  - branch')"
+    "$(printf '%s\n' "$out" | grep '^  - branch')"
+
+# --- recorded fixtures -----------------------------------------------------
+# A live background job, cut down: tests/fixtures/jobs/1420c08b and its
+# transcript, live-check-worker.jsonl.
+command rm -rf "$cfg/jobs" "$cfg/projects"
+mkdir -p "$cfg/jobs" "$cfg/projects/-work-project"
+command cp -R "$root/tests/fixtures/jobs/1420c08b" "$cfg/jobs/"
+command cp "$root/tests/fixtures/transcripts/live-check-worker.jsonl" \
+    "$cfg/projects/-work-project/1420c08b-a2df-4dac-88a2-519854173c28.jsonl"
+supervisor
+out=$(PATH="$work/bin:$PATH" sh "$scripts/record.sh" --id 1420c08b --dir "$repo" --start HEAD --ticket 56 \
+    --supervisor "$sup" --now 2026-09-30T05:47:26Z </dev/null)
+check "record: a recorded job" "## Supervised run of #56
+
+- worker: 1420c08b, claude-sonnet-5
+- launched: 2026-09-30T05:46:16Z
+- turn ended: 2026-09-30T05:46:26Z, under a minute after launch
+- reported: 2026-09-30T05:47:26Z, 1 min after the turn ended
+- API calls: 2, 2 by the worker and 0 by its subagents
+- tokens and cost: claude-sonnet-5 147k tokens \$0.31; \$0.31 in all
+- supervisor since launch: 0 API calls, 0 tokens, \$0.00
+- peak zone: 49%
+- captures and clears: none
+- human interventions: none
+- shared actions: none
+- outcome: no commits after $(git -C "$repo" rev-parse --short HEAD), ticket #56 CLOSED" "$out"
+
+# A hand-run /implement, cut down from a live interactive session with two
+# subagents: hand-run.jsonl and hand-run/subagents/.
+hand=0f3c2b1a-0000-4000-8000-000000000002
+command rm -rf "$cfg/jobs" "$cfg/projects"
+mkdir -p "$cfg/projects/-work-project"
+command cp "$root/tests/fixtures/transcripts/hand-run.jsonl" "$cfg/projects/-work-project/$hand.jsonl"
+command cp -R "$root/tests/fixtures/transcripts/hand-run" "$cfg/projects/-work-project/$hand"
+out=$(PATH="$work/bin:$PATH" sh "$scripts/record.sh" --session "$hand" --dir "$repo" --start "$start" --ticket 56 </dev/null)
+check "record: a hand run leaves out the job fields" "## Hand run of #56
+
+- session: $hand, claude-opus-5-5
+- started: 2026-09-25T20:07:49Z
+- turn ended: 2026-09-25T20:52:06Z, 44 min after the start
+- API calls: 55, 44 by the session and 11 by its subagents
+- tokens and cost: claude-haiku-4-5-20251001 904 tokens \$0.00; claude-opus-5-5 4.2M tokens \$2.19; \$2.19 in all
+- peak zone: 61%
+- captures and clears: 1 capture, 1 clear
+- human interventions: 5 messages typed into the session
+- outcome: 2 commits after $short, ticket #56 CLOSED" "$out"
+
+# The peak matches glance's reading of the same call: the status line
+# records input plus cache read and written as the zone's tokens.
+peak=$(jq -s '[.[] | select(.type == "assistant") | .message.usage
+        | .input_tokens + .cache_read_input_tokens + .cache_creation_input_tokens] | max' \
+    "$root/tests/fixtures/transcripts/hand-run.jsonl")
+mkdir -p "$work/ctx"
+printf '{"session_id":"%s","project_dir":"%s","tokens":%s,"remaining_pct":50,"updated":"2026-09-25T20:52:06Z"}\n' \
+    "$hand" "$repo" "$peak" >"$work/ctx/claude-$hand-zone.json"
+glance=$( (export WORKSTREAM_KIT_CONTEXT_DIR="$work/ctx"
+    sh "$root/plugins/mp-ported-skills/skills/glance/scripts/glance.sh" "$repo" "$hand" </dev/null) )
+check "record: the peak matches glance" "$glance" "$(field 'peak zone' "$out") of zone"
+glance=$( (export WORKSTREAM_KIT_CONTEXT_DIR="$work/ctx" MP_SMART_ZONE_K=40
+    sh "$root/plugins/mp-ported-skills/skills/glance/scripts/glance.sh" "$repo" "$hand" </dev/null) )
+check "record: the peak matches glance for another zone" "$glance" \
+    "$(field 'peak zone' "$( (export MP_SMART_ZONE_K=40; PATH="$work/bin:$PATH" sh "$scripts/record.sh" \
+        --session "$hand" --dir "$repo" --start "$start" --ticket 56 </dev/null) )" | sed 's/,.*//') of zone"
+
+sh "$scripts/record.sh" --id c2a368ee --session "$hand" --dir "$repo" --start "$start" --ticket 56 </dev/null >/dev/null 2>&1
+check "record: --id and --session are exclusive" "1" "$?"
+
+# actions.sh failing makes the field unknown, never a list of its errors.
+setup
+mkdir -p "$work/scripts"
+command cp "$scripts/record.sh" "$work/scripts/record.sh"
+printf '#!/bin/sh\necho "branch origin/x ungranted: partial"\necho "Error: the shared-action hook is missing" >&2\nexit 1\n' \
+    >"$work/scripts/actions.sh"
+out=$(PATH="$work/bin:$PATH" sh "$work/scripts/record.sh" --id c2a368ee --dir "$repo" --start "$start" --ticket 56 \
+    --supervisor "$sup" --now 2026-09-29T06:15:24Z </dev/null)
+check "record: actions.sh failed, unknown" "unknown" "$(field 'shared actions' "$out")"
+check "record: actions.sh failed, named" "- note: actions.sh failed, so the shared actions were not read: Error: the shared-action hook is missing" \
+    "$(printf '%s\n' "$out" | grep '^- note: actions')"
+# Its stderr is never an action.
+printf '#!/bin/sh\necho "warning: noise" >&2\necho none\n' >"$work/scripts/actions.sh"
+out=$(PATH="$work/bin:$PATH" sh "$work/scripts/record.sh" --id c2a368ee --dir "$repo" --start "$start" --ticket 56 \
+    --supervisor "$sup" --now 2026-09-29T06:15:24Z </dev/null 2>/dev/null)
+check "record: actions.sh stderr is not an action" "none" "$(field 'shared actions' "$out")"
+
+# A worker that made no API calls has no zone reading, and says why.
+setup
+jq -c 'select(.type != "assistant")' "$cfg/projects/-work-project/$sid.jsonl" >"$work/t"
+command mv "$work/t" "$cfg/projects/-work-project/$sid.jsonl"
+out=$(record)
+check "record: no calls, no zone" "none: no API calls" "$(field 'peak zone' "$out")"
 
 setup
 sh "$scripts/record.sh" --dir "$repo" --start "$start" --ticket 56 </dev/null >/dev/null 2>&1
