@@ -180,9 +180,10 @@ else
 fi
 
 if commits=$(git -C "$DIR" rev-list "$START..HEAD" 2>/dev/null); then
+    # Filtered on the full name: origin/HEAD's short name is just `origin`.
     branches=$(for c in $commits; do
-        git -C "$DIR" for-each-ref --contains "$c" --format='%(refname:short)' refs/remotes
-    done | grep -v '/HEAD$' | sort -u)
+        git -C "$DIR" for-each-ref --contains "$c" --format='%(refname)' refs/remotes
+    done | grep -v '/HEAD$' | sed 's|^refs/remotes/||' | sort -u)
     for b in $branches; do
         add "branch $b ungranted: holds the worker's commits"
     done

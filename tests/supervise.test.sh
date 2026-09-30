@@ -358,6 +358,8 @@ git init -q -b main "$repo"
 repo_git "$repo" commit -q --allow-empty -m start
 repo_git "$repo" remote add origin "$remote"
 repo_git "$repo" push -q origin main 2>/dev/null
+# A clone has origin/HEAD, whose short name is the bare remote name.
+git -C "$repo" remote set-head origin main
 start=$(git -C "$repo" rev-parse HEAD)
 repo_git "$repo" commit -q --allow-empty -m "worker's commit"
 repo_git "$repo" push -q origin HEAD:66-topic 2>/dev/null
@@ -425,6 +427,17 @@ transcript just-launched -work-project "$sid"
 printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cd /work/project\ngit push"}}]}}' >>"$cfg/projects/-work-project/$sid.jsonl"
 check "actions: a call with no result yet, by its first line" "$pushed
 command no result ungranted: cd /work/project ..." "$(actions)"
+
+# A commit pushed to the default branch is listed once, by that branch, not
+# again by origin/HEAD.
+transcript turn-ended -work-project "$sid"
+job
+main_start=$(git -C "$repo" rev-parse HEAD)
+repo_git "$repo" commit -q --allow-empty -m "pushed to main"
+repo_git "$repo" push -q origin HEAD:main 2>/dev/null
+check "actions: a push to main, not origin/HEAD" "branch origin/main ungranted: holds the worker's commits" \
+    "$(actions "$main_start")"
+repo_git "$repo" push -q -f origin "$start:main" 2>/dev/null
 
 # Nothing shared: the worker's commits are only local, and it ran no
 # shared command.
