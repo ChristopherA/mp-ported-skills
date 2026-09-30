@@ -1,0 +1,180 @@
+#!/bin/sh
+# deny-shared-actions.test.sh -- tests for the PreToolUse hook that refuses
+# a shared action reached by an unattended, auto-mode background session
+# (#66).
+#
+# Runs the command string from hooks.json, as Claude Code does, with a
+# PreToolUse payload on stdin, CLAUDE_CODE_SESSION_ATTENDED set the way
+# Claude Code sets it in a background session's own process, and
+# CLAUDE_PLUGIN_ROOT pointed at this checkout. Touches nothing outside its
+# own environment.
+#
+# Usage: sh tests/deny-shared-actions.test.sh
+
+set -u
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+hooks="$root/plugins/mp-ported-skills/hooks/hooks.json"
+export CLAUDE_PLUGIN_ROOT="$root/plugins/mp-ported-skills"
+
+pass=0 fail=0
+check() { # <name> <expected> <actual>
+    if [ "$2" = "$3" ]; then
+        pass=$((pass + 1))
+    else
+        fail=$((fail + 1))
+        printf 'FAIL %s\n  expected: %s\n  actual:   %s\n' "$1" "$2" "$3"
+    fi
+}
+
+# Every variable the hook reads, set or unset here. The hook runs
+# `git config` to resolve aliases, so git reads no global or system config
+# and no repo but the scratch one below, and the checks run from a folder
+# outside any repo.
+unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+outside=$(mktemp -d)
+cd "$outside" || exit 1
+
+entry='.hooks.PreToolUse[] | select(.hooks[0].command | test("deny-shared-actions"))'
+hook_cmd=$(jq -r "$entry | .hooks[0].command" "$hooks")
+
+run() { # <attended> <mode> <tool> <command>: the hook's full JSON output
+    payload=$(jq -cn --arg mode "$2" --arg tool "$3" --arg cmd "$4" \
+        '{hook_event_name:"PreToolUse",session_id:"s1",permission_mode:$mode,tool_name:$tool,tool_input:{command:$cmd}}')
+    printf '%s' "$payload" | CLAUDE_CODE_SESSION_ATTENDED="$1" sh -c "$hook_cmd"
+}
+
+decision() { run "$1" "$2" Bash "$3" | jq -r '.hookSpecificOutput.permissionDecision // empty'; }
+reason() { run "$1" "$2" Bash "$3" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty'; }
+
+# Each refused form, in a background session (unattended, auto mode).
+check "git push" "deny" "$(decision 0 auto 'git push')"
+check "git -C <dir> push" "deny" "$(decision 0 auto 'git -C some/dir push origin main')"
+check "git push in a compound command" "deny" "$(decision 0 auto 'echo hi && git push')"
+check "git push in a subshell" "deny" "$(decision 0 auto '(cd dir && git push) || echo failed')"
+check "gh pr create" "deny" "$(decision 0 auto 'gh pr create --title x --body y')"
+check "gh pr merge" "deny" "$(decision 0 auto 'gh pr merge 5 --squash')"
+check "gh issue close" "deny" "$(decision 0 auto 'gh issue close 42 --comment done')"
+check "git push with flags before push" "deny" "$(decision 0 auto 'git -c user.name=x -C repo push')"
+check "env-prefixed git push" "deny" "$(decision 0 auto 'env FOO=bar git push')"
+check "leading VAR=value before git push" "deny" "$(decision 0 auto 'FOO=bar git push')"
+check "leading VAR=value before gh pr create" "deny" "$(decision 0 auto 'FOO=bar gh pr create --title x')"
+
+# Forms that reach the same program another way: a path, a transparent
+# wrapper, a nested shell, a substitution, or a git alias.
+check "command git push" "deny" "$(decision 0 auto 'command git push')"
+check "absolute path to git" "deny" "$(decision 0 auto '/usr/bin/git push')"
+check "backslash-escaped git" "deny" "$(decision 0 auto '\\git push')"
+check "quoted program name" "deny" "$(decision 0 auto '"git" push')"
+check "backtick substitution" "deny" "$(decision 0 auto 'x=`git push`')"
+check "\$() substitution" "deny" "$(decision 0 auto 'echo $(git push 2>&1)')"
+check "bash -c" "deny" "$(decision 0 auto 'bash -c "git push"')"
+check "sh -c" "deny" "$(decision 0 auto "sh -c 'git push origin HEAD'")"
+check "bash -lc with a compound command" "deny" "$(decision 0 auto 'bash -lc "cd repo && git push"')"
+check "eval" "deny" "$(decision 0 auto 'eval "git push"')"
+check "time" "deny" "$(decision 0 auto 'time git push')"
+check "nohup" "deny" "$(decision 0 auto 'nohup git push &')"
+check "xargs" "deny" "$(decision 0 auto 'echo origin | xargs git push')"
+check "xargs with flags" "deny" "$(decision 0 auto 'echo origin | xargs -n 1 -I {} git push {}')"
+check "exec" "deny" "$(decision 0 auto 'exec git push')"
+check "builtin command chain" "deny" "$(decision 0 auto 'builtin command env git push')"
+check "env -u NAME" "deny" "$(decision 0 auto 'env -u GIT_DIR git push')"
+check "brace group" "deny" "$(decision 0 auto '{ git push; }')"
+check "if/then" "deny" "$(decision 0 auto 'if true; then git push; fi')"
+check "negated" "deny" "$(decision 0 auto '! git push')"
+check "git push HEAD:main" "deny" "$(decision 0 auto 'git push origin HEAD:main')"
+check "git push -u" "deny" "$(decision 0 auto 'git push -u origin some-branch')"
+check "git push --dry-run" "deny" "$(decision 0 auto 'git push --dry-run')"
+check "git -c alias defined inline" "deny" "$(decision 0 auto 'git -c alias.p=push p')"
+check "command gh pr create" "deny" "$(decision 0 auto 'command gh pr create --fill')"
+check "gh api merge (PUT)" "deny" "$(decision 0 auto 'gh api -X PUT repos/o/r/pulls/5/merge')"
+check "gh api --method=PATCH issue" "deny" "$(decision 0 auto 'gh api --method=PATCH repos/o/r/issues/5 -f state=closed')"
+check "gh api implicit POST to pulls" "deny" "$(decision 0 auto 'gh api repos/o/r/pulls -f title=x -f head=b -f base=main')"
+check "gh api ref update" "deny" "$(decision 0 auto 'gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=abc')"
+check "gh api graphql mutation" "deny" \
+    "$(decision 0 auto "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'")"
+
+check "gh api contents PUT (a commit)" "deny" "$(decision 0 auto 'gh api -X PUT repos/o/r/contents/f.txt -f message=m -f content=Zg==')"
+check "gh api git trees POST" "deny" "$(decision 0 auto 'gh api repos/o/r/git/trees -f base_tree=abc')"
+check "git subtree push" "deny" "$(decision 0 auto 'git subtree push --prefix=dist origin gh-pages')"
+check "git send-pack" "deny" "$(decision 0 auto 'git send-pack origin main')"
+check "git-push by path" "deny" "$(decision 0 auto '/usr/libexec/git-core/git-push origin')"
+check "piped into sh" "deny" "$(decision 0 auto 'echo git push | sh')"
+check "here-string into bash" "deny" "$(decision 0 auto 'bash <<< "git push"')"
+check "gh pr create piped into bash" "deny" "$(decision 0 auto 'printf "gh pr create --fill" | bash')"
+check "gh -R before pr create" "deny" "$(decision 0 auto 'gh -R o/r pr create --fill')"
+check "gh --repo=o/r before issue close" "deny" "$(decision 0 auto 'gh --repo=o/r issue close 3')"
+
+# A git alias in the repo's own config is resolved, since the hook runs
+# in the session's working directory.
+scratch=$(mktemp -d)
+git -C "$scratch" init -q
+git -C "$scratch" config alias.ship 'push origin HEAD'
+check "git alias from repo config" "deny" "$(cd "$scratch" && decision 0 auto 'git ship')"
+check "git alias that does not push" "" \
+    "$(git -C "$scratch" config alias.st status; cd "$scratch" && decision 0 auto 'git st')"
+command rm -rf "$scratch"
+
+# The refusal names the grant file and the supervisor.
+check "refusal names the grant file and the supervisor" \
+    "A background session in auto mode cannot run 'git push' on its own (#66): main has no branch protection, and the auto-mode classifier makes a judgment call here, not a rule. Route this through a standing grant in docs/agents/supervision.md (#58), driven by the supervisor, or leave it for the maintainer's own interactive session." \
+    "$(reason 0 auto 'git push')"
+
+# A command that is not a shared action goes through.
+check "gh pr view (not a shared action)" "" "$(decision 0 auto 'gh pr view 5')"
+check "gh api read (GET)" "" "$(decision 0 auto 'gh api repos/o/r/pulls/5')"
+check "gh api read with -X GET and a field" "" "$(decision 0 auto 'gh api -X GET repos/o/r/issues -f state=open')"
+check "gh api graphql query" "" "$(decision 0 auto "gh api graphql -f query='{ viewer { login } }'")"
+check "bash -c without a shared action" "" "$(decision 0 auto 'bash -c "git status && echo push"')"
+check "command -v git" "" "$(decision 0 auto 'command -v git')"
+check "sh running a script file" "" "$(decision 0 auto 'sh tests/some.test.sh')"
+check "piped into sh without a shared action" "" "$(decision 0 auto 'echo git status | sh')"
+check "gh api contents read" "" "$(decision 0 auto 'gh api repos/o/r/contents/README.md')"
+
+# Criterion 3 waits on #58 (docs/adr/0004): the hook sees only the command
+# text, so any script that runs git push itself is a route around it until
+# #58 names the grant script and this hook narrows to it.
+check "a script that runs git push is not inspected (waits on #58)" "" \
+    "$(decision 0 auto 'sh scripts/granted-push.sh')"
+
+# Commands that only resemble a refused form.
+check "git commit whose message says push" "" \
+    "$(decision 0 auto 'git commit -m "remember to push later"')"
+check "git status" "" "$(decision 0 auto 'git status')"
+check "a git-named command that is not git" "" "$(decision 0 auto 'mygit push')"
+check "gh issue list is not gh issue close" "" "$(decision 0 auto 'gh issue list')"
+check "env with no git/gh is unaffected" "" "$(decision 0 auto 'env NODE_ENV=test npm test')"
+
+# Accepted over-refusal: the splitter does not parse quoting, so a
+# separator inside a quoted string starts a new segment (docs/adr/0004).
+# In an unattended session a false refusal costs a detour through the
+# supervisor; a miss publishes.
+check "quoted text holding a separated git push is refused" "deny" \
+    "$(decision 0 auto 'git commit -m "wip; git push later"')"
+
+# The maintainer's own interactive session: attended, whatever the
+# permission mode.
+check "attended, auto mode: push allowed" "" "$(decision 1 auto 'git push')"
+check "attended, default mode: push allowed" "" "$(decision 1 default 'git push')"
+check "attended, unset (older Claude Code): push allowed" "" \
+    "$(payload=$(jq -cn '{hook_event_name:"PreToolUse",session_id:"s1",permission_mode:"auto",tool_name:"Bash",tool_input:{command:"git push"}}'); \
+       printf '%s' "$payload" | env -u CLAUDE_CODE_SESSION_ATTENDED sh -c "$hook_cmd" | jq -r '.hookSpecificOutput.permissionDecision // empty')"
+
+# Unattended outside auto mode: this hook stays out of the way; a manual
+# session with nobody to answer blocks on the ordinary permission prompt
+# instead.
+check "unattended, default mode: push allowed" "" "$(decision 0 default 'git push')"
+check "unattended, acceptEdits mode: push allowed" "" "$(decision 0 acceptEdits 'git push')"
+
+# A non-Bash tool call is never inspected.
+check "non-Bash tool" "" "$(run 0 auto Write 'git push' | jq -r '.hookSpecificOutput.permissionDecision // empty')"
+
+# The matcher and timeout Claude Code applies before the script's own check.
+check "matcher: Bash only" "Bash" "$(jq -r "$entry | .matcher" "$hooks")"
+check "timeout set" "5" "$(jq -r "$entry | .hooks[0].timeout" "$hooks")"
+
+cd / && command rm -rf "$outside"
+
+echo "deny-shared-actions: $pass passed, $fail failed"
+[ "$fail" -eq 0 ]

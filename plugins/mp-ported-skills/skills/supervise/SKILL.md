@@ -14,7 +14,7 @@ The supervisor drives build-loop defaults and nothing else:
 
 - **It may**: take the step `state.sh` names, launch `/implement #N` for a `ready-for-agent` ticket, watch the worker, and stop a worker that finished or failed a launch check.
 - **It stops for anything that changes the spec**: any other step, a question the worker asks, a permission prompt, a ticket that needs a decision. It reports these and answers none of them. The human answers in the worker with `claude attach <id>`, or in the approval request the Claude app shows for the worker's permission prompt.
-- **Shared actions are the human's.** This version holds no standing grants: a push, PR or issue close that `/implement` reaches is reported as blocked, and the supervisor performs none itself. Nothing here stops the worker from pushing on its own, since auto mode's classifier may allow it without a prompt, so the report checks whether its commits reached the remote.
+- **Shared actions are the human's.** This version holds no standing grants: a push, PR or issue close that `/implement` reaches is reported as blocked, and the supervisor performs none itself. A PreToolUse hook (#66) refuses a worker's own attempt at one in the forms it recognizes, so the report still checks whether its commits reached the remote, in case a form got past it or an older worker predates the hook.
 - **A worker outside the Project folder is stopped at launch**, including one the background service placed in a worktree: its commits would land on a branch nobody pushes.
 
 ## 1. Step

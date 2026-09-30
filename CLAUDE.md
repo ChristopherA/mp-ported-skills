@@ -22,7 +22,7 @@ This covers wrappers only. A skill that just names a Matt command for the user t
 
 ## Releasing
 
-A change under `plugins/mp-ported-skills/` bumps `version` in its `.claude-plugin/plugin.json`, in its own commit titled `Bump plugin to X.Y.Z`, after the change's commit: the plugin cache is keyed by version, so installs fetch the change only under a new one. Tests, docs and this file ship outside the plugin and take no bump. A new skill bumps the minor number; a script, fix or doc change inside an existing skill bumps the patch number (`iterm-pane` came in as 0.7.0, its launcher as 0.7.2).
+A change under `plugins/mp-ported-skills/` bumps `version` in its `.claude-plugin/plugin.json`, in its own commit titled `Bump plugin to X.Y.Z`, after the change's commit: the plugin cache is keyed by version, so installs fetch the change only under a new one. Tests, docs and this file ship outside the plugin and take no bump. An agent bumps only the patch number (0.7.1 to 0.7.2), whatever the change, and whether it runs under `/implement`, `/supervise` or any other skill. A minor or major bump is the maintainer's: when a change looks like one (a new skill, a new hook, a breaking change), bump the patch number and say in the report that it may deserve a minor or major bump, for the maintainer to make.
 
 After a push that bumps the version, run `claude plugin marketplace update mp-ported-skills && claude plugin update mp-ported-skills@mp-ported-skills` through Bash and report the version it installed. Do not offer it as a `!` command or on the clipboard: the maintainer may be on a remote client, where `!` commands and `/plugin` do not run and the clipboard is out of reach, and Bash works from any client. Then the maintainer types `/reload-plugins`, which works from a remote client too, to load the new version in this session.
 
@@ -43,6 +43,8 @@ A live test that starts `claude` in a pane runs it in a folder inside this repo'
 A live test that starts `claude --bg` in a new scratch folder trusts the folder first: `--bg` shows no trust prompt and exits with `Workspace not trusted`. Start plain `claude` there once in a tmux window and choose `Yes, I trust this folder`; the prompt opens on `No, exit`. The profile's sessions start in auto mode, so a test that needs a permission prompt launches with `--permission-mode default`.
 
 A pattern `pane-classify.sh` matches comes from a live capture in `tests/fixtures/pane-states/`, recorded in a wide pane and in a narrow one. Claude Code cuts text to fit a narrow pane: the interrupt marker `⎿  Interrupted` rendered as `⎿  Interrup·` at 27 columns, and a pattern built from the full word read that idle session as `working`.
+
+A live test of a change to the plugin passes `--plugin-dir <checkout>/plugins/mp-ported-skills` to `claude`, as `tests/live/deny-shared-actions.sh` does: a plain session loads the installed release, which does not hold the change. To read a background session's result, it puts a unique token in the prompt and finds the transcript under `$CLAUDE_CONFIG_DIR/projects/` by that token. The session's `jobs/<id>/` folder may already be gone.
 
 A live test that needs a particular model starts the session with `claude --model <id>`. Typing `/model` in a running session also saves the model to the profile's `settings.json` as the default, so it changes every later session on that profile.
 
