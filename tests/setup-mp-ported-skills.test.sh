@@ -261,6 +261,33 @@ check "sl off, other command: exit 0" "0" "$rc"
 check "sl off, other command: kept" "my-line.sh" "$(jq -r .statusLine.command "$p/settings.json")"
 check "sl off, other command: copy removed" "no" "$([ -f "$p/scripts/status-line.source" ] && echo yes || echo no)"
 
+# --- supervision-doc (#58) --------------------------------------------------
+p="$work/fresh"
+proj="$work/project"; mkdir -p "$proj"
+setup "$v1" "$p" --project-dir "$proj" report
+check "supervision-doc: absent in a fresh project" "absent" "$(feature supervision-doc)"
+has "supervision-doc: report names the project" "$proj" "$out"
+check "supervision-doc: report writes nothing in the project" "" "$(ls -A "$proj")"
+
+setup "$v1" "$p" --project-dir "$proj" supervision-doc write
+check "supervision-doc write: exit 0" "0" "$rc"
+check "supervision-doc write: file created" "./docs/agents/supervision.md" "$(cd "$proj" && find . -type f)"
+has "supervision-doc write: has a Grants heading" "## Grants" "$(cat "$proj/docs/agents/supervision.md")"
+has "supervision-doc write: says an empty file grants nothing" "grants nothing" "$(cat "$proj/docs/agents/supervision.md")"
+has "supervision-doc write: says what it did" "written, in project $proj" "$out"
+
+setup "$v1" "$p" --project-dir "$proj" report
+check "supervision-doc: present after writing" "present" "$(feature supervision-doc)"
+
+content_before=$(cat "$proj/docs/agents/supervision.md")
+setup "$v1" "$p" --project-dir "$proj" supervision-doc write
+check "supervision-doc write again: exit 0" "0" "$rc"
+has "supervision-doc write again: already present" "already present" "$out"
+check "supervision-doc write again: untouched" "$content_before" "$(cat "$proj/docs/agents/supervision.md")"
+
+setup "$v1" "$p" --project-dir "$work/nonexistent-project" supervision-doc write
+check "supervision-doc write: no project dir exits 2" "2" "$rc"
+
 # --- errors -------------------------------------------------------------------
 p="$work/badjson"; mkdir -p "$p"; printf '{not json\n' > "$p/settings.json"
 setup "$v1" "$p" titles on
@@ -272,6 +299,12 @@ setup "$v1" "$p" titles maybe
 check "bad state: exit 2" "2" "$rc"
 setup "$v1" "$work/fresh" titles on --force
 check "--force on titles: exit 2" "2" "$rc"
+setup "$v1" "$work/fresh" supervision-doc on
+check "supervision-doc on (not write): exit 2" "2" "$rc"
+setup "$v1" "$work/fresh" supervision-doc
+check "supervision-doc with no verb: exit 2" "2" "$rc"
+setup "$v1" "$work/fresh" titles write
+check "write on a feature that is not supervision-doc: exit 2" "2" "$rc"
 setup "$v1" "$work/fresh" report --replace-statusline
 check "--replace-statusline on report: exit 2" "2" "$rc"
 setup "$v1" "$work/nonexistent" report

@@ -35,25 +35,29 @@
 set -eu
 
 usage() {
-    echo "usage: setup.sh [--config-dir DIR] report" >&2
+    echo "usage: setup.sh [--config-dir DIR] [--project-dir DIR] report" >&2
     echo "       setup.sh [--config-dir DIR] <remote-control|status-line|titles> <on|off> [--force] [--replace-statusline]" >&2
+    echo "       setup.sh [--project-dir DIR] supervision-doc write" >&2
     exit 2
 }
 
-force=0 replace=0 cfg="" feature="" want=""
+force=0 replace=0 cfg="" proj="" feature="" want=""
 while [ $# -gt 0 ]; do
     case $1 in
         --config-dir) [ $# -ge 2 ] || usage; cfg=$2; shift ;;
+        --project-dir) [ $# -ge 2 ] || usage; proj=$2; shift ;;
         --force) force=1 ;;
         --replace-statusline) replace=1 ;;
-        report | remote-control | status-line | titles) [ -z "$feature" ] || usage; feature=$1 ;;
-        on | off) [ -n "$feature" ] && [ -z "$want" ] || usage; want=$1 ;;
+        report | remote-control | status-line | titles | supervision-doc) [ -z "$feature" ] || usage; feature=$1 ;;
+        on | off) [ -n "$feature" ] && [ -z "$want" ] && [ "$feature" != supervision-doc ] || usage; want=$1 ;;
+        write) [ "$feature" = supervision-doc ] && [ -z "$want" ] || usage; want=$1 ;;
         *) usage ;;
     esac
     shift
 done
 case $feature in
     report) [ -z "$want" ] || usage ;;
+    supervision-doc) [ "$want" = write ] || usage ;;
     '') usage ;;
     *) [ -n "$want" ] || usage ;;
 esac
@@ -61,9 +65,12 @@ esac
 if [ "$feature" != status-line ] && { [ "$force" -eq 1 ] || [ "$replace" -eq 1 ]; }; then usage; fi
 cfg=${cfg:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}
 cfg=${cfg%/}
+proj=${proj:-$(pwd)}
+proj=${proj%/}
 
 command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required" >&2; exit 2; }
 [ -d "$cfg" ] || { echo "ERROR: no profile directory at $cfg" >&2; exit 2; }
+[ -d "$proj" ] || { echo "ERROR: no project directory at $proj" >&2; exit 2; }
 settings="$cfg/settings.json"
 if [ -f "$settings" ]; then
     jq -e . "$settings" >/dev/null 2>&1 || { echo "ERROR: $settings is not valid JSON" >&2; exit 2; }
@@ -102,6 +109,13 @@ put() {
 
 remote_state() { [ "$(get .remoteControlAtStartup)" = true ] && echo on || echo off; }
 titles_state() { [ "$(get .env.MP_SESSION_TITLE)" = 1 ] && echo on || echo off; }
+
+# supervision_doc: $proj/docs/agents/supervision.md (#58), the file
+# /supervise's grant.sh reads from the default branch as committed. This
+# feature has no off: the file, once written, is the maintainer's to keep
+# or remove by hand, and an empty one already grants nothing.
+supervision_doc="$proj/docs/agents/supervision.md"
+supervision_doc_state() { [ -f "$supervision_doc" ] && echo present || echo absent; }
 
 # The status line's state, and what the report says beneath it. Sets
 #   sl_status    on | off | modified
@@ -162,6 +176,10 @@ report() {
     printf '  %-15s %s\n' status-line "$sl_status"
     printf '%s' "$sl_detail"
     printf '  %-15s %s\n' titles "$(titles_state)"
+    printf '  %-15s %s\n' supervision-doc "$(supervision_doc_state)"
+    if [ "$(supervision_doc_state)" = absent ]; then
+        echo "    docs/agents/supervision.md  missing, in project $proj; a /supervise worker stops for approval on every shared action until one is written"
+    fi
 }
 
 refuse() { # <lines>: print them, and write nothing
@@ -259,4 +277,28 @@ titles)
     echo "titles: $want. Sessions started from now on $([ "$want" = on ] && echo "are titled <project> · <profile> · <host>, and status line 1 shows only what is unusual" || echo "get no title, and status line 1 shows host · profile » project » branch")." ;;
 status-line)
     if [ "$want" = on ]; then status_line_on; else status_line_off; fi ;;
+supervision-doc)
+    if [ "$(supervision_doc_state)" = present ]; then echo "supervision-doc: already present"; exit 0; fi
+    mkdir -p "$(dirname "$supervision_doc")"
+    cat >"$supervision_doc" <<'DOC'
+# Supervision
+
+Grants recorded here, once committed on the default branch, let
+/supervise perform the action for its worker without stopping for
+approval. An absent file, or no matching line under "## Grants", means
+every shared action still stops for approval -- an empty file grants nothing.
+
+Grants are read only from the default branch as committed on its remote
+(origin/<default>), never the working tree or an uncommitted branch: a
+grant has to be pushed before it takes effect, so a worker cannot grant
+itself one by editing this file.
+
+## Grants
+
+<!-- One grant per line, as `- <action>` or `- <action>: <note>`.
+     <action> is push, pr-create, pr-merge or issue-close.
+     Example: `- push: release branches only` -->
+DOC
+    echo "  + docs/agents/supervision.md  written, in project $proj"
+    echo "supervision-doc: written. It grants nothing until a line is added under \"## Grants\" and pushed." ;;
 esac
