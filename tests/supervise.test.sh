@@ -639,6 +639,17 @@ check "launch with grants: notes the grant committed only locally" "note: docs/a
 check "launch with grants: the job's flags carry them" "--append-system-prompt" \
     "$(jq -r '.respawnFlags[0]' "$cfg/jobs/c2a368ee/state.json")"
 command rm -f "$(git -C "$granted" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
+# A grant.sh error is not read as "no grants": nothing launches.
+mkdir -p "$work/broken-scripts"
+command cp -f "$scripts"/*.sh "$work/broken-scripts/"
+printf '#!/bin/sh\necho "Error: broken" >&2\nexit 1\n' >"$work/broken-scripts/grant.sh"
+reset_fake
+echo "$fixtures/working-busy.json" >"$fake/seq"
+out=$(PATH="$work/bin:$PATH" sh "$work/broken-scripts/launch.sh" --dir "$granted" --ticket 56 </dev/null 2>&1); rc=$?
+check "launch: a grant.sh error exits 1" "1" "$rc"
+check "launch: a grant.sh error never launched" "no" "$([ -f "$fake/args" ] && echo yes || echo no)"
+check "launch: a grant.sh error says why" "grant.sh: Error: broken
+Error: grant.sh failed for push, so the worker's grants are unknown; not launched" "$out"
 
 # --- release.sh --------------------------------------------------------------
 echo c2a368ee >"$marker"

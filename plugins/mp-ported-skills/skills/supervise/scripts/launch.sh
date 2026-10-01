@@ -10,8 +10,8 @@
 # which the background service writes under that config dir, and checks that
 # the session runs under the same config dir, in DIR itself (not a worktree),
 # in auto mode, without EnterWorktree, with the background worktree guard
-# off, and with its grants text. A session that fails a check is stopped. Prints the session's
-# short id.
+# off, and with its grants text. A session that fails a check is stopped.
+# Prints the session's short id.
 #
 # EnterWorktree is denied because /implement workers called it on their own,
 # after launch, and committed on a worktree branch nobody pushed. The deny
@@ -142,13 +142,24 @@ others=$(printf '%s' "$list" | jq -er --arg d "$DIR" '
 marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker)
 
 # The standing grants, each as grant.sh cites it, from its source alone.
-here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# grant.sh exits 1 both for "not granted" and for an error, so its stderr
+# tells them apart: an error stops the launch rather than reading as no
+# grant, and a note (a grant committed only locally) is passed on.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+errs=$(mktemp) || fail "mktemp failed, so the grants cannot be read; not launched"
 granted=""
 for action in push pr-create pr-merge issue-close; do
-    cited=$(sh "$here/grant.sh" --dir "$DIR" --action "$action" </dev/null) &&
+    cited=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$action" </dev/null 2>"$errs") &&
         granted="$granted
 - $cited"
+    if grep -q '^Error' "$errs"; then
+        printf 'grant.sh: %s\n' "$(command cat "$errs")" >&2
+        command rm -f "$errs"
+        fail "grant.sh failed for $action, so the worker's grants are unknown; not launched"
+    fi
+    command cat "$errs" >&2
 done
+command rm -f "$errs"
 if [ -n "$granted" ]; then
     GRANTS="You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/$default (push is git push; pr-create, pr-merge and issue-close are gh pr create, gh pr merge and gh issue close):$granted
 A shared action one of these grants covers goes ahead without asking: when /implement reaches it, take it, and do not end your turn to ask first."
