@@ -42,7 +42,9 @@
 # `status: idle` while its `state` is `working`. But `state` can go on saying
 # working for hours after the turn ended (#73), so a working session with
 # `status: idle` whose transcript shows the turn ended is reported as done,
-# with a last line `note claude agents still said working`.
+# with a last line `note claude agents still said working`. A done session
+# whose last text has a line starting `Waiting on:` is reported as `blocked
+# input needed`, with a `needs` line naming the action (#88).
 #
 # Usage:
 #   watch.sh --id ID [--dir DIR [--since FILE]] [--interval SECONDS] [--timeout SECONDS] [--stall SECONDS]
@@ -152,6 +154,23 @@ turn_ended() {
     return 1
 }
 
+# waiting_on <session id>: the action a worker whose turn ended waits on,
+# from a line starting `Waiting on:` in its last text, which launch.sh tells
+# it to end on when a shared action has no grant (#88); empty when none. The
+# line may be wrapped in backticks or bold. Read from the main transcript
+# only, in every project folder, as turn_ended reads it.
+waiting_on() {
+    [ -n "$1" ] || return 0
+    for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
+        [ -f "$t" ] || continue
+        jq -r -s '[.[] | select(.type == "assistant" and (.isSidechain | not))
+                   | .message.content[]? | select(.type == "text") | .text // empty]
+                  | last // empty' "$t" 2>/dev/null |
+            sed -n 's/^[`* ]*Waiting on: *//p' | sed 's/[`* ]*$//' | tail -n 1
+        return 0
+    done
+}
+
 # session_id_of <agents json>: the job's sessionId, or empty when the list
 # cannot be read or names none. classify() only reads this for an idle
 # session (to call turn_ended); the stall check below needs it whatever the
@@ -244,7 +263,9 @@ commits() {
 # report <agents json>: classify, adding the job's needs to a blocked state.
 # A working session whose cwd is not DIR has moved. A working session with
 # status idle whose transcript says its turn ended is done: the state list
-# can go on saying working for hours after that. With --since, a worktree or
+# can go on saying working for hours after that. A done session whose last
+# text has a `Waiting on:` line is `blocked input needed`, with that action
+# as its needs line. With --since, a worktree or
 # branch made in the repo since the snapshot is listed, and makes a working
 # or done session moved.
 report() {
@@ -267,6 +288,13 @@ report() {
             if [ -f "$job" ]; then
                 needs=$(jq -r '.needs // empty' "$job" 2>/dev/null)
                 [ -z "$needs" ] || out=$(printf '%s\nneeds %s' "$out" "$needs")
+            fi ;;
+    esac
+    case $out in
+        done*)
+            waits=$(waiting_on "$(session_id_of "$1")")
+            if [ -n "$waits" ]; then
+                out=$(printf 'blocked input needed%s\nneeds %s' "${out#done}" "$waits")
             fi ;;
     esac
     if [ -n "$SINCE" ]; then

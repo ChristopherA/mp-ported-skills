@@ -153,6 +153,29 @@ cwd /work/project" "$(watch_file working-idle 9121ff49)"
 command rm -rf "$cfg/projects"
 check "watch: no transcript is working" "working
 cwd /work/project" "$(watch_file working-idle 9121ff49)"
+# A turn that ended on a `Waiting on:` line, as launch.sh tells a worker to
+# end on an ungranted shared action (#88), is blocked on that action, with it
+# as the needs line, whether claude agents says working or done.
+waiting_on() { # <last text> -- turn-ended, its final text block set to it
+    dir="$cfg/projects/-work-project"
+    command rm -rf "$cfg/projects"; mkdir -p "$dir"
+    jq -c --arg t "$1" 'if .type == "assistant" and .message.content == [{"type": "text"}]
+        then .message.content[0].text = $t else . end' "$transcripts/turn-ended.jsonl" \
+        >"$dir/9121ff49-5e25-43f0-bf48-307db0776c36.jsonl"
+}
+waiting_on "Committed 3 changes on main.
+
+\`Waiting on: git push origin main\`"
+check "watch: a turn that ended waiting on an action is blocked on it" "blocked input needed
+cwd /work/project
+note claude agents still said working
+needs git push origin main" "$(watch_file working-idle 9121ff49)"
+check "watch: done waiting on an action is blocked on it" "blocked input needed
+cwd /work/project
+needs git push origin main" "$(watch_file done 9121ff49)"
+waiting_on "All done; pushed to main. Nothing is Waiting on: anything."
+check "watch: a mention mid-line is not waiting" "done
+cwd /work/project" "$(watch_file done 9121ff49)"
 # A worker that entered a worktree has its transcript in the worktree's folder.
 transcript turn-ended -work-project--claude-worktrees-issue-66
 check "watch: transcript found in a worktree's folder" "done
