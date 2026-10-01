@@ -42,6 +42,13 @@
 # model is refused. MP_SUPERVISE_WAIT: seconds to wait for the job's
 # state.json (default 20).
 #
+# Before launching, it checks that DIR is a git checkout on its default
+# branch with a clean tree and no other live background session in it
+# (#76). Once the session passes its checks, it writes the session's id to
+# the marker `git rev-parse --git-path mp-supervise-worker`, which keeps an
+# attended session read-only in the checkout (scripts/supervise-read-only.sh)
+# until release.sh removes it.
+#
 # Exits 0 launched and confirmed; 1 not launched; 2 launched, failed a check
 # and stopped.
 
@@ -83,6 +90,38 @@ DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
 
 set -- "$CONFIG"/plugins/cache/*/mattpocock-skills/*/skills/*/implement/SKILL.md
 [ -f "$1" ] || fail "mattpocock-skills:implement is not installed under $CONFIG/plugins/cache; install mattpocock-skills first"
+
+# The entry check (#76): the checkout is on its default branch, its tree is
+# clean, and no other background session is live in it, so the worker
+# starts where its commits belong and alone. The default branch is found as
+# resuming's state.sh finds it.
+git -C "$DIR" rev-parse --git-dir >/dev/null 2>&1 || fail "$DIR is not a git checkout; not launched"
+status=$(git -C "$DIR" status --porcelain) || fail "git status failed in $DIR, so its tree is unconfirmed; not launched"
+dirty=$(printf '%s' "$status" | grep -c '^')
+if [ "$dirty" -gt 0 ]; then
+    [ "$dirty" = 1 ] && paths=path || paths=paths
+    fail "$DIR has uncommitted changes ($dirty $paths); commit or clear them before launching a worker there; not launched"
+fi
+branch=$(git -C "$DIR" symbolic-ref --short -q HEAD || echo "(detached)")
+default=$(git -C "$DIR" symbolic-ref --short -q refs/remotes/origin/HEAD)
+default=${default#origin/}
+if [ -z "$default" ]; then
+    for b in main master; do
+        git -C "$DIR" show-ref -q --verify "refs/heads/$b" && { default=$b; break; }
+    done
+fi
+default=${default:-main}
+[ "$branch" = "$default" ] || fail "$DIR is on $branch, not the default branch $default; not launched"
+list=$(CLAUDE_CONFIG_DIR="$CONFIG" claude agents --json --all </dev/null 2>/dev/null) ||
+    fail "claude agents --json --all failed, so other sessions in $DIR are unknown; not launched"
+others=$(printf '%s' "$list" | jq -er --arg d "$DIR" '
+    [.[] | select(.kind == "background" and .cwd == $d and .state != "stopped")
+     | "\(.id) (\(.state // "unknown"))"] | join(", ")' 2>/dev/null) ||
+    fail "claude agents --json --all printed no list jq could read, so other sessions in $DIR are unknown; not launched"
+[ -z "$others" ] || fail "another live background session in $DIR: $others; not launched"
+# The marker the read-only hook reads. One left by a worker that is no
+# longer live (the check above found none) is stale and is replaced below.
+marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker)
 
 out=$(cd "$DIR" && CLAUDE_CONFIG_DIR="$CONFIG" claude --bg --model "$MODEL" \
     --disallowedTools EnterWorktree --settings "$GUARD_OFF" --permission-mode auto \
@@ -130,4 +169,5 @@ jq -e '.respawnFlags as $f | [range(0; ($f | length) - 1)]
               and (($f[$i + 1] | try fromjson catch null) | .worktree.bgIsolation? == "none"))' "$job" >/dev/null ||
     reject "has the background worktree guard on, so its edits in $DIR would be refused: bgIsolation none is not in its settings (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
 
+echo "$id" >"$marker" || reject "could not write the marker $marker, so this checkout is not held read-only"
 echo "$id"

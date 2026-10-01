@@ -388,8 +388,11 @@ check "poll: failing agents command exits 1" "1" "$rc"
 check "poll: failing agents command is not gone" "" "$out"
 
 # --- launch.sh -------------------------------------------------------------
+# launch.sh reads `claude agents` for other live sessions in the checkout;
+# LAUNCH_AGENTS names the list the fake serves (by default, none there).
 launch() { # [args...] -- launch.sh --dir $project with the fake claude
     reset_fake
+    echo "${LAUNCH_AGENTS:-$fixtures/working-busy.json}" >"$fake/seq"
     PATH="$work/bin:$PATH" sh "$scripts/launch.sh" --dir "$project" "$@" </dev/null
 }
 out=$(launch --ticket 56 2>&1)
@@ -470,6 +473,72 @@ check "launch: no job state exits 2" "2" "$rc"
 check "launch: no job state stops the session" "stop c2a368ee" "$(command cat "$fake/calls" 2>/dev/null)"
 check "launch: no job state says why" "Error: no job state for session c2a368ee under $cfg/jobs after 1s, so its profile is unconfirmed; stopped it" "$out"
 
+# The worker's marker, which the read-only hook reads (#76).
+marker=$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-worker)
+command rm -f "$marker"
+launch --ticket 56 >/dev/null 2>&1
+check "launch: writes the worker's marker" "c2a368ee" "$(command cat "$marker" 2>/dev/null)"
+command rm -f "$marker"
+(export FAKE_STATE_FILTER='| .cwd = "/elsewhere"'; launch --ticket 56 >/dev/null 2>&1)
+check "launch: a worker that failed a check leaves no marker" "no" "$([ -f "$marker" ] && echo yes || echo no)"
+
+# The entry check: the default branch, a clean tree, and no other live
+# background session in the checkout, before anything launches.
+not_launched() { # <name> <expected message> -- run after a launch
+    check "launch: $1 exits 1" "1" "$rc"
+    check "launch: $1 never launched" "no" "$([ -f "$fake/args" ] && echo yes || echo no)"
+    check "launch: $1 says why" "$2" "$out"
+}
+echo dirty >>"$project/README"
+out=$(launch --ticket 56 2>&1); rc=$?
+not_launched "a modified file" "Error: $project has uncommitted changes (1 path); commit or clear them before launching a worker there; not launched"
+git -C "$project" checkout -q -- README
+touch "$project/untracked.txt"
+out=$(launch --ticket 56 2>&1); rc=$?
+not_launched "an untracked file" "Error: $project has uncommitted changes (1 path); commit or clear them before launching a worker there; not launched"
+command rm -f "$project/untracked.txt"
+project_git checkout -q -b feature
+out=$(launch --ticket 56 2>&1); rc=$?
+not_launched "another branch" "Error: $project is on feature, not the default branch main; not launched"
+project_git checkout -q main
+project_git branch -D feature
+jq --arg d "$project" '. + [{id: "7a6a0741", cwd: $d, kind: "background", sessionId: "7a6a0741-0000", name: "x", state: "blocked", pid: 99}]' \
+    "$fixtures/working-busy.json" >"$work/other-in-project.json"
+out=$(LAUNCH_AGENTS="$work/other-in-project.json"; export LAUNCH_AGENTS; launch --ticket 56 2>&1); rc=$?
+not_launched "another live session" "Error: another live background session in $project: 7a6a0741 (blocked); not launched"
+jq '[.[] | if .id == "7a6a0741" then .state = "stopped" | del(.pid) else . end]' \
+    "$work/other-in-project.json" >"$work/stopped-in-project.json"
+out=$(LAUNCH_AGENTS="$work/stopped-in-project.json"; export LAUNCH_AGENTS; launch --ticket 56 2>&1); rc=$?
+check "launch: a stopped session in the checkout does not block" "0 c2a368ee" "$rc $out"
+out=$( (export FAKE_AGENTS_FAIL=1; launch --ticket 56 2>&1) ); rc=$?
+not_launched "an unreadable session list" "Error: claude agents --json --all failed, so other sessions in $project are unknown; not launched"
+# A marker left by a worker that is no longer live does not block, and is
+# replaced.
+echo 0ld0ld00 >"$marker"
+out=$(launch --ticket 56 2>&1); rc=$?
+check "launch: a stale marker does not block" "0 c2a368ee" "$rc $out"
+check "launch: a stale marker is replaced" "c2a368ee" "$(command cat "$marker")"
+mkdir -p "$work/not-a-repo"
+out=$(PATH="$work/bin:$PATH" sh "$scripts/launch.sh" --dir "$work/not-a-repo" --ticket 56 </dev/null 2>&1); rc=$?
+check "launch: not a git checkout exits 1" "1 Error: $work/not-a-repo is not a git checkout; not launched" "$rc $out"
+
+# --- release.sh --------------------------------------------------------------
+echo c2a368ee >"$marker"
+out=$(sh "$scripts/release.sh" --dir "$project" --id 7a6a0741 </dev/null 2>&1); rc=$?
+check "release: another worker's marker exits 1" "1" "$rc"
+check "release: another worker's marker is kept" "c2a368ee" "$(command cat "$marker")"
+check "release: another worker's marker says so" "Error: the marker in $project names worker c2a368ee, not 7a6a0741; left in place" "$out"
+out=$(sh "$scripts/release.sh" --dir "$project" --id c2a368ee </dev/null 2>&1); rc=$?
+check "release: removes the worker's marker" "0 released c2a368ee no" "$rc $out $([ -f "$marker" ] && echo yes || echo no)"
+out=$(sh "$scripts/release.sh" --dir "$project" --id c2a368ee </dev/null 2>&1); rc=$?
+check "release: no marker is not an error" "0 no marker in $project" "$rc $out"
+out=$(cd "$project" && sh "$scripts/release.sh" --dir . --id c2a368ee </dev/null 2>&1)
+check "release: names the folder by its full path" "no marker in $project" "$out"
+sh "$scripts/release.sh" --dir "$project" </dev/null >/dev/null 2>&1
+check "release: --id is required" "1" "$?"
+sh "$scripts/release.sh" --id c2a368ee </dev/null >/dev/null 2>&1
+check "release: --dir is required" "1" "$?"
+
 # --- resume.sh -------------------------------------------------------------
 # The worker's row after a stop, in the shapes #77 saw: still working with a
 # pid, working with no pid, and stopped. Another background session in the
@@ -516,6 +585,8 @@ $sid
 /mp-ported-skills:capturing" "$(command cat "$fake/resume-args")"
 check "resume: runs in the project folder" "$project" "$(command cat "$fake/cwd")"
 check "resume: sets the config dir" "$cfg" "$(command cat "$fake/env")"
+check "resume: writes the worker's marker, live again" "c2a368ee" "$(command cat "$marker" 2>/dev/null)"
+command rm -f "$marker"
 
 # stopped may never show: a row with no pid for the settle time is enough,
 # and a pid showing again starts the settle time over.

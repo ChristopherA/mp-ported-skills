@@ -25,7 +25,9 @@
 # original, up to TRIES resumes in all.
 #
 # Prints `copy <id> stopped and removed` for each copy (or `stopped, not
-# removed` when `claude rm` failed), then `resumed <id>`.
+# removed` when `claude rm` failed), then `resumed <id>`. On a wake it writes
+# the worker's marker in DIR, as launch.sh does (#76), with a `note` line
+# before `resumed` when it could not.
 #
 # Usage:
 #   resume.sh --id ID --dir DIR --prompt TEXT [--settle S] [--interval S]
@@ -153,6 +155,11 @@ while [ "$try" -lt "$TRIES" ]; do
         continue
     fi
     if printf '%s\n' "$out" | grep -Eq "woke session $ID([^0-9a-f]|$)"; then
+        # The worker is live again, so its checkout is held read-only again
+        # (#76), after the Report step's release.sh cleared the marker.
+        marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker 2>/dev/null) &&
+            echo "$ID" >"$marker" ||
+            echo "note the marker for $ID was not written in $DIR, so the checkout is not held read-only"
         echo "resumed $ID"
         exit 0
     fi
