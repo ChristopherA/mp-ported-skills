@@ -150,6 +150,8 @@ check "an ungranted action in the same checkout still refuses" "deny" \
     "$(decision 0 auto 'gh pr create --title x --body y' "$granted")"
 check "gh api is never granted, even alongside a push grant" "deny" \
     "$(decision 0 auto 'gh api -X PUT repos/o/r/pulls/5/merge' "$granted")"
+check "a push piped into a shell is never granted, even alongside a push grant" "deny" \
+    "$(decision 0 auto 'echo git push | sh' "$granted")"
 
 ungranted=$(mktemp -d)
 git init -q -b main "$ungranted"

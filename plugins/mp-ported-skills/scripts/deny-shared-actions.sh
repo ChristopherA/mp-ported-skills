@@ -76,6 +76,11 @@ cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null) || cwd=""
 # so each segment starts with the command actually run there. Quoting is
 # not parsed: a separator inside a quoted string also splits, which can
 # over-refuse but never hides a command.
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$here/shared-action-classify.sh"
+classify_git_cmd=git
+classify_text=$cmd
+
 split=$(printf '%s' "$cmd" | sed -E 's/(&&|\|\||[;&|()`])/\n/g')
 
 matched=""
@@ -176,74 +181,11 @@ for seg in $split; do
     git-push | git-send-pack) matched="git push" ;;
     git)
         shift
-        while [ $# -gt 0 ]; do
-            case "$1" in
-            -c)
-                # An alias defined inline: `git -c alias.p=push p`.
-                case "${2:-}" in alias.*push*) matched="git push (alias)" ;; esac
-                if [ $# -ge 2 ]; then shift 2; else shift; fi
-                ;;
-            -C) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
-            -*) shift ;;
-            *) break ;;
-            esac
-        done
-        [ -n "$matched" ] && break
-        sub=${1:-}
-        if [ "$sub" = push ] || [ "$sub" = send-pack ]; then
-            matched="git push"
-        elif [ "$sub" = subtree ] && [ "${2:-}" = push ]; then
-            matched="git subtree push"
-        elif [ -n "$sub" ]; then
-            # An alias from git config, read in the session's working
-            # directory, where the command runs.
-            case "$(git config --get "alias.$sub" 2>/dev/null)" in
-            *push*) matched="git push (alias $sub)" ;;
-            esac
-        fi
+        classify_git "$@"
         ;;
     gh)
         shift
-        # A repo given before the subcommand: `gh -R o/r pr create`.
-        while [ $# -gt 0 ]; do
-            case "$1" in
-            -R | --repo) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
-            --repo=* | -R?*) shift ;;
-            *) break ;;
-            esac
-        done
-        case "${1:-}/${2:-}" in
-        pr/create) matched="gh pr create" ;;
-        pr/merge) matched="gh pr merge" ;;
-        issue/close) matched="gh issue close" ;;
-        api/*)
-            # A write through the REST or GraphQL API reaches the same
-            # actions: a POST, PUT, PATCH or DELETE on pulls, issues, merges,
-            # contents or the git data API, or a GraphQL mutation. gh sends POST by default
-            # once a field or input is given.
-            shift
-            method="" fields="" target="" graphql=""
-            while [ $# -gt 0 ]; do
-                case "$1" in
-                -X | --method) method=${2:-}; if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
-                -X* ) method=${1#-X}; shift ;;
-                --method=*) method=${1#--method=}; shift ;;
-                -f | -F | --field | --raw-field | --input) fields=yes; if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
-                -f* | -F* | --field=* | --raw-field=* | --input=*) fields=yes; shift ;;
-                graphql) graphql=yes; shift ;;
-                *pulls* | *issues* | *merges* | *contents* | */git/*) target=yes; shift ;;
-                *) shift ;;
-                esac
-            done
-            method=$(printf '%s' "$method" | tr '[:lower:]' '[:upper:]')
-            [ -n "$method" ] || { [ -n "$fields" ] && method=POST; } || method=GET
-            if [ -n "$graphql" ]; then
-                case "$cmd" in *mutation*) matched="gh api graphql mutation" ;; esac
-            elif [ -n "$target" ] && [ "$method" != GET ]; then
-                matched="gh api $method"
-            fi
-            ;;
-        esac
+        classify_gh "$@"
         ;;
     esac
 done
@@ -273,14 +215,7 @@ fi
 # so a grant added since cannot make that probe stop naming it -- the
 # variable can only ever make this hook refuse more, never less.
 action=""
-if [ -z "${MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS:-}" ]; then
-    case "$matched" in
-        "git push"* | "git subtree push"* | "git send-pack"*) action=push ;;
-        "gh pr create"*) action=pr-create ;;
-        "gh pr merge"*) action=pr-merge ;;
-        "gh issue close"*) action=issue-close ;;
-    esac
-fi
+[ -n "${MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS:-}" ] || action=$(grant_action "$matched")
 if [ -n "$action" ]; then
     grant_sh="${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}/skills/supervise/scripts/grant.sh"
     if [ -f "$grant_sh" ] && sh "$grant_sh" --dir "$cwd" --action "$action" >/dev/null 2>&1; then
