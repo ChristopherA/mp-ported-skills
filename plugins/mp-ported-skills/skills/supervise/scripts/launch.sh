@@ -3,14 +3,14 @@
 # confirm the session got what it was launched with.
 #
 # Runs `claude --bg --model MODEL --disallowedTools EnterWorktree
-# --settings '{"worktree":{"bgIsolation":"none"}}' --permission-mode auto
-# '/mattpocock-skills:implement #N'` in DIR with
+# --settings '{"worktree":{"bgIsolation":"none"}}' --append-system-prompt
+# GRANTS --permission-mode auto '/mattpocock-skills:implement #N'` in DIR with
 # CLAUDE_CONFIG_DIR set explicitly, so the session runs under this profile
 # whatever the shell would pick for DIR. Then reads the job's state.json,
 # which the background service writes under that config dir, and checks that
 # the session runs under the same config dir, in DIR itself (not a worktree),
-# in auto mode, without EnterWorktree, and with the background worktree
-# guard off. A session that fails a check is stopped. Prints the session's
+# in auto mode, without EnterWorktree, with the background worktree guard
+# off, and with its grants text. A session that fails a check is stopped. Prints the session's
 # short id.
 #
 # EnterWorktree is denied because /implement workers called it on their own,
@@ -41,6 +41,17 @@
 # reach it or its hooks. Checked live (#62): a SessionStart hook in the worker
 # recorded a variable set before `claude --bg` as unset, and one passed as
 # --settings '{"env":{...}}' as 1.
+#
+# The worker is told its Project's standing grants (#88) in an
+# --append-system-prompt: each shared action grant.sh finds granted on the
+# default branch as committed on origin (never DIR's working tree or local
+# commits), that a granted one goes ahead without asking, and that any other
+# ends its turn on one `Waiting on:` line naming it, which watch.sh's `needs`
+# line can carry. Without it, workers asked before every push, as /implement
+# and the maintainer's rules say, and the run stalled at blocked with a grant
+# in place. Checked live with 2.1.286: a `claude --bg` session given
+# --append-system-prompt replied with a codeword only that text held, and its
+# job's respawnFlags began with the flag and its text, so it can be confirmed.
 #
 # Usage:
 #   launch.sh --dir DIR --ticket N [--model MODEL]
@@ -130,8 +141,26 @@ others=$(printf '%s' "$list" | jq -er --arg d "$DIR" '
 # longer live (the check above found none) is stale and is replaced below.
 marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker)
 
+# The standing grants, each as grant.sh cites it, from its source alone.
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+granted=""
+for action in push pr-create pr-merge issue-close; do
+    cited=$(sh "$here/grant.sh" --dir "$DIR" --action "$action" </dev/null) &&
+        granted="$granted
+- $cited"
+done
+if [ -n "$granted" ]; then
+    GRANTS="You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/$default (push is git push; pr-create, pr-merge and issue-close are gh pr create, gh pr merge and gh issue close):$granted
+A shared action one of these grants covers goes ahead without asking: when /implement reaches it, take it, and do not end your turn to ask first."
+else
+    GRANTS="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/$default, holds no standing grant."
+fi
+GRANTS="$GRANTS
+A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin $default\`."
+
 out=$(cd "$DIR" && CLAUDE_CONFIG_DIR="$CONFIG" claude --bg --model "$MODEL" \
-    --disallowedTools EnterWorktree --settings "$GUARD_OFF" --permission-mode auto \
+    --disallowedTools EnterWorktree --settings "$GUARD_OFF" \
+    --append-system-prompt "$GRANTS" --permission-mode auto \
     "/mattpocock-skills:implement #$TICKET" </dev/null 2>&1)
 id=$(printf '%s\n' "$out" | sed -n 's/^backgrounded · \([0-9a-f][0-9a-f]*\)$/\1/p' | head -n 1)
 if [ -z "$id" ]; then
@@ -175,6 +204,9 @@ jq -e '.respawnFlags as $f | [range(0; ($f | length) - 1)]
         | any(. as $i | $f[$i] == "--settings"
               and (($f[$i + 1] | try fromjson catch null) | .worktree.bgIsolation? == "none"))' "$job" >/dev/null ||
     reject "has the background worktree guard on, so its edits in $DIR would be refused: bgIsolation none is not in its settings (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
+jq -e --arg g "$GRANTS" '.respawnFlags as $f | [range(0; ($f | length) - 1)]
+        | any(. as $i | $f[$i] == "--append-system-prompt" and $f[$i + 1] == $g)' "$job" >/dev/null ||
+    reject "was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
 
 echo "$id" >"$marker" || reject "could not write the marker $marker, so this checkout is not held read-only"
 echo "$id"

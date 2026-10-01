@@ -347,9 +347,15 @@ case "$1" in
         if [ -n "${FAKE_BG_OUT+x}" ]; then printf '%s\n' "$FAKE_BG_OUT"; exit 0; fi
         echo "Starting background service…"; echo "backgrounded · c2a368ee"
         if [ -z "${FAKE_NO_STATE:-}" ]; then
+            # The daemon records --append-system-prompt first in the
+            # job's flags, as a live launch with it did (#88).
+            asp=""; prev=""
+            for a in "$@"; do [ "$prev" = --append-system-prompt ] && asp=$a; prev=$a; done
             mkdir -p "$CLAUDE_CONFIG_DIR/jobs/c2a368ee"
-            jq --arg cfg "$CLAUDE_CONFIG_DIR" --arg cwd "$(pwd -P)" \
-                ".cwd = \$cwd | .providerEnv.CLAUDE_CONFIG_DIR = \$cfg ${FAKE_STATE_FILTER:-}" \
+            jq --arg cfg "$CLAUDE_CONFIG_DIR" --arg cwd "$(pwd -P)" --arg asp "$asp" \
+                ".cwd = \$cwd | .providerEnv.CLAUDE_CONFIG_DIR = \$cfg
+                 | if \$asp != \"\" then .respawnFlags = [\"--append-system-prompt\", \$asp] + .respawnFlags else . end
+                 ${FAKE_STATE_FILTER:-}" \
                 "$FAKE_JOB" >"$CLAUDE_CONFIG_DIR/jobs/c2a368ee/state.json"
         fi ;;
     *) echo "fake claude: unexpected $*" >&2; exit 1 ;;
@@ -464,6 +470,10 @@ out=$(launch --ticket 56 2>&1)
 rc=$?
 check "launch: exit 0" "0" "$rc"
 check "launch: prints the id" "c2a368ee" "$out"
+# The worker is told its Project's standing grants (#88). $project has no
+# origin, so it has none, and an ungranted action ends the turn on one line.
+no_grants="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/main, holds no standing grant.
+A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`."
 check "launch: flags and the command" "--bg
 --model
 claude-sonnet-5
@@ -471,6 +481,8 @@ claude-sonnet-5
 EnterWorktree
 --settings
 {\"worktree\":{\"bgIsolation\":\"none\"}}
+--append-system-prompt
+$no_grants
 --permission-mode
 auto
 /mattpocock-skills:implement #56" "$(command cat "$fake/args")"
@@ -523,6 +535,10 @@ mismatch "isolation guard on" '| .respawnFlags = ["--disallowedTools", "EnterWor
     "Error: session c2a368ee has the background worktree guard on, so its edits in $project would be refused: bgIsolation none is not in its settings (its flags: --disallowedTools EnterWorktree --permission-mode auto --model claude-sonnet-5); stopped it"
 mismatch "isolation guard set to another value" '| .respawnFlags = ["--disallowedTools", "EnterWorktree", "--settings", "{\"worktree\":{\"bgIsolation\":\"worktree\"}}", "--permission-mode", "auto"]' \
     "Error: session c2a368ee has the background worktree guard on, so its edits in $project would be refused: bgIsolation none is not in its settings (its flags: --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"worktree\"}} --permission-mode auto); stopped it"
+mismatch "grants not recorded" '| .respawnFlags |= .[2:]' \
+    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5); stopped it"
+mismatch "other grants recorded" '| .respawnFlags[1] = "something else"' \
+    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --append-system-prompt something else --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5); stopped it"
 mismatch "wrong profile" '| .providerEnv.CLAUDE_CONFIG_DIR = "/elsewhere"' \
     "Error: session c2a368ee runs under config /elsewhere, not $cfg; stopped it"
 mismatch "no profile recorded" '| del(.providerEnv)' \
@@ -586,6 +602,43 @@ check "launch: a stale marker is replaced" "c2a368ee" "$(command cat "$marker")"
 mkdir -p "$work/not-a-repo"
 out=$(PATH="$work/bin:$PATH" sh "$scripts/launch.sh" --dir "$work/not-a-repo" --ticket 56 </dev/null 2>&1); rc=$?
 check "launch: not a git checkout exits 1" "1 Error: $work/not-a-repo is not a git checkout; not launched" "$rc $out"
+
+# The grants come from grant.sh's source, docs/agents/supervision.md on
+# origin's default branch (#88): one committed but not pushed is not listed.
+granted="$work/granted"
+git init -q --bare "$work/granted.git"
+git init -q -b main "$granted"
+granted_git() { git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@" >/dev/null 2>&1; }
+mkdir -p "$granted/docs/agents"
+printf '# Supervision\n\n## Grants\n\n- push: to main, once tests pass\n- issue-close\n\n## Other\n\n- pr-merge\n' \
+    >"$granted/docs/agents/supervision.md"
+granted_git add docs
+granted_git commit -m grants
+granted_git remote add origin "$work/granted.git"
+granted_git push origin main
+granted_git remote set-head origin main
+printf '# Supervision\n\n## Grants\n\n- push: to main, once tests pass\n- issue-close\n- pr-create\n\n## Other\n\n- pr-merge\n' \
+    >"$granted/docs/agents/supervision.md"
+granted_git commit -am 'local grant'
+launch_in() { # <dir> [args...] -- launch.sh --dir <dir> with the fake claude
+    d=$1; shift
+    reset_fake
+    echo "$fixtures/working-busy.json" >"$fake/seq"
+    PATH="$work/bin:$PATH" sh "$scripts/launch.sh" --dir "$d" "$@" </dev/null
+}
+out=$(launch_in "$granted" --ticket 56 2>/dev/null); rc=$?
+check "launch with grants: exit 0" "0 c2a368ee" "$rc $out"
+check "launch with grants: lists the grants on origin, and only those" "You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/main (push is git push; pr-create, pr-merge and issue-close are gh pr create, gh pr merge and gh issue close):
+- push: to main, once tests pass
+- issue-close
+A shared action one of these grants covers goes ahead without asking: when /implement reaches it, take it, and do not end your turn to ask first.
+A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`." \
+    "$(sed -n '/^--append-system-prompt$/,/^--permission-mode$/p' "$fake/args" | sed '1d;$d')"
+check "launch with grants: notes the grant committed only locally" "note: docs/agents/supervision.md grants pr-create on the working tree or current branch, not on the committed origin/main; ignored" \
+    "$(launch_in "$granted" --ticket 56 2>&1 >/dev/null)"
+check "launch with grants: the job's flags carry them" "--append-system-prompt" \
+    "$(jq -r '.respawnFlags[0]' "$cfg/jobs/c2a368ee/state.json")"
+command rm -f "$(git -C "$granted" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
 
 # --- release.sh --------------------------------------------------------------
 echo c2a368ee >"$marker"
