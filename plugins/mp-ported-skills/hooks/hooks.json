@@ -20,6 +20,15 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-path.sh\" </dev/null",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PreToolUse": [

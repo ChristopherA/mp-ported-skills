@@ -47,9 +47,9 @@
 # wrapper not listed above (`sudo`, `find -exec`), and a GraphQL mutation
 # read from a file. The hook sees only the command text, never what a
 # script it names goes on to run, so `sh some-script.sh` that pushes gets
-# through whatever it contains -- #58's grant.sh does not close this, since
-# it is consulted here only for a form this scan already recognized by its
-# text (docs/adr/0004, docs/adr/0005).
+# past this hook whatever it contains. worker-path.sh's git and gh wrappers
+# cover that case, and the variable and find -exec ones, by the real
+# arguments (docs/adr/0006).
 #
 # Reads the PreToolUse payload on stdin. Prints a deny decision and exits 0
 # when the command matches one of the refused forms; otherwise prints

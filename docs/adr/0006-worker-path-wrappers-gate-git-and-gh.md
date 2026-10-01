@@ -1,0 +1,21 @@
+# Wrappers on a background session's PATH gate git and gh by their real arguments
+
+`deny-shared-actions.sh` (ADR 0004) reads only the text of a Bash command, so `sh push.sh` gets past it whatever `push.sh` runs, and so do `g=git; $g push` and `find -exec git push`. To make #58's grant check the route to a shared action for those too, a SessionStart hook, `scripts/worker-path.sh`, writes `export PATH='<plugin>/scripts/worker-bin':"$PATH"` to `CLAUDE_ENV_FILE` when `CLAUDE_CODE_SESSION_ATTENDED=0`. Claude Code sources that file before every Bash command the session runs (https://code.claude.com/docs/en/hooks.md), so every `git` and `gh` found by name, in the command or in anything it starts, is `worker-bin/git` or `worker-bin/gh`. Both hand their argv to `scripts/worker-gate.sh`, which classifies it with the same `shared-action-classify.sh` the hook uses, asks `grant.sh` about the same four actions, and either runs the real program (the first on PATH that is not a wrapper) or prints the refusal on stderr and exits 1.
+
+The hook stays: it refuses before the command runs and tells the model why in the tool result, and it covers a program called by its full path in the command text, which the wrappers never see. The wrappers cover what the text hides.
+
+## Considered Options
+
+- **GitHub branch protection on `main`.** It is the one gate a worker cannot reach around from its own machine, but on a personal repo a worker pushes with the maintainer's own credentials, so GitHub cannot tell a worker's push from the maintainer's, or a granted push from an ungranted one. A rule strict enough to stop a worker stops the maintainer and every granted push the same way. It also covers only pushes to `main`, not PRs, merges or issue closes.
+- **Withhold credentials from the worker** (`GH_TOKEN` set to nothing, a git credential helper that refuses). A granted action needs the credentials too, so the grant check would have to hand them back for one call, and a worker can still read them from the keychain or `gh`'s own config, the same reach-around as a full path.
+- **A git `pre-push` hook through `core.hooksPath`.** It replaces the repo's own hooks, covers only pushes, and `--no-verify` inside a script skips it.
+- **Gate on permission mode as the PreToolUse hook does.** SessionStart's input carries no `permission_mode`, and the wrappers run as child processes with no payload at all. They gate on `CLAUDE_CODE_SESSION_ATTENDED=0` alone, so they refuse in an unattended session outside auto mode too, where nobody would approve the action anyway.
+
+## Consequences
+
+- Known gaps: a program run by its full path from inside a script (`/usr/bin/git push`), a script that resets `PATH`, and a write made without git or gh (`curl` with a token) reach no wrapper. #58's grant check is the only route to a shared action through git or gh as found on PATH, not through every program on the machine.
+- `CLAUDE_CODE_SESSION_ATTENDED` is fixed when the session's process starts (ADR 0004), and `CLAUDE_ENV_FILE` is the session's own, so `claude attach` to a worker keeps the wrappers, and switching it out of auto mode lifts the hook but not the wrappers. Push from the maintainer's own interactive session.
+- Every git and gh call in a background session now goes through one extra `sh`, and a call the classifier must resolve as an alias runs `git config` once more. A matched shared action runs `grant.sh`.
+- `worker-bin/git` and `worker-bin/gh` must be committed executable (mode 100755), since PATH lookup skips a file without the bit; `tests/worker-bin.test.sh` checks the index.
+- `tests/worker-bin.test.sh` runs the SessionStart hook with a scratch `CLAUDE_ENV_FILE` and then runs commands with that file sourced: a script, a variable, `find -exec` and an alias that push are refused and the remote does not move; a granted push from a script goes through; gh refuses `pr create` and API writes and passes reads; an attended session passes everything. `tests/live/deny-shared-actions.sh` checks in a real `claude --bg` session that `git` on PATH is the wrapper and that a push from a script file is refused.
+- Sharing the parser fixed a mapping the hook got wrong: a push piped into a shell matched the push grant by its "git push" prefix, though ADR 0005 says that form is never granted.

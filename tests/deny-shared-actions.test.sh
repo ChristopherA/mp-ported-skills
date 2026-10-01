@@ -174,8 +174,8 @@ check "piped into sh without a shared action" "" "$(decision 0 auto 'echo git st
 check "gh api contents read" "" "$(decision 0 auto 'gh api repos/o/r/contents/README.md')"
 
 # The hook sees only the command text, never what a named script goes on to
-# run, so a script that pushes is a route around it whatever its content --
-# #58's grant check does not close this (docs/adr/0004, docs/adr/0005).
+# run, so a script that pushes gets past it whatever its content; the
+# wrappers in tests/worker-bin.test.sh catch it there (docs/adr/0006).
 check "a script that runs git push is not inspected" "" \
     "$(decision 0 auto 'sh scripts/granted-push.sh')"
 

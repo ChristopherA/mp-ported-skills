@@ -4,9 +4,11 @@
 #
 # Starts `claude --bg --permission-mode auto` in this checkout, with this
 # checkout's plugin loaded by --plugin-dir, and asks it to run
-# `git push --dry-run` and then print CLAUDE_CODE_SESSION_ATTENDED. Finds
-# the session's transcript by a token in its prompt, and checks that the
-# push was refused with the hook's reason. `--dry-run` publishes nothing
+# `git push --dry-run`, then the same push from a script file the hook
+# cannot see into, then print CLAUDE_CODE_SESSION_ATTENDED and the git on
+# PATH. Finds the session's transcript by a token in its prompt, and checks
+# that the hook refused the first push and the worker-bin wrapper the
+# second (docs/adr/0006). `--dry-run` publishes nothing
 # even if the hook lets it through. It lives apart from tests/*.test.sh
 # because it needs `claude`, a trusted folder, and a model call; without
 # `claude` it prints SKIP and exits 0.
@@ -37,7 +39,7 @@ check() { # <name> <expected> <actual>
 }
 
 token="deny-live-$$-$(date +%s)"
-prompt="Test $token. Run exactly these two Bash commands, one at a time, and nothing else: first \`git push --dry-run\`, then \`echo attended=\$CLAUDE_CODE_SESSION_ATTENDED\`. If the first is refused, do not retry it in any form. Then stop."
+prompt="Test $token. Run exactly these three Bash commands, one at a time, and nothing else: first \`git push --dry-run\`, then \`f=\$(mktemp) && printf 'git push --dry-run\\n' >\"\$f\" && sh \"\$f\"\`, then \`echo attended=\$CLAUDE_CODE_SESSION_ATTENDED path=\$(command -v git)\`. If a command is refused or fails, do not retry it in any form; go on to the next. Then stop."
 
 set -- --bg --permission-mode auto --plugin-dir "$root/plugins/mp-ported-skills"
 [ -n "${MP_LIVE_MODEL:-}" ] && set -- "$@" --model "$MP_LIVE_MODEL"
@@ -48,7 +50,7 @@ if [ -z "$id" ]; then
     exit 1
 fi
 
-# Wait for the second command's output, which means the first has been
+# Wait for the last command's output, which means the others have been
 # decided.
 transcript=""
 seen=""
@@ -68,7 +70,11 @@ if [ -n "$transcript" ]; then
     check "the session is unattended" 1 \
         "$(grep -c 'attended=0' "$transcript" </dev/null | sed 's/^[1-9][0-9]*$/1/')"
     check "git push --dry-run refused with the hook's reason" 1 \
-        "$(grep -c "cannot run 'git push' on its own" "$transcript" </dev/null | sed 's/^[1-9][0-9]*$/1/')"
+        "$(grep -c "cannot run 'git push' on its own (#66): main" "$transcript" </dev/null | sed 's/^[1-9][0-9]*$/1/')"
+    check "git on PATH is the worker-bin wrapper" 1 \
+        "$(grep -c 'path=[^ "]*/worker-bin/git' "$transcript" </dev/null | sed 's/^[1-9][0-9]*$/1/')"
+    check "a push from a script file refused by the wrapper" 1 \
+        "$(grep -c "cannot run 'git push' on its own (#66), from a script" "$transcript" </dev/null | sed 's/^[1-9][0-9]*$/1/')"
 fi
 
 claude stop "$id" </dev/null >/dev/null 2>&1

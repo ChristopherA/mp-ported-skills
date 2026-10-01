@@ -1,0 +1,3 @@
+#!/bin/sh
+# git for a background session: see ../worker-gate.sh (#66).
+exec sh "$(dirname -- "$0")/../worker-gate.sh" git "$@"
