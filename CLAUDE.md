@@ -40,7 +40,11 @@ To set a variable for one script run, set and export it in a subshell, as `launc
 
 A live test that starts `claude` in a pane runs it in a folder inside this repo's parent. The maintainer's shell picks the Claude Code config from a marker file in a parent folder, so a scratch folder elsewhere starts the session under the default config and at the folder-trust prompt, and the test observes a setup no real launch has.
 
-A live test that starts `claude --bg` in a new scratch folder trusts the folder first: `--bg` shows no trust prompt and exits with `Workspace not trusted`. Start plain `claude` there once in a tmux window and choose `Yes, I trust this folder`; the prompt opens on `No, exit`. The profile's sessions start in auto mode, so a test that needs a permission prompt launches with `--permission-mode default`.
+A live test that starts `claude --bg` in a new scratch folder trusts the folder first: `--bg` shows no trust prompt and exits with `Workspace not trusted`. Start plain `claude` there once in a tmux window and choose `Yes, I trust this folder`; the prompt opens on `No, exit`. A folder inside this checkout inherits its trust and needs no such step, which is why `tests/live/supervise-resume.sh` makes its scratch folder there (Claude Code 2.1.286).
+
+A live test removes every background session it starts, with `claude stop` then `claude rm`, before it exits. A finished session stays listed in `claude agents` until removed, and one left in a checkout makes `supervise`'s `resume.sh` refuse to resume there: two leftover live checks did so in this checkout.
+
+The profile's sessions start in auto mode, so a test that needs a permission prompt launches with `--permission-mode default`.
 
 A pattern `pane-classify.sh` matches comes from a live capture in `tests/fixtures/pane-states/`, recorded in a wide pane and in a narrow one. Claude Code cuts text to fit a narrow pane: the interrupt marker `⎿  Interrupted` rendered as `⎿  Interrup·` at 27 columns, and a pattern built from the full word read that idle session as `working`.
 
