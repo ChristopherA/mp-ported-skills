@@ -36,7 +36,7 @@ check() { # <name> <expected> <actual>
 
 # Every variable the scripts read, set or unset here, so the result does not
 # depend on the session running the test.
-unset MP_SMART_ZONE_K CLAUDE_CODE_SESSION_ID FAKE_GH_FAIL WORKSTREAM_KIT_CONTEXT_DIR
+unset MP_SMART_ZONE_K CLAUDE_CODE_SESSION_ID FAKE_GH_FAIL WORKSTREAM_KIT_CONTEXT_DIR CLAUDE_CODE_SESSION_ATTENDED
 cfg="$work/config"
 mkdir -p "$cfg"
 export CLAUDE_CONFIG_DIR="$cfg"

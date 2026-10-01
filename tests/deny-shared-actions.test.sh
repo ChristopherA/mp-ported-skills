@@ -34,7 +34,7 @@ check() { # <name> <expected> <actual>
 # the calling session, it would skip the grant lookup below without a
 # single test here asking for that -- the exact silent-skip the variable
 # is designed to never cause from the hook's own default.
-unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS
+unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS CLAUDE_CODE_SESSION_ATTENDED
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 outside=$(mktemp -d)
 cd "$outside" || exit 1

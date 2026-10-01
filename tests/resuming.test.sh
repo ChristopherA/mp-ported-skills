@@ -57,7 +57,7 @@ EOF
 chmod +x "$work/bin/gh"
 PATH="$work/bin:$PATH"
 export FAKE_GH="$work/gh"
-unset FAKE_GH_FAIL FAKE_GH_SLEEP MP_RESUME_BUDGET CLAUDE_PROJECT_DIR 2>/dev/null || true
+unset FAKE_GH_FAIL FAKE_GH_SLEEP MP_RESUME_BUDGET CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ATTENDED 2>/dev/null || true
 
 issues() { printf '%s' "$1" >"$FAKE_GH/issues.json"; }
 prs() { printf '%s' "$1" >"$FAKE_GH/prs.json"; }
