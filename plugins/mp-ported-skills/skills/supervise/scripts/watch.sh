@@ -22,6 +22,11 @@
 # branch holds. Any such line turns working or done into moved.
 # A worker denied EnterWorktree made its worktree with `git worktree add`
 # from Bash and kept its cwd in DIR, so its cwd alone does not show it (#83).
+# A worktree locked with a reason starting `claude agent bridge-` is a
+# session the Claude app started through a remote-control server in DIR
+# during the run, not the worker: it is listed as `other <path>` instead,
+# its branch is left out of the branch lines, and neither turns the state
+# into moved (#84).
 #
 # The state comes from `state`, not `status`: a session just launched shows
 # `status: idle` while its `state` is `working`. But `state` can go on saying
@@ -132,8 +137,18 @@ turn_ended() {
     return 1
 }
 
-# made_since: the worktree, branch and commit lines for what DIR's repo
-# gained since the --since snapshot, or a note when the repo was not read.
+# lock_reason <worktree path>: its "locked" reason in DIR's repo, or empty
+# when it is not locked.
+lock_reason() {
+    git -C "$DIR" worktree list --porcelain | awk -v target="$1" '
+        /^worktree / { path = substr($0, 10); next }
+        path == target && /^locked / { print substr($0, 8); exit }
+    '
+}
+
+# made_since: the worktree, branch, other and commit lines for what DIR's
+# repo gained since the --since snapshot, or a note when the repo was not
+# read.
 made_since() {
     now=$(snapshot) || { printf 'note the repo in %s was not read\n' "$DIR"; return 0; }
     base=$(sed -n 's/^head //p' "$SINCE")
@@ -144,15 +159,32 @@ made_since() {
     if [ -n "$current" ] && git -C "$DIR" rev-parse -q --verify "refs/heads/$current" >/dev/null; then
         set -- "$base" "refs/heads/$current"
     fi
-    printf '%s\n' "$now" | sed -n 's/^worktree //p' | while IFS= read -r w; do
+    new_worktrees=$(printf '%s\n' "$now" | sed -n 's/^worktree //p')
+    bridge_branches=""
+    old_ifs=$IFS
+    IFS='
+'
+    for w in $new_worktrees; do
+        IFS=$old_ifs
         grep -Fqx "worktree $w" "$SINCE" && continue
+        reason=$(lock_reason "$w")
+        case $reason in
+            "claude agent bridge-"*)
+                printf 'other %s\n' "$w"
+                br=$(git -C "$w" symbolic-ref -q --short HEAD 2>/dev/null)
+                [ -z "$br" ] || bridge_branches="$bridge_branches
+$br"
+                continue ;;
+        esac
         printf 'worktree %s\n' "$w"
         # A detached worktree's commits are on no branch, so list them here.
         git -C "$w" symbolic-ref -q HEAD >/dev/null && continue
         commits "$(git -C "$w" rev-parse HEAD)" "$@"
     done
+    IFS=$old_ifs
     printf '%s\n' "$now" | sed -n 's/^ref //p' | while read -r name tip; do
         [ "$name" != "$current" ] || continue
+        printf '%s\n' "$bridge_branches" | grep -Fqx "$name" && continue
         grep -Fqx "ref $name $tip" "$SINCE" && continue
         printf 'branch %s\n' "$name"
         commits "$tip" "$@"
@@ -198,12 +230,11 @@ report() {
     if [ -n "$SINCE" ]; then
         made=$(made_since)
         if [ -n "$made" ]; then
-            case $made in
-                worktree* | branch*)
-                    case $out in
-                        working* | done*) out=$(printf '%s\n' "$out" | sed '1s/.*/moved/') ;;
-                    esac ;;
-            esac
+            if printf '%s\n' "$made" | grep -Eq '^(worktree|branch) '; then
+                case $out in
+                    working* | done*) out=$(printf '%s\n' "$out" | sed '1s/.*/moved/') ;;
+                esac
+            fi
             out=$(printf '%s\n%s' "$out" "$made")
         fi
     fi

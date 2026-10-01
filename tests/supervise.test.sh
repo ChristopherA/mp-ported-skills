@@ -264,6 +264,41 @@ commit $(git -C "$project/.wt-detached" rev-parse --short HEAD) Detached
 branch kept
 commit $(git -C "$project" rev-parse --short kept) On kept" "$(watch_since working-busy c2a368ee)"
 project_git worktree remove --force "$project/.wt-detached"
+# A worktree locked with a reason starting `claude agent bridge-` is a
+# session the Claude app started in the Project during the run, not the
+# worker: it is listed as `other <path>`, and neither it nor its branch
+# turns a working or done worker into moved. A fresh snapshot keeps this
+# check clear of the `kept` branch's commit added above.
+sh "$scripts/watch.sh" --dir "$project" --snapshot </dev/null >"$work/since-bridge"
+watch_since_bridge() { # <fixture> <id> -- watch.sh --dir $project --since on a fresh snapshot
+    sh "$scripts/watch.sh" --id "$2" --dir "$project" --since "$work/since-bridge" --file "$(in_project "$1")" </dev/null
+}
+bridge="$project/.claude/worktrees/bridge-x"
+project_git worktree add -q -b bridge-x "$bridge"
+git -C "$bridge" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q --allow-empty -m "Bridge commit"
+project_git worktree lock --reason 'claude agent bridge-x (pid 1)' "$bridge"
+check "watch --since: a Claude-app bridge worktree is not moved" "working
+cwd $project
+other $bridge" "$(watch_since_bridge working-busy c2a368ee)"
+check "watch --since: a bridge worktree leaves done alone too" "done
+cwd $project
+other $bridge" "$(watch_since_bridge done 9121ff49)"
+# Unlocked, or locked for another reason, it is still moved.
+project_git worktree unlock "$bridge"
+check "watch --since: an unlocked worktree in a bridge path is still moved" "moved
+cwd $project
+worktree $bridge
+branch bridge-x
+commit $(git -C "$bridge" rev-parse --short HEAD) Bridge commit" "$(watch_since_bridge working-busy c2a368ee)"
+project_git worktree lock --reason 'something else' "$bridge"
+check "watch --since: locked for another reason is still moved" "moved
+cwd $project
+worktree $bridge
+branch bridge-x
+commit $(git -C "$bridge" rev-parse --short HEAD) Bridge commit" "$(watch_since_bridge working-busy c2a368ee)"
+project_git worktree unlock "$bridge"
+project_git worktree remove --force "$bridge"
+project_git branch -D bridge-x
 out=$(sh "$scripts/watch.sh" --dir "$project" --since "$work/missing" --id c2a368ee --file "$(in_project working-busy)" </dev/null 2>&1)
 check "watch --since: missing snapshot exits 1" "1" "$?"
 check "watch --since: missing snapshot says so" "Error: no such snapshot: $work/missing" "$out"
