@@ -36,6 +36,8 @@ A check on a line that lists several items, such as `ready, blockers closed:`, c
 
 Each test sets or unsets every environment variable the scripts it runs read, so it gives the same result in any session. The maintainer's sessions set `MP_SESSION_TITLE=1`, which changes what the status line prints, and one test failed only there.
 
+A test that runs `git` or `gh` unsets `CLAUDE_CODE_SESSION_ATTENDED`. A `/supervise` worker runs the suite with `scripts/worker-bin` first on its PATH and the variable at `0`, and there the wrappers refuse a scratch repo's push (docs/adr/0006); five test files failed only there. Check a new test the way a worker runs it: `PATH="$PWD/plugins/mp-ported-skills/scripts/worker-bin:$PATH" CLAUDE_CODE_SESSION_ATTENDED=0 sh tests/<name>.test.sh`.
+
 To set a variable for one script run, set and export it in a subshell, as `launch_as` in `tests/iterm-pane.test.sh` does, not as a prefix to a helper function such as `run`. `/bin/sh` on macOS is bash in POSIX mode, where `X=1 f` leaves `X` set after the function returns, so every later check in the file runs with it.
 
 A live test that starts `claude` in a pane runs it in a folder inside this repo's parent. The maintainer's shell picks the Claude Code config from a marker file in a parent folder, so a scratch folder elsewhere starts the session under the default config and at the folder-trust prompt, and the test observes a setup no real launch has.
