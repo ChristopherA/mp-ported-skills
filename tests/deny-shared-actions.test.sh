@@ -30,8 +30,11 @@ check() { # <name> <expected> <actual>
 # Every variable the hook reads, set or unset here. The hook runs
 # `git config` to resolve aliases, so git reads no global or system config
 # and no repo but the scratch one below, and the checks run from a folder
-# outside any repo.
-unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
+# outside any repo. MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS unset: left set in
+# the calling session, it would skip the grant lookup below without a
+# single test here asking for that -- the exact silent-skip the variable
+# is designed to never cause from the hook's own default.
+unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 outside=$(mktemp -d)
 cd "$outside" || exit 1
@@ -39,14 +42,14 @@ cd "$outside" || exit 1
 entry='.hooks.PreToolUse[] | select(.hooks[0].command | test("deny-shared-actions"))'
 hook_cmd=$(jq -r "$entry | .hooks[0].command" "$hooks")
 
-run() { # <attended> <mode> <tool> <command>: the hook's full JSON output
-    payload=$(jq -cn --arg mode "$2" --arg tool "$3" --arg cmd "$4" \
-        '{hook_event_name:"PreToolUse",session_id:"s1",permission_mode:$mode,tool_name:$tool,tool_input:{command:$cmd}}')
+run() { # <attended> <mode> <tool> <command> [<cwd>]: the hook's full JSON output
+    payload=$(jq -cn --arg mode "$2" --arg tool "$3" --arg cmd "$4" --arg cwd "${5:-}" \
+        '{hook_event_name:"PreToolUse",session_id:"s1",permission_mode:$mode,tool_name:$tool,tool_input:{command:$cmd}} + (if $cwd == "" then {} else {cwd: $cwd} end)')
     printf '%s' "$payload" | CLAUDE_CODE_SESSION_ATTENDED="$1" sh -c "$hook_cmd"
 }
 
-decision() { run "$1" "$2" Bash "$3" | jq -r '.hookSpecificOutput.permissionDecision // empty'; }
-reason() { run "$1" "$2" Bash "$3" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty'; }
+decision() { run "$1" "$2" Bash "$3" "${4:-}" | jq -r '.hookSpecificOutput.permissionDecision // empty'; }
+reason() { run "$1" "$2" Bash "$3" "${4:-}" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty'; }
 
 # Each refused form, in a background session (unattended, auto mode).
 check "git push" "deny" "$(decision 0 auto 'git push')"
@@ -121,6 +124,42 @@ check "refusal names the grant file and the supervisor" \
     "A background session in auto mode cannot run 'git push' on its own (#66): main has no branch protection, and the auto-mode classifier makes a judgment call here, not a rule. Route this through a standing grant in docs/agents/supervision.md (#58), driven by the supervisor, or leave it for the maintainer's own interactive session." \
     "$(reason 0 auto 'git push')"
 
+# A standing grant on the committed default branch lets the matching form
+# through; an ungranted action, or a grant read from the working tree only,
+# still refuses (#58).
+granted=$(mktemp -d)
+remote="$granted.git"
+git init -q --bare "$remote"
+git init -q -b main "$granted"
+git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q --allow-empty -m start
+git -C "$granted" remote add origin "$remote"
+git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+git -C "$granted" remote set-head origin main
+mkdir -p "$granted/docs/agents"
+printf '## Grants\n\n- push\n- issue-close: routine\n' >"$granted/docs/agents/supervision.md"
+git -C "$granted" add docs/agents/supervision.md
+git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -m grants
+git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+
+check "a granted push goes through" "" "$(decision 0 auto 'git push' "$granted")"
+check "a granted push in a compound command goes through" "" \
+    "$(decision 0 auto 'echo hi && git push' "$granted")"
+check "a granted issue close goes through, note cited or not" "" \
+    "$(decision 0 auto 'gh issue close 42 --comment done' "$granted")"
+check "an ungranted action in the same checkout still refuses" "deny" \
+    "$(decision 0 auto 'gh pr create --title x --body y' "$granted")"
+check "gh api is never granted, even alongside a push grant" "deny" \
+    "$(decision 0 auto 'gh api -X PUT repos/o/r/pulls/5/merge' "$granted")"
+
+ungranted=$(mktemp -d)
+git init -q -b main "$ungranted"
+git -C "$ungranted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q --allow-empty -m start
+mkdir -p "$ungranted/docs/agents"
+printf '## Grants\n\n- push\n' >"$ungranted/docs/agents/supervision.md"
+check "a grant only in the working tree, not pushed, still refuses" "deny" \
+    "$(decision 0 auto 'git push' "$ungranted")"
+command rm -rf "$granted" "$remote" "$ungranted"
+
 # A command that is not a shared action goes through.
 check "gh pr view (not a shared action)" "" "$(decision 0 auto 'gh pr view 5')"
 check "gh api read (GET)" "" "$(decision 0 auto 'gh api repos/o/r/pulls/5')"
@@ -132,10 +171,10 @@ check "sh running a script file" "" "$(decision 0 auto 'sh tests/some.test.sh')"
 check "piped into sh without a shared action" "" "$(decision 0 auto 'echo git status | sh')"
 check "gh api contents read" "" "$(decision 0 auto 'gh api repos/o/r/contents/README.md')"
 
-# Criterion 3 waits on #58 (docs/adr/0004): the hook sees only the command
-# text, so any script that runs git push itself is a route around it until
-# #58 names the grant script and this hook narrows to it.
-check "a script that runs git push is not inspected (waits on #58)" "" \
+# The hook sees only the command text, never what a named script goes on to
+# run, so a script that pushes is a route around it whatever its content --
+# #58's grant check does not close this (docs/adr/0004, docs/adr/0005).
+check "a script that runs git push is not inspected" "" \
     "$(decision 0 auto 'sh scripts/granted-push.sh')"
 
 # Commands that only resemble a refused form.

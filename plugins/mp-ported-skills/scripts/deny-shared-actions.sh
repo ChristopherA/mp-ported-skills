@@ -1,6 +1,7 @@
 #!/bin/sh
 # deny-shared-actions.sh -- PreToolUse hook: refuse a shared action a
-# background worker reaches on its own (#66).
+# background worker reaches on its own, unless a standing grant covers it
+# (#58, #66).
 #
 # A Claude Code background session (`claude --bg`) launched in auto mode --
 # /supervise's workers, or any other unattended auto-mode session -- must
@@ -9,7 +10,13 @@
 # rule. This hook refuses a Bash command that runs `git push`,
 # `gh pr create`, `gh pr merge`, `gh issue close`, or a `gh api` write that
 # reaches the same actions, and points the worker at the supervisor and
-# docs/agents/supervision.md (#58) as the route to a shared action.
+# docs/agents/supervision.md (#58) as the route to a shared action -- unless
+# `grant.sh` finds a standing grant for that same action on the committed
+# default branch, in which case this hook lets the command through. A `git
+# push` whose destination grant.sh cannot name (one of the gh api forms, or
+# a command piped into a shell) is never granted: a grant covers a form this
+# hook can tell apart from the others, and those cannot be told apart from
+# each other, so they stay refused on purpose.
 #
 # Detection: Claude Code sets CLAUDE_CODE_SESSION_ATTENDED=0 in a
 # background session's own process env (seen in CLI 2.1.284 by reading
@@ -40,8 +47,9 @@
 # wrapper not listed above (`sudo`, `find -exec`), and a GraphQL mutation
 # read from a file. The hook sees only the command text, never what a
 # script it names goes on to run, so `sh some-script.sh` that pushes gets
-# through. Narrowing
-# that to #58's grant script waits on #58 (docs/adr/0004).
+# through whatever it contains -- #58's grant.sh does not close this, since
+# it is consulted here only for a form this scan already recognized by its
+# text (docs/adr/0004, docs/adr/0005).
 #
 # Reads the PreToolUse payload on stdin. Prints a deny decision and exits 0
 # when the command matches one of the refused forms; otherwise prints
@@ -60,6 +68,8 @@ tool=$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null) || tool="
 [ "$tool" = Bash ] || exit 0
 
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null) || cmd=""
+cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null) || cwd=""
+[ -n "$cwd" ] || cwd=$(pwd)
 [ -n "$cmd" ] || exit 0
 
 # Split on command separators, subshell/substitution parens and backticks,
@@ -254,6 +264,29 @@ if [ -z "$matched" ] && [ -n "$piped" ]; then
 fi
 
 [ -n "$matched" ] || exit 0
+
+# A standing grant lets this exact form through. Only a form grant.sh can
+# name maps to an action; the gh api forms and the piped-into-a-shell
+# fallback stay refused, since a grant names an action, not an arbitrary
+# command. MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS, set by actions.sh's own
+# probe of whether a past command matches a refused form at all, skips this
+# so a grant added since cannot make that probe stop naming it -- the
+# variable can only ever make this hook refuse more, never less.
+action=""
+if [ -z "${MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS:-}" ]; then
+    case "$matched" in
+        "git push"* | "git subtree push"* | "git send-pack"*) action=push ;;
+        "gh pr create"*) action=pr-create ;;
+        "gh pr merge"*) action=pr-merge ;;
+        "gh issue close"*) action=issue-close ;;
+    esac
+fi
+if [ -n "$action" ]; then
+    grant_sh="${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}/skills/supervise/scripts/grant.sh"
+    if [ -f "$grant_sh" ] && sh "$grant_sh" --dir "$cwd" --action "$action" >/dev/null 2>&1; then
+        exit 0
+    fi
+fi
 
 jq -cn --arg reason "A background session in auto mode cannot run '$matched' on its own (#66): main has no branch protection, and the auto-mode classifier makes a judgment call here, not a rule. Route this through a standing grant in docs/agents/supervision.md (#58), driven by the supervisor, or leave it for the maintainer's own interactive session." \
     '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'

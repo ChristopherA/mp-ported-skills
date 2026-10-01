@@ -52,6 +52,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/deny-worker-grant-edits.sh\"",
+            "timeout": 5
+          }
+        ]
       }
     ]
   }

@@ -29,10 +29,19 @@
 # push from another checkout of the same repo shows only after a fetch
 # there.
 #
-# This version holds no standing grants (#58), so every action is
-# `ungranted`. After the actions it prints a `note` line for each source it
-# could not read, which is never taken as empty, and prints `none` only when
-# there are neither actions nor notes.
+# `ungranted`, on a branch or command line, becomes `granted (<citation>)`
+# when grant.sh (#58) finds a standing grant for the action on DIR's default
+# branch as committed on origin -- never the working tree, so a grant a
+# worker commits locally but cannot push stays ungranted, reported as a
+# `note` line naming it as ignored, not silently treated as absent.
+# A branch line's action is always push. A command line's action is a
+# light word-token
+# guess (push, pr-create, pr-merge or issue-close) from its text and the
+# recorded op, good enough to cite a grant, not an enforcement check; a gh
+# write the hook's own scan would not single out, or one this guess cannot
+# name, stays ungranted. A `children` entry -- a PR or issue the worker's
+# own tool use opened, with no command text to classify -- is always
+# `ungranted` too.
 #
 # The job's state.json and the transcripts are read under
 # $CLAUDE_CONFIG_DIR, the transcript by session id in any project folder,
@@ -82,11 +91,16 @@ add() { actions="$actions$1
 note() { notes="${notes}note $1
 "; }
 
-# refused <command>: whether the #66 hook refuses it in an unattended
-# auto-mode session. Run in DIR, where it looks up git aliases.
+# refused <command>: whether the #66 hook would refuse it in an unattended
+# auto-mode session, regardless of any grant now on record -- this is an
+# inclusion test (did this command match a regulated form at all), not a
+# grant lookup, so a grant added since the worker ran must not make a
+# command it actually refused at the time drop out of the report.
+# grant_label, below, is what cites the grant on the line. Run in DIR, where
+# it looks up git aliases.
 refused() {
     [ -n "$(jq -cn --arg c "$1" '{permission_mode: "auto", tool_name: "Bash", tool_input: {command: $c}}' |
-        (cd "$DIR" && CLAUDE_CODE_SESSION_ATTENDED=0 sh "$hook"))" ]
+        (cd "$DIR" && CLAUDE_CODE_SESSION_ATTENDED=0 MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS=1 sh "$hook"))" ]
 }
 
 # gh_write_words <word>...: prints yes when the words run `gh pr` or
@@ -137,7 +151,9 @@ gh_write() {
 }
 
 # calls <transcript>: one JSON row per Bash call worth checking: its
-# command, whether its result recorded a push or PR, and its report line.
+# command, the op Claude Code recorded, and its report line's pieces --
+# status and rest, with "<kind> ungranted:" left for the shell loop to fill
+# in once it knows whether grant.sh covers the action.
 calls() {
     jq -c -s '
         [.[] | select(.type == "assistant" or .type == "user")] as $rows
@@ -156,15 +172,53 @@ calls() {
            | join(", ")) as $ops
         | select($ops != "" or ($cmd | test("\\bgh\\b|push|send-pack|alias")))
         | ($cmd | split("\n")) as $lines
-        | {cmd: $cmd, recorded: ($ops != ""),
-           line: ("command "
-                  + (if $result == null then "no result"
+        | {cmd: $cmd, ops: $ops, recorded: ($ops != ""),
+           status: (if $result == null then "no result"
                      elif ($result.error | not) then "succeeded"
                      elif ($result.text | test("denied by the Claude Code auto mode classifier|on its own \\(#66\\)")) then "refused"
-                     else "failed" end)
-                  + " ungranted: " + $lines[0]
+                     else "failed" end),
+           rest: ($lines[0]
                   + (if ($lines | length) > 1 then " ..." else "" end)
                   + (if $ops != "" then " -- " + $ops else "" end))}' "$1" 2>/dev/null
+}
+
+# action_for <cmd> <ops>: push, pr-create, pr-merge, issue-close, or empty.
+# A light word-token heuristic for citing a grant on the report line, not an
+# enforcement check -- deny-shared-actions.sh is the enforcement layer, and
+# this only has to agree with it closely enough to cite the right grant.
+action_for() {
+    words=$(printf '%s %s' "$1" "$2" | tr -c 'A-Za-z0-9_-' '\n')
+    has() { printf '%s\n' "$words" | grep -qx -- "$1"; }
+    if has push || has send-pack; then echo push
+    elif has gh && has pr && has create; then echo pr-create
+    elif has gh && has pr && has merge; then echo pr-merge
+    elif has gh && has issue && has close; then echo issue-close
+    else echo ""
+    fi
+}
+
+# grant_label <action>: sets GRANT_LABEL to "ungranted", or
+# "granted (<citation>)" when grant.sh finds a standing grant for it on the
+# committed default branch (#58). An empty action (action_for found none)
+# is always ungranted. grant.sh's own note of a grant it found only on the
+# working tree or an unpushed commit -- ignored, since a worker can reach
+# either without the maintainer seeing it -- is surfaced as a `note` line
+# via note(), not swallowed, so a tampered or merely premature grant is
+# reported, not just quietly ignored. Called directly, never through
+# $(...): note() mutates the shared $notes, and that mutation would be
+# lost if this ran in a command-substitution subshell.
+grant_label() {
+    GRANT_LABEL=ungranted
+    [ -n "$1" ] || return
+    err=$(mktemp)
+    if cite=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$1" 2>"$err") && [ -n "$cite" ]; then
+        GRANT_LABEL="granted ($cite)"
+    elif [ -s "$err" ]; then
+        # grant.sh's own message already starts "note: "; note() adds its
+        # own "note " prefix, so strip grant.sh's to avoid "note note: ".
+        note "$(command cat "$err" | sed 's/^note: //')"
+    fi
+    command rm -f "$err"
 }
 
 sid=""
@@ -185,7 +239,8 @@ if commits=$(git -C "$DIR" rev-list "$START..HEAD" 2>/dev/null); then
         git -C "$DIR" for-each-ref --contains "$c" --format='%(refname)' refs/remotes
     done | grep -v '/HEAD$' | sed 's|^refs/remotes/||' | sort -u)
     for b in $branches; do
-        add "branch $b ungranted: holds the worker's commits"
+        grant_label push
+        add "branch $b $GRANT_LABEL: holds the worker's commits"
     done
 else
     note "git rev-list $START..HEAD failed in $DIR, so remote branches were not read"
@@ -208,7 +263,11 @@ if [ -n "$sid" ]; then
             IFS=$oldIFS
             cmd=$(printf '%s' "$row" | jq -r .cmd)
             if [ "$(printf '%s' "$row" | jq -r .recorded)" = true ] || gh_write "$cmd" || refused "$cmd"; then
-                add "$(printf '%s' "$row" | jq -r .line)"
+                ops=$(printf '%s' "$row" | jq -r .ops)
+                status=$(printf '%s' "$row" | jq -r .status)
+                rest=$(printf '%s' "$row" | jq -r .rest)
+                grant_label "$(action_for "$cmd" "$ops")"
+                add "command $status $GRANT_LABEL: $rest"
             fi
         done
         set +f

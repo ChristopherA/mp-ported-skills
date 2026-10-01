@@ -422,6 +422,36 @@ rc=$?
 check "poll: failing agents command exits 1" "1" "$rc"
 check "poll: failing agents command is not gone" "" "$out"
 
+# --stall (#58): a transcript that never grows across polls is reported as
+# a hang, left running, well before the outer --timeout.
+reset_fake
+transcript just-launched -work-project c2a368ee-c513-484c-83d3-581830e209a5
+echo "$fixtures/working-busy.json" >"$fake/seq"
+out=$(PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id c2a368ee --interval 1 --timeout 30 --stall 1 </dev/null)
+rc=$?
+check "poll --stall: exits 0, worker left running" "0" "$rc"
+check "poll --stall: reports hang, with cwd" "hang
+cwd /work/project" "$(printf '%s\n' "$out" | sed -n '1,2p')"
+check "poll --stall: a note names how long with no growth" "1" \
+    "$(printf '%s\n' "$out" | grep -cE '^note its transcript has not grown in [0-9]+s$')"
+
+# A --stall longer than --timeout never fires; the outer timeout still does.
+reset_fake
+transcript just-launched -work-project c2a368ee-c513-484c-83d3-581830e209a5
+echo "$fixtures/working-busy.json" >"$fake/seq"
+out=$(PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id c2a368ee --interval 1 --timeout 1 --stall 3600 </dev/null)
+rc=$?
+check "poll --stall: a high stall does not pre-empt the timeout" "124" "$rc"
+check "poll --stall: the timeout still reports working, not hang" "working
+cwd /work/project" "$out"
+command rm -rf "$cfg/projects"
+
+for bad in "--id c2a368ee --stall x" "--id c2a368ee --stall -1" "--id c2a368ee --stall"; do
+    # shellcheck disable=SC2086
+    sh "$scripts/watch.sh" $bad </dev/null >/dev/null 2>&1
+    check "watch: refuses $bad" "1" "$?"
+done
+
 # --- launch.sh -------------------------------------------------------------
 # launch.sh reads `claude agents` for other live sessions in the checkout;
 # LAUNCH_AGENTS names the list the fake serves (by default, none there).
@@ -873,6 +903,68 @@ sh "$scripts/actions.sh" --id c2a368ee --dir "$work/missing" --start "$start" </
 check "actions: a missing folder exits 1" "1" "$?"
 ( unset CLAUDE_CONFIG_DIR; sh "$scripts/actions.sh" --id c2a368ee --dir "$repo" --start "$start" </dev/null >/dev/null 2>&1 )
 check "actions: config dir required" "1" "$?"
+
+# A standing grant on the committed default branch cites itself on the
+# matching branch and command lines, which read granted instead of
+# ungranted (#58); a fresh repo and remote for each case, so the earlier
+# checks above stay exact and the two grant cases do not share history.
+new_grant_repo() { # <folder var name> <grant file content>: a repo with the
+    # grant committed and pushed to origin/main before any worker commit,
+    # then one worker commit pushed only to a topic branch, never main.
+    eval "$1=\"\$work/grant-repo-$grant_n\""
+    eval "grepo=\$$1"
+    grant_n=$((grant_n + 1))
+    gremote="$grepo.git"
+    git init -q --bare "$gremote"
+    git init -q -b main "$grepo"
+    repo_git "$grepo" commit -q --allow-empty -m start
+    repo_git "$grepo" remote add origin "$gremote"
+    repo_git "$grepo" push -q origin main 2>/dev/null
+    git -C "$grepo" remote set-head origin main
+    mkdir -p "$grepo/docs/agents"
+    printf '%s' "$2" >"$grepo/docs/agents/supervision.md"
+    repo_git "$grepo" add docs/agents/supervision.md
+    repo_git "$grepo" commit -q -m "grant"
+    repo_git "$grepo" push -q origin main 2>/dev/null
+    gstart=$(git -C "$grepo" rev-parse HEAD)
+    repo_git "$grepo" commit -q --allow-empty -m "worker's commit"
+    repo_git "$grepo" push -q origin HEAD:66-topic 2>/dev/null
+}
+grant_n=1
+
+command rm -rf "$cfg/jobs"
+mkdir -p "$cfg/jobs/c2a368ee"
+jq '.children = []' "$fixtures/job-state.json" >"$cfg/jobs/c2a368ee/state.json"
+transcript shared-actions -work-project "$sid"
+
+new_grant_repo grepo1 '## Grants
+
+- push: release branches only
+'
+check "actions: a granted push is cited, not ungranted" \
+    "branch origin/66-topic granted (push: release branches only): holds the worker's commits
+command refused granted (push: release branches only): git push origin HEAD:main 2>&1
+command succeeded granted (push: release branches only): git push -u origin 66-deny-shared-actions-to-background-workers 2>&1 -- push 66-deny-shared-actions-to-background-workers
+command failed ungranted: gh pr create --repo ChristopherA/mp-ported-skills --title \"Deny shared actions to background workers\" --body-file \"\$CLAUDE_JOB_DIR/tmp/pr-body.md\" --head 66-deny-shared-actions-to-background-workers --base main 2>&1
+command succeeded ungranted: gh pr create --repo ChristopherA/mp-ported-skills --title \"Deny shared actions to background workers\" --body-file /work/config/jobs/76153f47/tmp/pr-body.md --head 66-deny-shared-actions-to-background-workers --base main 2>&1 -- pr 72 created" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo1" --start "$gstart" </dev/null)"
+
+# A grant for a different action (pr-create) does not cover the push.
+new_grant_repo grepo2 '## Grants
+
+- pr-create
+'
+check "actions: an unmatched grant leaves the push ungranted" \
+    "branch origin/66-topic ungranted: holds the worker's commits" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo2" --start "$gstart" </dev/null | grep '^branch')"
+
+# A grant present only on the working tree (never pushed to origin/main) is
+# reported as ignored, not silently treated as absent (#58).
+printf '## Grants\n\n- push\n' >"$grepo2/docs/agents/supervision.md"
+check "actions: a working-tree-only grant is reported, not silent" \
+    "note docs/agents/supervision.md grants push on the working tree or current branch, not on the committed origin/main; ignored" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo2" --start "$gstart" </dev/null | grep '^note docs/agents/supervision.md grants push' | sort -u)"
+repo_git "$grepo2" checkout -q -- docs/agents/supervision.md
 
 echo "supervise: $pass passed, $fail failed"
 [ "$fail" = 0 ]

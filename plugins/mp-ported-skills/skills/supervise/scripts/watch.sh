@@ -7,12 +7,22 @@
 #   moved              still running, but no longer in DIR (with --dir): it
 #                      entered a worktree or another folder
 #   done               its turn ended; the session is still live
+#   hang               still working, but its transcript has not grown in
+#                      --stall seconds (#58): report it, leave it running
 #   blocked <what>     waiting on a human: `permission prompt`, `input needed`
 #   stopped            stopped, conversation kept
 #   gone               not in the list: removed, or never started
 #   unknown <state>    a state this script does not know
 # then `cwd <path>` (where the session runs), and for a blocked session
 # `needs <text>` when its job's state.json under $CLAUDE_CONFIG_DIR names it.
+#
+# `hang` is a polling-loop state, not something a single classification can
+# see: it needs the session's transcript size at an earlier poll to compare
+# against. --file classifies one snapshot and never reports it. A long tool
+# call can hold the transcript's size steady for a while in its own right
+# (the result is appended only once the call returns), so `hang` is a
+# "no progress for a while" signal to report, not proof the worker is stuck
+# -- hence left running rather than stopped.
 #
 # With --since, it also compares DIR's repo with a snapshot taken before the
 # launch, and prints `worktree <path>` for each worktree added since, and
@@ -35,7 +45,7 @@
 # with a last line `note claude agents still said working`.
 #
 # Usage:
-#   watch.sh --id ID [--dir DIR [--since FILE]] [--interval SECONDS] [--timeout SECONDS]
+#   watch.sh --id ID [--dir DIR [--since FILE]] [--interval SECONDS] [--timeout SECONDS] [--stall SECONDS]
 #       poll until a state other than working; on timeout print the last
 #       one and exit 124
 #   watch.sh --id ID [--dir DIR [--since FILE]] --file PATH
@@ -44,7 +54,9 @@
 #       print DIR's repo state for --since: take it before the launch
 #
 # DIR is the Project folder the worker was launched in. Without it, a working
-# session is working wherever it runs.
+# session is working wherever it runs. --stall is how long the transcript
+# may hold steady before a poll reports hang (default 1800); --file never
+# reports it, since it has only one snapshot to look at.
 #
 # Exits 1 when the list cannot be read, which is never reported as gone.
 
@@ -57,6 +69,7 @@ SINCE=""
 SNAPSHOT=""
 INTERVAL=30
 TIMEOUT=14400
+STALL=1800
 
 need_value() { [ $# -ge 2 ] || { printf 'Error: %s needs a value\n' "$1" >&2; exit 1; }; }
 while [ $# -gt 0 ]; do
@@ -68,9 +81,10 @@ while [ $# -gt 0 ]; do
         --snapshot) SNAPSHOT=1; shift ;;
         --interval) need_value "$@"; INTERVAL="$2"; shift 2 ;;
         --timeout)  need_value "$@"; TIMEOUT="$2"; shift 2 ;;
+        --stall)    need_value "$@"; STALL="$2"; shift 2 ;;
         --help)
-            printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--interval S] [--timeout S] | watch.sh --id ID [--dir DIR [--since FILE]] --file PATH | watch.sh --dir DIR --snapshot\n'
-            printf 'Prints: working, moved, done, blocked <what>, stopped, gone or unknown <state>; then cwd, needs, worktree, branch and commit lines.\n'
+            printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--interval S] [--timeout S] [--stall S] | watch.sh --id ID [--dir DIR [--since FILE]] --file PATH | watch.sh --dir DIR --snapshot\n'
+            printf 'Prints: working, moved, done, hang, blocked <what>, stopped, gone or unknown <state>; then cwd, needs, worktree, branch and commit lines.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
@@ -99,6 +113,7 @@ fi
 [ -n "$ID" ] || fail "--id is required"
 case $INTERVAL in '' | *[!0-9]*) fail "--interval needs whole seconds, not '$INTERVAL'" ;; esac
 case $TIMEOUT in '' | *[!0-9]*) fail "--timeout needs whole seconds, not '$TIMEOUT'" ;; esac
+case $STALL in '' | *[!0-9]*) fail "--stall needs whole seconds, not '$STALL'" ;; esac
 # claude agents and the job's state.json both follow the config dir, so an
 # unset one would read another profile's sessions.
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the profile being watched is unknown"
@@ -135,6 +150,33 @@ turn_ended() {
               and (.pendingBackgroundAgentCount // 0) == 0' "$t" >/dev/null 2>&1 && return 0
     done
     return 1
+}
+
+# session_id_of <agents json>: the job's sessionId, or empty when the list
+# cannot be read or names none. classify() only reads this for an idle
+# session (to call turn_ended); the stall check below needs it whatever the
+# status is.
+session_id_of() {
+    printf '%s' "$1" | jq -r --arg id "$ID" '
+        [.[] | select(.kind == "background" and .id == $id)] | first
+        | .sessionId // empty' 2>/dev/null
+}
+
+# transcript_size <session id>: total bytes across its transcript and any
+# subagent transcripts, or empty when none are found (never 0 for "no
+# transcript yet", so a session with no transcript at all never compares
+# equal across polls and falsely reports no progress).
+transcript_size() {
+    [ -n "$1" ] || { echo ""; return; }
+    total=0
+    found=""
+    for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl "$CLAUDE_CONFIG_DIR"/projects/*/"$1"/subagents/*.jsonl; do
+        [ -f "$t" ] || continue
+        found=1
+        sz=$(wc -c <"$t" 2>/dev/null) || sz=0
+        total=$((total + sz))
+    done
+    [ -n "$found" ] && echo "$total" || echo ""
 }
 
 # lock_reason <worktree path>: its "locked" reason in DIR's repo, or empty
@@ -248,17 +290,32 @@ if [ -n "$FILE" ]; then
 fi
 
 start=$(date +%s)
+stall_size=""
+stall_since=$start
 while :; do
     if ! list=$(claude agents --json --all </dev/null); then
         printf 'Error: claude agents --json --all failed\n' >&2
         exit 1
     fi
     out=$(report "$list") || { printf 'Error: claude agents --json --all printed no JSON array\n' >&2; exit 1; }
+    now=$(date +%s)
+    case $out in
+        working*)
+            size=$(transcript_size "$(session_id_of "$list")")
+            if [ -z "$size" ]; then
+                stall_size="" stall_since=$now
+            elif [ "$size" != "$stall_size" ]; then
+                stall_size=$size stall_since=$now
+            elif [ $((now - stall_since)) -ge "$STALL" ]; then
+                out=$(printf '%s\n' "$out" | sed '1s/.*/hang/')
+                out=$(printf '%s\nnote its transcript has not grown in %ss\n' "$out" "$((now - stall_since))")
+            fi ;;
+    esac
     case $out in
         working*) ;;
         *) printf '%s\n' "$out"; exit 0 ;;
     esac
-    if [ $(($(date +%s) - start)) -ge "$TIMEOUT" ]; then
+    if [ $((now - start)) -ge "$TIMEOUT" ]; then
         printf '%s\n' "$out"
         exit 124
     fi
