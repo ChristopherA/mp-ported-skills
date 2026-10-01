@@ -93,7 +93,7 @@ check "watch: done" "done
 cwd /work/project" "$(watch_file done 9121ff49)"
 check "watch: permission prompt" "blocked permission prompt
 cwd /work/project" "$(watch_file blocked-permission-prompt 91a06a74)"
-check "watch: SessionStart question" "blocked input needed
+check "watch: question asked" "blocked input needed
 cwd /work/project" "$(watch_file blocked-input-needed c2a368ee)"
 check "watch: stopped" "stopped
 cwd /work/project" "$(watch_file stopped c2a368ee)"

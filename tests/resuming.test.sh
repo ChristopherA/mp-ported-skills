@@ -1,15 +1,13 @@
 #!/bin/sh
-# resuming.test.sh -- tests for the resuming skill's state.sh and the hook.
+# resuming.test.sh -- tests for the resuming skill's state.sh.
 #
 # Runs state.sh against a scratch repo with a bare origin and a fake `gh` on
-# PATH that serves fixture JSON: no issue-tracker config (hook silent), `gh`
-# failing (hook silent, report says unreached), a hung `gh` (hook silent
-# within its budget, and within the hook's timeout on the default budget),
-# each of the seven weighing cases, a ticket labelled in-motion or parked, the next
+# PATH that serves fixture JSON: no issue-tracker config, `gh` failing (report
+# says unreached), a hung `gh` (report says timed out within its budget), each
+# of the seven weighing cases, a ticket labelled in-motion or parked, the next
 # child of an in-motion parent, and label strings read from
-# triage-labels.md. Hook cases run the command string from
-# hooks.json, as Claude Code does. Touches nothing outside its own mktemp
-# directory.
+# triage-labels.md. Also checks that no plugin hook runs state.sh. Touches
+# nothing outside its own mktemp directory.
 #
 # Usage: sh tests/resuming.test.sh
 
@@ -18,8 +16,6 @@ set -u
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 state="$root/plugins/mp-ported-skills/skills/resuming/scripts/state.sh"
 hooks="$root/plugins/mp-ported-skills/hooks/hooks.json"
-hook_cmd=$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$hooks")
-hook_timeout=$(jq -r '.hooks.SessionStart[0].hooks[0].timeout' "$hooks")
 work=$(mktemp -d)
 trap 'command rm -rf "$work"' EXIT
 
@@ -61,7 +57,7 @@ EOF
 chmod +x "$work/bin/gh"
 PATH="$work/bin:$PATH"
 export FAKE_GH="$work/gh"
-unset FAKE_GH_FAIL FAKE_GH_SLEEP MP_RESUME_BUDGET 2>/dev/null || true
+unset FAKE_GH_FAIL FAKE_GH_SLEEP MP_RESUME_BUDGET CLAUDE_PROJECT_DIR 2>/dev/null || true
 
 issues() { printf '%s' "$1" >"$FAKE_GH/issues.json"; }
 prs() { printf '%s' "$1" >"$FAKE_GH/prs.json"; }
@@ -87,58 +83,36 @@ g remote add origin "$work/origin.git"
 g push -qu origin main
 g remote set-head origin main
 run() { sh "$state" "$@" "$proj" </dev/null 2>&1; }
-# hook_at <dir>: the hooks.json command, run the way Claude Code runs it.
-hook_at() {
-    CLAUDE_PLUGIN_ROOT="$root/plugins/mp-ported-skills" CLAUDE_PROJECT_DIR=$1 \
-        sh -c "$hook_cmd" </dev/null 2>&1
-}
-hook() { hook_at "$proj"; }
 
-# --- silence ----------------------------------------------------------------
+# --- no session-start hook --------------------------------------------------
+check "no hook runs state.sh" "0" \
+    "$(jq '[.hooks[][].hooks[].command | select(test("state\\.sh"))] | length' "$hooks")"
+
+# --- no tracker, unreached, timed out --------------------------------------
 issues '[]'
 prs '[]'
 bare="$work/bare"
 git init -q "$bare"
-check "no config: hook silent" "" "$(hook_at "$bare")"
 has "no config: report names setup" "no docs/agents/issue-tracker.md; run /setup-matt-pocock-skills (you type it; user-invoked)" "$(sh "$state" "$bare" </dev/null 2>&1)"
 
-check "gh failing: hook silent" "" "$(FAKE_GH_FAIL=1 hook)"
 out=$(FAKE_GH_FAIL=1 run)
 has "gh failing: report says unreached" "tracker: GitHub, UNREACHED" "$out"
 has "gh failing: no confident case" "undecided" "$(next "$out")"
 check "gh failing: no runner-up known" "none known: the tracker was not read" "$(runner "$out")"
 
 start=$(date +%s)
-out=$(FAKE_GH_SLEEP=5 MP_RESUME_BUDGET=1 hook)
+out=$(FAKE_GH_SLEEP=5 MP_RESUME_BUDGET=1 run)
 took=$(($(date +%s) - start))
-check "gh hung: hook silent" "" "$out"
+has "gh hung: report says timed out" "timed out after 1s; the lines above are all that was read" "$out"
 [ "$took" -lt 4 ] && pass=$((pass + 1)) || { fail=$((fail + 1)); echo "FAIL gh hung: took ${took}s"; }
-
-# The default hook budget must end the hook before Claude Code's timeout does:
-# an alarm at hooks.json's timeout stands in for Claude Code, and exit 142 is
-# the alarm killing it. A missing or non-numeric timeout would leave no alarm
-# and the case testing nothing, so that fails first.
-case $hook_timeout in
-    '' | *[!0-9]*) fail=$((fail + 1)); echo "FAIL hooks.json timeout is not a number: $hook_timeout"; hook_timeout=0 ;;
-    *) pass=$((pass + 1)) ;;
-esac
-out=$(FAKE_GH_SLEEP=$((hook_timeout + 5)) perl -e 'alarm shift; exec @ARGV' -- "$hook_timeout" \
-    env CLAUDE_PLUGIN_ROOT="$root/plugins/mp-ported-skills" CLAUDE_PROJECT_DIR="$proj" \
-    sh -c "$hook_cmd" </dev/null 2>&1)
-check "gh hung: default budget ends within the hook timeout" "0" "$?"
-check "gh hung: default budget, hook silent" "" "$out"
 
 # --- the seven cases --------------------------------------------------------
 out=$(run)
 check "case 7: nothing in motion" "7 nothing in motion" "$(next "$out")"
 check "case 7: runner-up names the suggestions" "$ideas" "$(runner "$out")"
-out=$(hook)
-has "case 7: hook states it" "next: 7 nothing in motion" "$out"
-has "case 7: hook carries the runner-up" "runner-up: $ideas" "$out"
-has "hook: instruction line" "Do not ask what they are working on." "$out"
-has "hook: asks the step as a question" "ask it as one AskUserQuestion" "$out"
-has "hook: user-invoked commands are for the user to type" "never call them missing or swap in a model-invocable skill" "$out"
-has "hook: user-invoked commands go in a code block" "giving each full command on its own in a fenced code block" "$out"
+# With no dir, state.sh reads the folder it runs in.
+check "case 7: dir defaults to the current folder" "7 nothing in motion" \
+    "$(next "$(cd "$proj" && sh "$state" </dev/null 2>&1)")"
 
 issues "$(list "$(issue 20 wayfinder:map)" "$(issue 21 wayfinder:task)")"
 out=$(run)

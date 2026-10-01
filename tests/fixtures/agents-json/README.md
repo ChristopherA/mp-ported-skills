@@ -8,7 +8,7 @@ captured from a live `claude --bg --model claude-sonnet-5` session:
 |---|---|
 | `working-idle.json` | just launched: `status: idle` but `state: working` |
 | `working-busy.json` | `status: busy`, `state: working` |
-| `blocked-input-needed.json` | stopped at the SessionStart question: `state: blocked`, `waitingFor: input needed` |
+| `blocked-input-needed.json` | stopped at a question it asked: `state: blocked`, `waitingFor: input needed` |
 | `blocked-permission-prompt.json` | launched with `--permission-mode default`, stopped at a Bash prompt: `waitingFor: permission prompt` |
 | `done.json` | finished its turn: `status: idle`, `state: done`, still live |
 | `stopped.json` | after `claude stop`: `state: stopped`, no `status` or `pid` |

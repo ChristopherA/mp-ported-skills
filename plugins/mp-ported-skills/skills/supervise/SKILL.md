@@ -68,7 +68,7 @@ It prints one line for each PR or issue in the worker's job, each remote branch 
   claude attach ID
   ```
 
-  `input needed` is a question the worker asked, such as the SessionStart recommendation question. Leave the worker running, and its marker in place. Report any `worktree`, `branch` and `commit` lines as for `moved`.
+  `input needed` is a question the worker asked and is waiting on an answer to. Leave the worker running, and its marker in place. Report any `worktree`, `branch` and `commit` lines as for `moved`.
 - **`hang`**: the id, the `note` line naming how long its transcript has not grown, and `claude attach ID` to look. Leave the worker running, and its marker in place -- this is a "no progress for a while" signal, not confirmation the worker is actually stuck, since a long tool call can hold the transcript steady on its own. Report any `worktree`, `branch` and `commit` lines as for `moved`.
 - **`stopped`**: the id, and that `claude attach ID` reopens it, which starts it again. Release its marker (below).
 - **`gone`**: the id; the session was removed and there is nothing to open. Release its marker (below).

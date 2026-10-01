@@ -8,28 +8,20 @@
 # when no other applies). A ticket labelled `parked` is never a step. Writes
 # nothing.
 #
-# Usage: sh state.sh [--hook] [dir]
-#   default  report everything; an unreached tracker is reported, not hidden.
-#   --hook   SessionStart mode: dir defaults to $CLAUDE_PROJECT_DIR; prints
-#            nothing unless docs/agents/issue-tracker.md exists and the tracker
-#            was reached; always exits 0.
-# Env: MP_RESUME_BUDGET  seconds before giving up (default 4 with --hook, else 30)
+# Usage: sh state.sh [dir]
+#   dir defaults to the current folder. Reports everything; an unreached
+#   tracker is reported, not hidden.
+# Env: MP_RESUME_BUDGET  seconds before giving up (default 30)
 
 set -u
 
-hook=0
-if [ "${1:-}" = --hook ]; then hook=1; shift; fi
-if [ $hook = 1 ]; then dir=${1:-${CLAUDE_PROJECT_DIR:-$PWD}}; else dir=${1:-$PWD}; fi
+dir=${1:-$PWD}
 case ${MP_RESUME_BUDGET:-} in
-    '' | *[!0-9]*) if [ $hook = 1 ]; then budget=4; else budget=30; fi ;;
+    '' | *[!0-9]*) budget=30 ;;
     *) budget=$MP_RESUME_BUDGET ;;
 esac
 
 cd "$dir" 2>/dev/null || exit 0
-if [ $hook = 1 ]; then
-    [ -f docs/agents/issue-tracker.md ] || exit 0
-    exec 2>/dev/null
-fi
 
 # Label string for a triage role, from docs/agents/triage-labels.md; the role
 # name itself when the file or row is missing.
@@ -98,7 +90,6 @@ $(gh api "repos/{owner}/{repo}/issues/$k/dependencies/blocked_by" 2>/dev/null |
 gather() {
     command -v git >/dev/null && git rev-parse --git-dir >/dev/null 2>&1 || {
         echo "git: not a repository"
-        [ $hook = 1 ] && exit 3
         echo "next: 7 nothing in motion"
         echo "runner-up: $ideas"
         exit 0
@@ -169,7 +160,6 @@ gather() {
         github) if [ $reached = 1 ]; then echo "tracker: GitHub, reached"
             else echo "tracker: GitHub, UNREACHED: $why"; fi ;;
     esac
-    if [ $tracker = github ] && [ $reached = 0 ] && [ $hook = 1 ]; then exit 3; fi
 
     if [ $reached = 1 ]; then
         t_triage=$(label_for needs-triage) t_info=$(label_for needs-info)
@@ -320,9 +310,11 @@ gather() {
 
 # gather runs in the background so the watchdog can stop a hung `gh`. The EXIT
 # trap is set after both forks: a subshell that inherits one defers the kill
-# until its current command returns.
+# until its current command returns. Its stderr goes to a file too, replayed
+# after: a hung child the kill leaves behind would otherwise hold the caller's
+# stderr open, and a caller capturing it would wait out the hang.
 tmp=$(mktemp -d) || exit 0
-gather >"$tmp/out" &
+gather >"$tmp/out" 2>"$tmp/err" &
 gpid=$!
 (sleep "$budget"; kill "$gpid") >/dev/null 2>&1 &
 wpid=$!
@@ -331,13 +323,9 @@ wait "$gpid"
 rc=$?
 { kill "$wpid"; wait "$wpid"; } >/dev/null 2>&1
 
-if [ $rc = 0 ]; then
-    cat "$tmp/out"
-    if [ $hook = 1 ]; then
-        echo "On your first reply, whatever the user wrote, recommend one next step from this state in the resuming skill's shape (the step, its reason, and the runner-up line as the runner-up) and ask it as one AskUserQuestion, the step first and marked (Recommended), then answer anything else they asked. Do not ask what they are working on. Commands marked user-invoked are installed but hidden from your skill list: tell the user to type them, giving each full command on its own in a fenced code block so it can be copied, and never call them missing or swap in a model-invocable skill."
-    fi
-elif [ $hook = 0 ]; then
-    cat "$tmp/out"
+cat "$tmp/err" >&2
+cat "$tmp/out"
+if [ $rc != 0 ]; then
     if [ $rc -gt 128 ]; then echo "timed out after ${budget}s; the lines above are all that was read"
     else echo "state.sh failed (exit $rc)"; fi
 fi

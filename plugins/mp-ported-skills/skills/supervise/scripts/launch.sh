@@ -35,6 +35,13 @@
 # on main in the folder. --settings is used because it leaves the Project's
 # files alone and the job's respawnFlags record it, so it can be confirmed.
 #
+# An environment variable meant for the worker goes in an "env" block in
+# --settings, never in the shell before `claude --bg`: the background service
+# starts the session, so a variable set on the launching command does not
+# reach it or its hooks. Checked live (#62): a SessionStart hook in the worker
+# recorded a variable set before `claude --bg` as unset, and one passed as
+# --settings '{"env":{...}}' as 1.
+#
 # Usage:
 #   launch.sh --dir DIR --ticket N [--model MODEL]
 #

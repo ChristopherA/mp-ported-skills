@@ -21,8 +21,6 @@ It reads git (no fetch) and, when `docs/agents/issue-tracker.md` names GitHub, t
 6. **Hand work**: a `ready-for-human` ticket, not `in-motion`, with every blocker closed. Do it by hand. The highest priority line wins (High, Medium, none, Low), then the lowest number. When this case wins, the second such ticket, if any, is the runner-up.
 7. **Nothing in motion**: say so plainly. Runner-ups: `/grill-with-docs` on a new idea, or `/improve-codebase-architecture`.
 
-When the SessionStart hook already put this state in context, use it; run the script only when it is absent or the user asks again later.
-
 ## 2. Check what the script cannot
 
 - **Case 1**: name the work: `git status`, `git log --oneline <default>..HEAD`, the PR's title, or `gh issue view N` for an `in-motion` ticket. Finishing means commit, push or merge as the state shows, or picking the ticket up where its last comment left it. For a parent, `state.sh` names the next child, or every open child's blockers when none is free.

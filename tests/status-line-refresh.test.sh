@@ -152,11 +152,9 @@ check "no jq: exit 0" "0" "$rc"
 check "no jq: nothing on stderr" "" "$(cat "$work/stderr")"
 check "no jq: untouched" "$before" "$(snapshot "$p")"
 
-# The entry Claude Code runs, and the resuming hook left as the first entry.
+# The entry Claude Code runs.
 check "matcher: startup, clear and compact" "startup|clear|compact" "$(jq -r "$entry | .matcher" "$hooks")"
 check "timeout set" "5" "$(jq -r "$entry | .hooks[0].timeout" "$hooks")"
-check "resuming hook still first" 'sh "${CLAUDE_PLUGIN_ROOT}/skills/resuming/scripts/state.sh" --hook </dev/null' \
-    "$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$hooks")"
 
 echo "status-line-refresh: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
