@@ -28,8 +28,11 @@ check() { # <name> <expected> <actual>
 }
 
 # Every variable the scripts read, set or unset here. git reads no global
-# or system config, and never signs.
-unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS CLAUDE_ENV_FILE
+# or system config, and never signs. Run inside a background session, this
+# test inherits that session's wrappers and attended flag; without them the
+# setup pushes below would be refused before any check runs.
+unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS CLAUDE_ENV_FILE CLAUDE_CODE_SESSION_ATTENDED
+PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '/worker-bin/*$' | paste -sd: -)
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
@@ -136,6 +139,16 @@ check "a granted push from a script goes through" "exit=0" "$(last "$(worker 0 g
 check "the remote moved" "$(git -C granted rev-parse main)" "$(git -C granted.git rev-parse main)"
 check "a granted issue close reaches the real gh" "real gh: issue close 4" \
     "$(worker 0 granted 'gh issue close 4' | head -n 1)"
+# The grant is read from the repo the push acts on, not the one the
+# command runs in.
+git -C plain -c commit.gpgsign=false commit -q --allow-empty -m elsewhere
+before=$(git -C plain.git rev-parse main)
+check "git -C into an ungranted repo is refused from a granted one" "exit=1" \
+    "$(last "$(worker 0 granted 'git -C ../plain push -q origin main')")"
+check "the ungranted remote did not move" "$before" "$(git -C plain.git rev-parse main)"
+git -C granted -c commit.gpgsign=false commit -q --allow-empty -m from-outside
+check "git -C into a granted repo goes through from an ungranted one" "exit=0" \
+    "$(last "$(worker 0 plain 'git -C ../granted push -q origin main')")"
 check "an ungranted action beside a grant is refused" "exit=1" \
     "$(last "$(worker 0 granted 'gh pr merge 5')")"
 check "gh api is never granted" "exit=1" \

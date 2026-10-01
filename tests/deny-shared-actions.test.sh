@@ -150,6 +150,10 @@ check "an ungranted action in the same checkout still refuses" "deny" \
     "$(decision 0 auto 'gh pr create --title x --body y' "$granted")"
 check "gh api is never granted, even alongside a push grant" "deny" \
     "$(decision 0 auto 'gh api -X PUT repos/o/r/pulls/5/merge' "$granted")"
+check "git -C into a granted repo goes through from elsewhere" "" \
+    "$(decision 0 auto "git -C $granted push" "$outside")"
+check "git -C into an ungranted repo is refused from a granted one" "deny" \
+    "$(decision 0 auto "git -C $outside push" "$granted")"
 check "a push piped into a shell is never granted, even alongside a push grant" "deny" \
     "$(decision 0 auto 'echo git push | sh' "$granted")"
 

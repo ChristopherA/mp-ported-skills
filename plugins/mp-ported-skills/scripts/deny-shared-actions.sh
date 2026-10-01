@@ -79,6 +79,7 @@ cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null) || cwd=""
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$here/shared-action-classify.sh"
 classify_git_cmd=git
+classify_base=$cwd
 classify_text=$cmd
 
 split=$(printf '%s' "$cmd" | sed -E 's/(&&|\|\||[;&|()`])/\n/g')
@@ -216,9 +217,13 @@ fi
 # variable can only ever make this hook refuse more, never less.
 action=""
 [ -n "${MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS:-}" ] || action=$(grant_action "$matched")
+# A grant is read from the repo the command acts on: `git -C <dir>`'s, or
+# the session's working directory.
+grant_dir=$cwd
+case "$matched" in git*) grant_dir=$classify_dir ;; esac
 if [ -n "$action" ]; then
     grant_sh="${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}/skills/supervise/scripts/grant.sh"
-    if [ -f "$grant_sh" ] && sh "$grant_sh" --dir "$cwd" --action "$action" >/dev/null 2>&1; then
+    if [ -f "$grant_sh" ] && sh "$grant_sh" --dir "$grant_dir" --action "$action" >/dev/null 2>&1; then
         exit 0
     fi
 fi

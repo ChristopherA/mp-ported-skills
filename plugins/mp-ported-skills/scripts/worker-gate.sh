@@ -22,14 +22,14 @@ prog=$1
 shift
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 
-# The real program: the first on PATH that is not one of the wrappers.
+# The real program: the first on PATH outside any worker-bin folder, this
+# copy's or another plugin copy's (an install beside a --plugin-dir).
 real=""
 oldIFS=$IFS
 IFS=:
 for d in $PATH; do
-    [ -n "$d" ] || continue
+    case "$d" in '' | */worker-bin | */worker-bin/) continue ;; esac
     [ -x "$d/$prog" ] && [ ! -d "$d/$prog" ] || continue
-    [ "$d/$prog" -ef "$here/worker-bin/$prog" ] && continue
     real="$d/$prog"
     break
 done
@@ -44,6 +44,7 @@ fi
 . "$here/shared-action-classify.sh"
 matched=""
 classify_git_cmd=$real
+classify_base=$PWD
 classify_text="$*"
 case "$prog" in
 git) classify_git "$@" ;;
@@ -52,7 +53,11 @@ esac
 [ -n "$matched" ] || exec "$real" "$@"
 
 action=$(grant_action "$matched")
-if [ -n "$action" ] && sh "$here/../skills/supervise/scripts/grant.sh" --dir "$PWD" --action "$action" >/dev/null 2>&1; then
+# A grant is read from the repo the command acts on: `git -C <dir>`'s, or
+# the working directory.
+grant_dir=$PWD
+case "$matched" in git*) grant_dir=$classify_dir ;; esac
+if [ -n "$action" ] && sh "$here/../skills/supervise/scripts/grant.sh" --dir "$grant_dir" --action "$action" >/dev/null 2>&1; then
     exec "$real" "$@"
 fi
 
