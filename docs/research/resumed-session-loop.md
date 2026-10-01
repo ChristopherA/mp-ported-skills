@@ -2,7 +2,7 @@
 
 Question from #77: can one supervised background session run the maintainer's loop (`/implement #N`, `/capturing`, `/clear`, next step, `/implement #M`), each command sent by stop and resume, or does each ticket need a fresh background session, as ADR 0003 assumes?
 
-Tested live on **Claude Code 2.1.286** with `claude-sonnet-5`. The Project was a scratch git repo beside this one, with no remote and no tracker. The tickets were two no-op specs given as `/implement`'s arguments: create `hello.txt`, then `bye.txt`, and commit. One session was launched as `launch.sh` launches (`claude --bg --model claude-sonnet-5 --disallowedTools EnterWorktree --permission-mode auto '/mattpocock-skills:implement ...'`), and each later command was sent with `claude stop <id>`, then `claude --bg --resume <session id> '<command>'` with no other flags.
+Tested live on **Claude Code 2.1.286** with `claude-sonnet-5`. The Project was a scratch git repo beside this one, with no remote and no tracker. The tickets were two no-op specs given as `/implement`'s arguments: create `hello.txt`, then `bye.txt`, and commit. One session was launched as `launch.sh` launched then (`claude --bg --model claude-sonnet-5 --disallowedTools EnterWorktree --permission-mode auto '/mattpocock-skills:implement ...'`), and each later command was sent with `claude stop <id>`, then `claude --bg --resume <session id> '<command>'` with no other flags.
 
 ## Answers
 
@@ -36,9 +36,25 @@ The background service's system prompt in 2.1.286 tells a session to call `Enter
 
 > This background session hasn't isolated its changes yet. Call EnterWorktree first so edits land in a worktree instead of the shared checkout, then retry this edit using the worktree path (a path inside a linked git worktree, including one you create with `git worktree add`, is accepted). (To disable this guard for this repo, set `"worktree": {"bgIsolation": "none"}` in .claude/settings.json.)
 
-With `EnterWorktree` denied, as `launch.sh` denies it, both workers ran `git worktree add .claude/worktrees/<name> -b implement-<name>` from Bash and committed there, while the session's `cwd` stayed the Project folder. `launch.sh`'s checks and `watch.sh`'s `moved` state both read the session's `cwd`, so neither sees it, and the commits sit on a branch nobody pushes, which is what `/supervise`'s policy that a worker stays in the Project folder exists to prevent. The second worker's branch started from `main`, not from the first worker's unmerged branch.
+With `EnterWorktree` denied, as `launch.sh` denies it, both workers ran `git worktree add .claude/worktrees/<name> -b implement-<name>` from Bash and committed there, while the session's `cwd` stayed the Project folder. `launch.sh`'s checks and `watch.sh`'s `moved` state both read only the session's `cwd` then, so neither saw it, and the commits sat on a branch nobody pushes, which is what `/supervise`'s policy that a worker stays in the Project folder exists to prevent. The second worker's branch started from `main`, not from the first worker's unmerged branch.
 
-The guard names its own switch, `"worktree": {"bgIsolation": "none"}` in the Project's `.claude/settings.json`. Whether setting it keeps a worker in the checkout is untested here.
+The guard names its own switch, `"worktree": {"bgIsolation": "none"}` in the Project's `.claude/settings.json`.
+
+### The switch keeps a worker in the checkout (#83)
+
+Tested live on **Claude Code 2.1.286** with `claude-sonnet-5`. There were three scratch git repos inside this checkout, each a fresh `git init` that needed the folder-trust prompt accepted once. In each, one session was launched as `launch.sh` launched then (`claude --bg --model claude-sonnet-5 --disallowedTools EnterWorktree --permission-mode auto`) and told to create `hello.txt` and commit it with git:
+
+| Variant | Guard message | Where the commit landed |
+|---|---|---|
+| No setting (control) | Yes, on the first `Write` | A worktree the session made with `git worktree add .wt-iso-test -b iso-control-test`, inside the repo but not under `.claude/worktrees/`; `main` unchanged |
+| `--settings '{"worktree":{"bgIsolation":"none"}}'` at launch | No | `main`, in the folder; no worktree |
+| The same JSON in the repo's `.claude/settings.local.json` | No | `main`, in the folder; no worktree |
+
+- The control's session still reported its `cwd` as the folder, as before, so only the repo's `git worktree list` and branches showed where its commit went.
+- With `--settings`, the job's `respawnFlags` held `"--settings", "{\"worktree\":{\"bgIsolation\":\"none\"}}"` beside `--disallowedTools EnterWorktree`, so the setting can be confirmed on the job as the deny is. `.claude/settings.local.json` leaves no mark on the job, and writes a file into the Project, though the maintainer's global git ignore hides it.
+- `launch.sh` now passes `--settings`, and `watch.sh --since` compares the repo with a snapshot taken before the launch, so a worktree or branch made from Bash shows as `moved`.
+
+The three sessions were removed with `claude rm` and the scratch repos deleted. Their transcripts remain in the profile's `projects/` folder, and the three folders' trust entries in its `.claude.json`.
 
 ## Recommendation for #59: a fresh background session per ticket
 
@@ -59,6 +75,6 @@ Per ticket, the loop in each shape:
 
 So #59 should keep ADR 0003's shape: on `done`, resume the finished worker once with `/mp-ported-skills:capturing`, then stop and `claude rm` it, and launch the next ticket with `launch.sh` in a new session.
 
-Before #59 loops, the worktree guard above has to be settled. With it on, every ticket in the loop lands on its own unpushed branch, and the "finished ticket has not landed" stop fires after every ticket.
+Before #59 loops, the worktree guard above had to be settled. With it on, every ticket in the loop would land on its own unpushed branch, and the "finished ticket has not landed" stop would fire after every ticket. `launch.sh` now turns it off (#83).
 
 The test's background sessions (the original and the copy) were removed with `claude rm`, and the scratch repo and its worktrees deleted. Their transcripts remain in the profile's `projects/` folder.

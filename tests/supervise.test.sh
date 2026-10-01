@@ -189,6 +189,91 @@ out=$(sh "$scripts/watch.sh" --id c2a368ee --dir "$work/missing" --file "$fixtur
 check "watch --dir: missing folder exits 1" "1" "$?"
 check "watch --dir: missing folder says so" "Error: not a directory: $work/missing" "$out"
 
+# With --since, a worktree or branch made in the Project's repo after the
+# snapshot is reported, whatever the worker's cwd: a worker with EnterWorktree
+# denied ran `git worktree add` from Bash and kept its cwd in the folder.
+project_git() { # <git args> -- git in $project, its output dropped, errors shown
+    git -C "$project" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@" >/dev/null
+}
+project_git init -b main
+echo seed >"$project/README"
+project_git add README
+project_git commit -m seed
+project_git branch older
+project_git worktree add -q "$work/kept" -b kept
+sh "$scripts/watch.sh" --dir "$project" --snapshot </dev/null >"$work/since"
+check "snapshot: head, branch, worktrees and refs" "head $(git -C "$project" rev-parse HEAD)
+branch main
+worktree $project
+worktree $work/kept
+ref kept $(git -C "$project" rev-parse HEAD)
+ref main $(git -C "$project" rev-parse HEAD)
+ref older $(git -C "$project" rev-parse HEAD)" "$(command cat "$work/since")"
+watch_since() { # <fixture> <id> -- watch.sh --dir $project --since on that fixture
+    sh "$scripts/watch.sh" --id "$2" --dir "$project" --since "$work/since" --file "$(in_project "$1")" </dev/null
+}
+check "watch --since: nothing made is working" "working
+cwd $project" "$(watch_since working-busy c2a368ee)"
+# Commits on the default branch in the folder are where they belong.
+echo more >>"$project/README"
+project_git commit -am "Add more"
+check "watch --since: commits on the folder's branch are working" "working
+cwd $project" "$(watch_since working-busy c2a368ee)"
+project_git worktree add -q "$project/.wt-iso" -b iso-test
+echo hi >"$project/.wt-iso/hello.txt"
+git -C "$project/.wt-iso" add hello.txt
+git -C "$project/.wt-iso" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -m "Add hello.txt"
+made="worktree $project/.wt-iso
+branch iso-test
+commit $(git -C "$project" rev-parse --short iso-test) Add hello.txt"
+check "watch --since: a worktree made from Bash is moved" "moved
+cwd $project
+$made" "$(watch_since working-busy c2a368ee)"
+check "watch --since: done with a worktree made is moved" "moved
+cwd $project
+$made" "$(watch_since done 9121ff49)"
+check "watch --since: blocked keeps its state and names the worktree" "blocked permission prompt
+cwd $project
+$made" "$(watch_since blocked-permission-prompt 91a06a74)"
+check "watch --since: stopped keeps its state and names the worktree" "stopped
+cwd $project
+$made" "$(watch_since stopped c2a368ee)"
+project_git worktree remove --force "$project/.wt-iso"
+project_git branch -D iso-test
+# A branch the worker checks out and commits on in the folder counts too.
+project_git checkout -q older
+project_git commit --allow-empty -m "On older"
+check "watch --since: a branch checked out in the folder is moved" "moved
+cwd $project
+branch older
+commit $(git -C "$project" rev-parse --short older) On older" "$(watch_since working-busy c2a368ee)"
+project_git checkout -q main
+project_git branch -f older "$(sed -n 's/^head //p' "$work/since")"
+git -C "$work/kept" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q --allow-empty -m "On kept"
+check "watch --since: commits on an older worktree's branch are moved" "moved
+cwd $project
+branch kept
+commit $(git -C "$project" rev-parse --short kept) On kept" "$(watch_since working-busy c2a368ee)"
+# A detached worktree's commits are on no branch, so they follow its line.
+project_git worktree add -q --detach "$project/.wt-detached"
+git -C "$project/.wt-detached" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q --allow-empty -m "Detached"
+check "watch --since: a detached worktree lists its commits" "moved
+cwd $project
+worktree $project/.wt-detached
+commit $(git -C "$project/.wt-detached" rev-parse --short HEAD) Detached
+branch kept
+commit $(git -C "$project" rev-parse --short kept) On kept" "$(watch_since working-busy c2a368ee)"
+project_git worktree remove --force "$project/.wt-detached"
+out=$(sh "$scripts/watch.sh" --dir "$project" --since "$work/missing" --id c2a368ee --file "$(in_project working-busy)" </dev/null 2>&1)
+check "watch --since: missing snapshot exits 1" "1" "$?"
+check "watch --since: missing snapshot says so" "Error: no such snapshot: $work/missing" "$out"
+sh "$scripts/watch.sh" --since "$work/since" --id c2a368ee --file "$(in_project working-busy)" </dev/null >/dev/null 2>&1
+check "watch --since: needs --dir" "1" "$?"
+sh "$scripts/watch.sh" --snapshot </dev/null >/dev/null 2>&1
+check "watch --snapshot: needs --dir" "1" "$?"
+sh "$scripts/watch.sh" --snapshot --dir "$work/not-a-repo" </dev/null >/dev/null 2>&1
+check "watch --snapshot: not a repo exits 1" "1" "$?"
+
 # --- fake claude -----------------------------------------------------------
 fake="$work/fake"
 mkdir -p "$work/bin" "$fake"
@@ -242,7 +327,11 @@ if [ "$(PATH="$work/bin:$PATH" command -v claude)" != "$work/bin/claude" ]; then
     echo "FAIL fake claude is not first on PATH; not running the rest" >&2
     exit 1
 fi
-export FAKE_DIR="$fake" FAKE_JOB="$fixtures/job-state.json"
+# The job a launch writes carries launch.sh's --settings, as the job of a
+# live launch with that flag did on Claude Code 2.1.286.
+jq '.respawnFlags = ["--disallowedTools", "EnterWorktree", "--settings", "{\"worktree\":{\"bgIsolation\":\"none\"}}"] + .respawnFlags[2:]' \
+    "$fixtures/job-state.json" >"$work/job-launched.json"
+export FAKE_DIR="$fake" FAKE_JOB="$work/job-launched.json"
 reset_fake() { command rm -rf "$fake" "$cfg/jobs"; mkdir -p "$fake"; }
 
 # --- watch.sh polling -----------------------------------------------------
@@ -273,6 +362,16 @@ cwd $project/.claude/worktrees/issue-66" \
     "$(PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id c2a368ee --dir "$project" --interval 0 --timeout 30 </dev/null)"
 check "poll --dir: stopped at the round it moved" "2" "$(command cat "$fake/count")"
 
+# The kept worktree's branch has a commit since the snapshot (above).
+reset_fake
+in_project working-busy >"$fake/seq"
+check "poll --since: stops at a branch made since the snapshot" "moved
+cwd $project
+branch kept
+commit $(git -C "$project" rev-parse --short kept) On kept" \
+    "$(PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id c2a368ee --dir "$project" --since "$work/since" --interval 0 --timeout 30 </dev/null)"
+check "poll --since: stopped at the first round" "1" "$(command cat "$fake/count")"
+
 reset_fake
 echo "$fixtures/working-busy.json" >"$fake/seq"
 out=$(PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id c2a368ee --interval 1 --timeout 1 </dev/null)
@@ -302,6 +401,8 @@ check "launch: flags and the command" "--bg
 claude-sonnet-5
 --disallowedTools
 EnterWorktree
+--settings
+{\"worktree\":{\"bgIsolation\":\"none\"}}
 --permission-mode
 auto
 /mattpocock-skills:implement #56" "$(command cat "$fake/args")"
@@ -348,8 +449,12 @@ mismatch() { # <name> <jq filter> <expected message>
 }
 mismatch "wrong permission mode" '| .respawnFlags = ["--permission-mode", "default", "--model", "claude-sonnet-5"]' \
     "Error: session c2a368ee is not in auto mode (its flags: --permission-mode default --model claude-sonnet-5); stopped it"
-mismatch "worktrees allowed" '| .respawnFlags = ["--permission-mode", "auto", "--model", "claude-sonnet-5"]' \
-    "Error: session c2a368ee can enter a worktree: EnterWorktree is not in its disallowed tools (its flags: --permission-mode auto --model claude-sonnet-5); stopped it"
+mismatch "worktrees allowed" '| .respawnFlags = ["--settings", "{\"worktree\":{\"bgIsolation\":\"none\"}}", "--permission-mode", "auto", "--model", "claude-sonnet-5"]' \
+    "Error: session c2a368ee can enter a worktree: EnterWorktree is not in its disallowed tools (its flags: --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5); stopped it"
+mismatch "isolation guard on" '| .respawnFlags = ["--disallowedTools", "EnterWorktree", "--permission-mode", "auto", "--model", "claude-sonnet-5"]' \
+    "Error: session c2a368ee has the background worktree guard on, so its edits in $project would be refused: bgIsolation none is not in its settings (its flags: --disallowedTools EnterWorktree --permission-mode auto --model claude-sonnet-5); stopped it"
+mismatch "isolation guard set to another value" '| .respawnFlags = ["--disallowedTools", "EnterWorktree", "--settings", "{\"worktree\":{\"bgIsolation\":\"worktree\"}}", "--permission-mode", "auto"]' \
+    "Error: session c2a368ee has the background worktree guard on, so its edits in $project would be refused: bgIsolation none is not in its settings (its flags: --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"worktree\"}} --permission-mode auto); stopped it"
 mismatch "wrong profile" '| .providerEnv.CLAUDE_CONFIG_DIR = "/elsewhere"' \
     "Error: session c2a368ee runs under config /elsewhere, not $cfg; stopped it"
 mismatch "no profile recorded" '| del(.providerEnv)' \

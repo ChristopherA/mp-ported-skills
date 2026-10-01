@@ -14,6 +14,15 @@
 # then `cwd <path>` (where the session runs), and for a blocked session
 # `needs <text>` when its job's state.json under $CLAUDE_CONFIG_DIR names it.
 #
+# With --since, it also compares DIR's repo with a snapshot taken before the
+# launch, and prints `worktree <path>` for each worktree added since, and
+# `branch <name>` for each branch other than the snapshot's current one that
+# was made or moved since, each followed by a `commit <sha> <subject>` line
+# for each of its commits that neither the snapshot's HEAD nor that current
+# branch holds. Any such line turns working or done into moved.
+# A worker denied EnterWorktree made its worktree with `git worktree add`
+# from Bash and kept its cwd in DIR, so its cwd alone does not show it (#83).
+#
 # The state comes from `state`, not `status`: a session just launched shows
 # `status: idle` while its `state` is `working`. But `state` can go on saying
 # working for hours after the turn ended (#73), so a working session with
@@ -21,11 +30,13 @@
 # with a last line `note claude agents still said working`.
 #
 # Usage:
-#   watch.sh --id ID [--dir DIR] [--interval SECONDS] [--timeout SECONDS]
+#   watch.sh --id ID [--dir DIR [--since FILE]] [--interval SECONDS] [--timeout SECONDS]
 #       poll until a state other than working; on timeout print the last
 #       one and exit 124
-#   watch.sh --id ID [--dir DIR] --file PATH
+#   watch.sh --id ID [--dir DIR [--since FILE]] --file PATH
 #       classify one saved `claude agents --json --all` output
+#   watch.sh --dir DIR --snapshot
+#       print DIR's repo state for --since: take it before the launch
 #
 # DIR is the Project folder the worker was launched in. Without it, a working
 # session is working wherever it runs.
@@ -37,6 +48,8 @@ set -u
 ID=""
 FILE=""
 DIR=""
+SINCE=""
+SNAPSHOT=""
 INTERVAL=30
 TIMEOUT=14400
 
@@ -46,25 +59,47 @@ while [ $# -gt 0 ]; do
         --id)       need_value "$@"; ID="$2"; shift 2 ;;
         --file)     need_value "$@"; FILE="$2"; shift 2 ;;
         --dir)      need_value "$@"; DIR="$2"; shift 2 ;;
+        --since)    need_value "$@"; SINCE="$2"; shift 2 ;;
+        --snapshot) SNAPSHOT=1; shift ;;
         --interval) need_value "$@"; INTERVAL="$2"; shift 2 ;;
         --timeout)  need_value "$@"; TIMEOUT="$2"; shift 2 ;;
         --help)
-            printf 'Usage: watch.sh --id ID [--dir DIR] [--interval S] [--timeout S] | watch.sh --id ID [--dir DIR] --file PATH\n'
-            printf 'Prints: working, moved, done, blocked <what>, stopped, gone or unknown <state>; then cwd and needs lines.\n'
+            printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--interval S] [--timeout S] | watch.sh --id ID [--dir DIR [--since FILE]] --file PATH | watch.sh --dir DIR --snapshot\n'
+            printf 'Prints: working, moved, done, blocked <what>, stopped, gone or unknown <state>; then cwd, needs, worktree, branch and commit lines.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
 done
 fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
+if [ -n "$DIR" ]; then
+    [ -d "$DIR" ] || fail "not a directory: $DIR"
+    DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
+fi
+
+# snapshot: DIR's HEAD, current branch, worktrees and branch tips, one per
+# line, or exit 1 when DIR is not in a repo with a commit.
+snapshot() {
+    head=$(git -C "$DIR" rev-parse --verify -q HEAD) || return 1
+    printf 'head %s\nbranch %s\n' "$head" "$(git -C "$DIR" branch --show-current)"
+    git -C "$DIR" worktree list --porcelain | sed -n '/^worktree /p'
+    git -C "$DIR" for-each-ref refs/heads --format='ref %(refname:short) %(objectname)'
+}
+
+if [ -n "$SNAPSHOT" ]; then
+    [ -n "$DIR" ] || fail "--snapshot needs --dir"
+    snapshot || fail "no commit to snapshot in $DIR"
+    exit 0
+fi
+
 [ -n "$ID" ] || fail "--id is required"
 case $INTERVAL in '' | *[!0-9]*) fail "--interval needs whole seconds, not '$INTERVAL'" ;; esac
 case $TIMEOUT in '' | *[!0-9]*) fail "--timeout needs whole seconds, not '$TIMEOUT'" ;; esac
 # claude agents and the job's state.json both follow the config dir, so an
 # unset one would read another profile's sessions.
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the profile being watched is unknown"
-if [ -n "$DIR" ]; then
-    [ -d "$DIR" ] || fail "not a directory: $DIR"
-    DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
+if [ -n "$SINCE" ]; then
+    [ -n "$DIR" ] || fail "--since needs --dir"
+    [ -f "$SINCE" ] || fail "no such snapshot: $SINCE"
 fi
 
 # classify <agents json>: the report lines for $ID, or exit 1 when the input
@@ -97,35 +132,82 @@ turn_ended() {
     return 1
 }
 
+# made_since: the worktree, branch and commit lines for what DIR's repo
+# gained since the --since snapshot, or a note when the repo was not read.
+made_since() {
+    now=$(snapshot) || { printf 'note the repo in %s was not read\n' "$DIR"; return 0; }
+    base=$(sed -n 's/^head //p' "$SINCE")
+    current=$(sed -n 's/^branch //p' "$SINCE")
+    # Commits listed are those neither the snapshot's HEAD nor the folder's
+    # branch holds.
+    set -- "$base"
+    if [ -n "$current" ] && git -C "$DIR" rev-parse -q --verify "refs/heads/$current" >/dev/null; then
+        set -- "$base" "refs/heads/$current"
+    fi
+    printf '%s\n' "$now" | sed -n 's/^worktree //p' | while IFS= read -r w; do
+        grep -Fqx "worktree $w" "$SINCE" && continue
+        printf 'worktree %s\n' "$w"
+        # A detached worktree's commits are on no branch, so list them here.
+        git -C "$w" symbolic-ref -q HEAD >/dev/null && continue
+        commits "$(git -C "$w" rev-parse HEAD)" "$@"
+    done
+    printf '%s\n' "$now" | sed -n 's/^ref //p' | while read -r name tip; do
+        [ "$name" != "$current" ] || continue
+        grep -Fqx "ref $name $tip" "$SINCE" && continue
+        printf 'branch %s\n' "$name"
+        commits "$tip" "$@"
+    done
+}
+
+# commits <tip> <excluded>...: a commit line for each commit on tip and not
+# on any excluded one, or a note when git could not list them.
+commits() {
+    tip=$1; shift
+    git -C "$DIR" log --format='commit %h %s' "$tip" --not "$@" ||
+        printf 'note the commits on %s were not read\n' "$tip"
+}
+
 # report <agents json>: classify, adding the job's needs to a blocked state.
 # A working session whose cwd is not DIR has moved. A working session with
 # status idle whose transcript says its turn ended is done: the state list
-# can go on saying working for hours after that.
+# can go on saying working for hours after that. With --since, a worktree or
+# branch made in the repo since the snapshot is listed, and makes a working
+# or done session moved.
 report() {
     out=$(classify "$1") || return 1
     case $out in
         working*)
             cwd=$(printf '%s\n' "$out" | sed -n 's/^cwd //p')
             if [ -n "$DIR" ] && [ -n "$cwd" ] && [ "$cwd" != "$DIR" ]; then
-                printf 'moved\ncwd %s\n' "$cwd"
-                return 0
-            fi
-            session_id=$(printf '%s' "$1" | jq -r --arg id "$ID" '
-                [.[] | select(.kind == "background" and .id == $id)] | first
-                | select(.status == "idle") | .sessionId // empty')
-            if turn_ended "$session_id"; then
-                out=$(printf 'done%s\nnote claude agents still said working' "${out#working}")
+                out=$(printf 'moved\ncwd %s' "$cwd")
+            else
+                session_id=$(printf '%s' "$1" | jq -r --arg id "$ID" '
+                    [.[] | select(.kind == "background" and .id == $id)] | first
+                    | select(.status == "idle") | .sessionId // empty')
+                if turn_ended "$session_id"; then
+                    out=$(printf 'done%s\nnote claude agents still said working' "${out#working}")
+                fi
             fi ;;
-    esac
-    printf '%s\n' "$out"
-    case $out in
         blocked*)
             job="$CLAUDE_CONFIG_DIR/jobs/$ID/state.json"
             if [ -f "$job" ]; then
                 needs=$(jq -r '.needs // empty' "$job" 2>/dev/null)
-                [ -z "$needs" ] || printf 'needs %s\n' "$needs"
+                [ -z "$needs" ] || out=$(printf '%s\nneeds %s' "$out" "$needs")
             fi ;;
     esac
+    if [ -n "$SINCE" ]; then
+        made=$(made_since)
+        if [ -n "$made" ]; then
+            case $made in
+                worktree* | branch*)
+                    case $out in
+                        working* | done*) out=$(printf '%s\n' "$out" | sed '1s/.*/moved/') ;;
+                    esac ;;
+            esac
+            out=$(printf '%s\n%s' "$out" "$made")
+        fi
+    fi
+    printf '%s\n' "$out"
 }
 
 if [ -n "$FILE" ]; then
