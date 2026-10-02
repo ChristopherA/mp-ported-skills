@@ -111,6 +111,17 @@ cwd /work/project
 needs approve Bash: git push origin main" "$(watch_file blocked-permission-prompt 91a06a74)"
 command rm -rf "$cfg/jobs/91a06a74"
 
+# A worker that ended its turn on a plain-text question is blocked with no
+# waitingFor; it is named a question, and keeps the job's needs line (#85).
+mkdir -p "$cfg/jobs/91a06a74"
+jq '.needs = "push to origin/main now?"' "$fixtures/job-state.json" >"$cfg/jobs/91a06a74/state.json"
+jq '[.[] | if .kind == "background" then del(.waitingFor) else . end]' \
+    "$fixtures/blocked-permission-prompt.json" >"$work/no-waiting-for.json"
+check "watch: blocked with no waitingFor is a question" "blocked question
+cwd /work/project
+needs push to origin/main now?" "$(sh "$scripts/watch.sh" --id 91a06a74 --file "$work/no-waiting-for.json" </dev/null)"
+command rm -rf "$cfg/jobs/91a06a74"
+
 printf 'not json\n' >"$work/bad.json"
 sh "$scripts/watch.sh" --id c2a368ee --file "$work/bad.json" </dev/null >"$work/out" 2>/dev/null
 rc=$?

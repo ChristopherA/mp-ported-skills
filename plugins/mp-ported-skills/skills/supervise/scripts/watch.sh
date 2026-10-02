@@ -9,7 +9,9 @@
 #   done               its turn ended; the session is still live
 #   hang               still working, but its transcript has not grown in
 #                      --stall seconds (#58): report it, leave it running
-#   blocked <what>     waiting on a human: `permission prompt`, `input needed`
+#   blocked <what>     waiting on a human: `permission prompt`, `input needed`,
+#                      or `question` when claude agents names no waitingFor:
+#                      the worker asked in plain text (#85)
 #   stopped            stopped, conversation kept
 #   gone               not in the list: removed, or never started
 #   unknown <state>    a state this script does not know
@@ -132,7 +134,7 @@ classify() {
         [.[] | select(.kind == "background" and .id == $id)] | first
         | if . == null then "gone"
           else (if .state == "working" or .state == "done" or .state == "stopped" then .state
-                elif .state == "blocked" then "blocked \(.waitingFor // "unknown")"
+                elif .state == "blocked" then "blocked \(.waitingFor // "question")"
                 else "unknown \(.state // "none")" end),
                (.cwd // empty | "cwd \(.)")
           end'
