@@ -60,7 +60,7 @@ sh "${CLAUDE_SKILL_DIR}/scripts/actions.sh" --id ID --dir "<cwd>" --start <start
 
 It prints one line for each PR or issue in the worker's job, each remote branch holding its commits, and each push, PR or issue command in its transcript or a subagent's, with whether it `succeeded`, was `refused`, `failed` or has `no result`. A command counts when the #66 hook would refuse it, when it runs a `gh pr` or `gh issue` subcommand that is not read-only, or when Claude Code recorded a push or PR on its result. It prints `none` only when it found nothing and read every source. A branch or command line is marked `granted (<citation>)` when a standing grant in `docs/agents/supervision.md` covers it, read only from the default branch as committed on origin (#58); otherwise `ungranted`. Report a `granted` line too -- it is what the maintainer's standing grant already approved, not something to re-approve -- and report every `ungranted` line as a shared action the maintainer did not approve, and every `note` line as a source that was not read, never as no actions.
 
-- **`done`**: the ticket and its commits, `git -C <cwd> log --oneline <start>..HEAD`, the shared actions, and whether the ticket is closed (`gh issue view N --json state`). `done` means only that the worker's turn ended: with no commits and the ticket open, read its last output with `claude logs ID`, since it may have ended on a question asked in plain text, and report that as blocked with `claude attach ID`. Otherwise stop the worker, which is still live: `claude stop ID`, then release its marker (below). When `cwd` is not the Project folder, say the commits sit in that checkout, on a branch nobody pushes.
+- **`done`**: the ticket and its commits, `git -C <cwd> log --oneline <start>..HEAD`, the shared actions, and whether the ticket is closed (`gh issue view N --json state`). `done` means only that the worker's turn ended: with no commits and the ticket open, read its last output (below), since it may have ended on a question asked in plain text, and report that as blocked with `claude attach ID`. Otherwise stop the worker, which is still live: `claude stop ID`, then release its marker (below). When `cwd` is not the Project folder, say the commits sit in that checkout, on a branch nobody pushes.
 - **`moved`**: stop the worker at once, `claude stop ID`, and release its marker (below). Report where it went: the `cwd` line, with its commits there, `git -C <cwd> log --oneline <start>..HEAD` on `git -C <cwd> branch --show-current`, when `cwd` is not the Project folder; and every `worktree`, `branch` and `commit` line. Say the commits sit on a branch nobody pushes. A worktree inside the Project folder, such as one under `.claude/worktrees/`, also leaves its folder untracked there, so `state.sh` reports work in flight until the maintainer removes the worktree; say so. Moving or salvaging the commits is the maintainer's. An `other` line alongside these is still another session's worktree, not the worker's; report it as such, not as part of why the worker moved.
 - **`blocked permission prompt`**, **`blocked input needed`**: what it waits for (the `needs` line), the id, and the command to open it, in a fenced code block of its own:
 
@@ -72,7 +72,16 @@ It prints one line for each PR or issue in the worker's job, each remote branch 
 - **`hang`**: the id, the `note` line naming how long its transcript has not grown, and `claude attach ID` to look. Leave the worker running, and its marker in place -- this is a "no progress for a while" signal, not confirmation the worker is actually stuck, since a long tool call can hold the transcript steady on its own. Report any `worktree`, `branch` and `commit` lines as for `moved`.
 - **`stopped`**: the id, and that `claude attach ID` reopens it, which starts it again. Release its marker (below).
 - **`gone`**: the id; the session was removed and there is nothing to open. Release its marker (below).
-- **`unknown ...`**, or exit 124: the state, the id, and `claude logs ID` for its last output. Exit 1: `claude agents` could not be read, so the worker's state is unknown; report that, never that it is gone.
+- **`unknown ...`**, or exit 124: the state, the id, and its last output (below). Exit 1: `claude agents` could not be read, so the worker's state is unknown; report that, never that it is gone.
+
+To read a worker's last output, take the last text it wrote from its transcript, found by the job's `sessionId` in any project folder, since a worker that entered a worktree has its transcript moved:
+
+```sh
+sid=$(claude agents --json --all </dev/null | jq -r '.[] | select((.id // "") | startswith("ID")) | .sessionId // empty')
+jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text' "$CLAUDE_CONFIG_DIR"/projects/*/"$sid".jsonl | tail -40
+```
+
+Not `claude logs ID`: it prints the worker's raw terminal stream, cursor moves and colour codes included, which reads as noise (`[42B[38;2;215;119;87m✻`) rather than as the worker's words.
 
 Release the marker whenever the worker was stopped or is gone, so the checkout is writable again and the next launch finds no stale mark (a stale one does not block `launch.sh`, but it keeps the hook refusing):
 
