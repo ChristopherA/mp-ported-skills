@@ -372,12 +372,19 @@ case "$1" in
         if [ -z "${FAKE_NO_STATE:-}" ]; then
             # The daemon records --append-system-prompt first in the
             # job's flags, as a live launch with it did (#88).
-            asp=""; prev=""
-            for a in "$@"; do [ "$prev" = --append-system-prompt ] && asp=$a; prev=$a; done
+            # It records --effort too, as a live `claude --bg --effort
+            # medium` job did on 2.1.286.
+            asp=""; effort=""; prev=""
+            for a in "$@"; do
+                [ "$prev" = --append-system-prompt ] && asp=$a
+                [ "$prev" = --effort ] && effort=$a
+                prev=$a
+            done
             mkdir -p "$CLAUDE_CONFIG_DIR/jobs/c2a368ee"
-            jq --arg cfg "$CLAUDE_CONFIG_DIR" --arg cwd "$(pwd -P)" --arg asp "$asp" \
+            jq --arg cfg "$CLAUDE_CONFIG_DIR" --arg cwd "$(pwd -P)" --arg asp "$asp" --arg effort "$effort" \
                 ".cwd = \$cwd | .providerEnv.CLAUDE_CONFIG_DIR = \$cfg
                  | if \$asp != \"\" then .respawnFlags = [\"--append-system-prompt\", \$asp] + .respawnFlags else . end
+                 | if \$effort != \"\" then .respawnFlags += [\"--effort\", \$effort] else . end
                  ${FAKE_STATE_FILTER:-}" \
                 "$FAKE_JOB" >"$CLAUDE_CONFIG_DIR/jobs/c2a368ee/state.json"
         fi ;;
@@ -515,6 +522,28 @@ check "launch: stops nothing" "" "$(command cat "$fake/calls" 2>/dev/null)"
 
 launch --ticket 56 --model claude-opus-5-5 >/dev/null 2>&1
 check "launch: --model passes through" "claude-opus-5-5" "$(sed -n 3p "$fake/args")"
+check "launch: no --effort, none passed" "no" "$(grep -qx -- --effort "$fake/args" && echo yes || echo no)"
+
+out=$(launch --ticket 56 --model claude-opus-5-5 --effort medium 2>&1)
+rc=$?
+check "launch: --effort exit 0" "0" "$rc"
+check "launch: --effort passes through after the model" "--model
+claude-opus-5-5
+--effort
+medium
+--disallowedTools" "$(sed -n 2,6p "$fake/args")"
+
+out=$(launch --ticket 56 --effort extreme 2>&1)
+rc=$?
+check "launch: unknown effort refused" "1" "$rc"
+check "launch: unknown effort says why" "Error: --effort is low, medium, high, xhigh or max, not 'extreme'" "$out"
+check "launch: unknown effort never launched" "no" "$([ -f "$fake/args" ] && echo yes || echo no)"
+
+out=$( (export FAKE_STATE_FILTER='| .respawnFlags[-1] = "high"'; launch --ticket 56 --effort medium 2>&1) )
+rc=$?
+check "launch: effort not recorded exits 2" "2" "$rc"
+check "launch: effort not recorded stops the session" "stop c2a368ee" "$(command cat "$fake/calls" 2>/dev/null)"
+check "launch: effort not recorded says why" "Error: session c2a368ee does not run at effort medium (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --effort high); stopped it" "$out"
 
 out=$(launch --ticket 56 --model claude-haiku-4-5-20251001 2>&1)
 rc=$?

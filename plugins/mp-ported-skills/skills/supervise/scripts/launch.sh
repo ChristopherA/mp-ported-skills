@@ -2,7 +2,7 @@
 # launch.sh -- start /implement #N as a background session in a Project, and
 # confirm the session got what it was launched with.
 #
-# Runs `claude --bg --model MODEL --disallowedTools EnterWorktree
+# Runs `claude --bg --model MODEL [--effort LEVEL] --disallowedTools EnterWorktree
 # --settings '{"worktree":{"bgIsolation":"none"}}' --append-system-prompt
 # GRANTS --permission-mode auto '/mattpocock-skills:implement #N'` in DIR with
 # CLAUDE_CONFIG_DIR set explicitly, so the session runs under this profile
@@ -10,7 +10,7 @@
 # which the background service writes under that config dir, and checks that
 # the session runs under the same config dir, in DIR itself (not a worktree),
 # in auto mode, without EnterWorktree, with the background worktree guard
-# off, and with its grants text. A session that fails a check is stopped.
+# off, with its grants text, and at LEVEL when one was given. A session that fails a check is stopped.
 # Prints the session's short id.
 #
 # EnterWorktree is denied because /implement workers called it on their own,
@@ -54,10 +54,14 @@
 # job's respawnFlags began with the flag and its text, so it can be confirmed.
 #
 # Usage:
-#   launch.sh --dir DIR --ticket N [--model MODEL]
+#   launch.sh --dir DIR --ticket N [--model MODEL] [--effort LEVEL]
 #
 # MODEL defaults to claude-sonnet-5 and must support auto mode, so a Haiku
-# model is refused. MP_SUPERVISE_WAIT: seconds to wait for the job's
+# model is refused. LEVEL is one of claude's effort levels (low, medium,
+# high, xhigh, max); without it the session runs at the model's default.
+# The job's respawnFlags record --effort, so it can be confirmed: checked
+# live with 2.1.286, a `claude --bg --model claude-opus-5-5 --effort medium`
+# job's flags read ["--model","claude-opus-5-5","--effort","medium", ...]. MP_SUPERVISE_WAIT: seconds to wait for the job's
 # state.json (default 20).
 #
 # Before launching, it checks that DIR is a git checkout on its default
@@ -75,6 +79,7 @@ set -u
 DIR=""
 TICKET=""
 MODEL="claude-sonnet-5"
+EFFORT=""
 
 need_value() { [ $# -ge 2 ] || { printf 'Error: %s needs a value\n' "$1" >&2; exit 1; }; }
 while [ $# -gt 0 ]; do
@@ -82,8 +87,9 @@ while [ $# -gt 0 ]; do
         --dir)    need_value "$@"; DIR="$2"; shift 2 ;;
         --ticket) need_value "$@"; TICKET="$2"; shift 2 ;;
         --model)  need_value "$@"; MODEL="$2"; shift 2 ;;
+        --effort) need_value "$@"; EFFORT="$2"; shift 2 ;;
         --help)
-            printf 'Usage: launch.sh --dir DIR --ticket N [--model MODEL]\n'
+            printf 'Usage: launch.sh --dir DIR --ticket N [--model MODEL] [--effort LEVEL]\n'
             printf 'Starts /mattpocock-skills:implement #N as a background session in DIR. Outputs: its short id\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
@@ -98,6 +104,10 @@ case $TICKET in
 esac
 case $MODEL in
     *haiku*) fail "$MODEL has no auto mode, so its session would stop at the first permission prompt; use a model that supports auto mode" ;;
+esac
+case $EFFORT in
+    '' | low | medium | high | xhigh | max) ;;
+    *) fail "--effort is low, medium, high, xhigh or max, not '$EFFORT'" ;;
 esac
 GUARD_OFF='{"worktree":{"bgIsolation":"none"}}'
 CONFIG="${CLAUDE_CONFIG_DIR:-}"
@@ -169,7 +179,9 @@ fi
 GRANTS="$GRANTS
 A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin $default\`."
 
-out=$(cd "$DIR" && CLAUDE_CONFIG_DIR="$CONFIG" claude --bg --model "$MODEL" \
+set -- --model "$MODEL"
+[ -z "$EFFORT" ] || set -- "$@" --effort "$EFFORT"
+out=$(cd "$DIR" && CLAUDE_CONFIG_DIR="$CONFIG" claude --bg "$@" \
     --disallowedTools EnterWorktree --settings "$GUARD_OFF" \
     --append-system-prompt "$GRANTS" --permission-mode auto \
     "/mattpocock-skills:implement #$TICKET" </dev/null 2>&1)
@@ -218,6 +230,11 @@ jq -e '.respawnFlags as $f | [range(0; ($f | length) - 1)]
 jq -e --arg g "$GRANTS" '.respawnFlags as $f | [range(0; ($f | length) - 1)]
         | any(. as $i | $f[$i] == "--append-system-prompt" and $f[$i + 1] == $g)' "$job" >/dev/null ||
     reject "was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
+if [ -n "$EFFORT" ]; then
+    jq -e --arg e "$EFFORT" '.respawnFlags as $f | [range(0; ($f | length) - 1)]
+            | any(. as $i | $f[$i] == "--effort" and $f[$i + 1] == $e)' "$job" >/dev/null ||
+        reject "does not run at effort $EFFORT (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
+fi
 
 echo "$id" >"$marker" || reject "could not write the marker $marker, so this checkout is not held read-only"
 echo "$id"
