@@ -404,8 +404,13 @@ case "$1" in
         if [ -n "${FAKE_BG_OUT+x}" ]; then printf '%s\n' "$FAKE_BG_OUT"; exit 0; fi
         # A named session's line ends with its name, and with FORCE_COLOR
         # set the id is colored, as 2.1.288 printed for `claude --bg --name`.
-        name=""; prev=""
-        for a in "$@"; do [ "$prev" = --name ] && name=$a; prev=$a; done
+        asp=""; effort=""; name=""; prev=""
+        for a in "$@"; do
+            [ "$prev" = --append-system-prompt ] && asp=$a
+            [ "$prev" = --effort ] && effort=$a
+            [ "$prev" = --name ] && name=$a
+            prev=$a
+        done
         echo "Starting background service…"
         if [ -n "$name" ]; then printf 'backgrounded · \033[36mc2a368ee\033[39m · %s\n' "$name"
         else echo "backgrounded · c2a368ee"; fi
@@ -415,12 +420,6 @@ case "$1" in
             # It records --effort too, as a live `claude --bg --effort
             # medium` job did on 2.1.286, and --name, with the name in
             # .name, as a live `claude --bg --name` job did on 2.1.288.
-            asp=""; effort=""; prev=""
-            for a in "$@"; do
-                [ "$prev" = --append-system-prompt ] && asp=$a
-                [ "$prev" = --effort ] && effort=$a
-                prev=$a
-            done
             mkdir -p "$CLAUDE_CONFIG_DIR/jobs/c2a368ee"
             jq --arg cfg "$CLAUDE_CONFIG_DIR" --arg cwd "$(pwd -P)" --arg asp "$asp" --arg effort "$effort" --arg name "$name" \
                 ".cwd = \$cwd | .providerEnv.CLAUDE_CONFIG_DIR = \$cfg
@@ -595,21 +594,10 @@ out=$( (export FAKE_GH_FAIL=1; launch --ticket 56 2>&1) )
 rc=$?
 check "launch: no title still launches" "0" "$rc"
 check "launch: no title names the Project and ticket" "supervise project #56" "$(name_of)"
-check "launch: no title says why" "note: gh issue view 56 failed, so the worker's name leaves out the ticket's title
+check "launch: no title says why" "note: gh issue view 56 failed (HTTP 404: Not Found), so the worker's name leaves out the ticket's title
 c2a368ee" "$out"
 out=$( (export FAKE_GH_TITLE=""; launch --ticket 56 2>&1) )
 check "launch: an empty title names the Project and ticket" "supervise project #56" "$(name_of)"
-mismatch_name() { # <name> <jq filter> <expected message>
-    out=$( (export FAKE_STATE_FILTER="$2"; launch --ticket 56 2>&1) )
-    rc=$?
-    check "launch: $1 exits 2" "2" "$rc"
-    check "launch: $1 stops the session" "stop c2a368ee" "$(command cat "$fake/calls" 2>/dev/null)"
-    check "launch: $1 says why" "$3" "$out"
-}
-mismatch_name "name not recorded" '| .name = "mattpocock skills implementation"' \
-    "Error: session c2a368ee is named 'mattpocock skills implementation', not 'supervise project #56: Add the thing'; stopped it"
-mismatch_name "no name recorded" '| del(.name)' \
-    "Error: session c2a368ee is named '(none recorded)', not 'supervise project #56: Add the thing'; stopped it"
 
 launch --ticket 56 --model claude-opus-5-5 >/dev/null 2>&1
 check "launch: --model passes through" "claude-opus-5-5" "$(sed -n 3p "$fake/args")"
@@ -691,6 +679,10 @@ mismatch "another folder" '| .cwd = "/elsewhere"' \
     "Error: session c2a368ee runs in /elsewhere, not $project; stopped it"
 mismatch "a worktree" '| .worktreePath = "/w/.claude/worktrees/x"' \
     "Error: session c2a368ee was placed in worktree /w/.claude/worktrees/x, not $project; stopped it"
+mismatch "name not recorded" '| .name = "mattpocock skills implementation"' \
+    "Error: session c2a368ee is named 'mattpocock skills implementation', not 'supervise project #56: Add the thing'; stopped it"
+mismatch "no name recorded" '| del(.name)' \
+    "Error: session c2a368ee is named '(none recorded)', not 'supervise project #56: Add the thing'; stopped it"
 
 out=$( (export FAKE_NO_STATE=1 MP_SUPERVISE_WAIT=1; launch --ticket 56 2>&1) )
 rc=$?

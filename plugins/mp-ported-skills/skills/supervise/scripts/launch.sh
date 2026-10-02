@@ -76,8 +76,10 @@
 # state.json recorded the name in .name and --name in respawnFlags, so it can
 # be confirmed; a stop and a flagless `claude --bg --resume`, as resume.sh
 # runs, woke the session "with its saved options (..., --name)" and kept the
-# name. The `backgrounded` line then ends ` · <name>`, and with FORCE_COLOR
-# set its id is colored, so both are read past.
+# name, in .name and in `claude agents`. The hook also fires on /clear and
+# fork; whether it then replaces the name is unchecked. The `backgrounded`
+# line then ends ` · <name>`, and with FORCE_COLOR set its id is colored, so
+# both are read past.
 #
 # Before launching, it checks that DIR is a git checkout on its default
 # branch with a clean tree and no other live background session in it
@@ -201,13 +203,15 @@ A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue c
 # The worker's name (#103), in characters, not bytes, whatever the locale.
 top=$(git -C "$DIR" rev-parse --show-toplevel)
 NAME="supervise ${top##*/} #$TICKET"
-if title=$(cd "$DIR" && gh issue view "$TICKET" --json title --jq .title </dev/null 2>/dev/null); then
+NAME_MAX=80
+if title=$(cd "$DIR" && gh issue view "$TICKET" --json title --jq .title </dev/null 2>&1); then
     [ -z "$title" ] || NAME="$NAME: $title"
 else
-    printf "note: gh issue view %s failed, so the worker's name leaves out the ticket's title\n" "$TICKET" >&2
+    printf "note: gh issue view %s failed (%s), so the worker's name leaves out the ticket's title\n" \
+        "$TICKET" "$(printf '%s\n' "$title" | head -n 1)" >&2
 fi
-if [ "$(printf '%s' "$NAME" | LC_ALL=en_US.UTF-8 wc -m)" -gt 80 ]; then
-    NAME="$(printf '%s' "$NAME" | LC_ALL=en_US.UTF-8 cut -c1-77 | sed 's/ *$//')..."
+if [ "$(printf '%s' "$NAME" | LC_ALL=en_US.UTF-8 wc -m)" -gt "$NAME_MAX" ]; then
+    NAME="$(printf '%s' "$NAME" | LC_ALL=en_US.UTF-8 cut -c1-$((NAME_MAX - 3)) | sed 's/ *$//')..."
 fi
 
 set -- --model "$MODEL"
