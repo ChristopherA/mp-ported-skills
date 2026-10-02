@@ -170,6 +170,26 @@ printf 'x\n' >"$(git -C "$project" rev-parse --path-format=absolute --git-path m
 refused "marker in place" "fail marker: worker x still holds the checkout; stop it and release its marker first" --sweep "$sweep"
 
 new_project
+repo_git "$project" remote set-url origin "$work/no-such-remote.git"
+out=$(push --sweep "$sweep")
+check "fetch fails: exits 2" "2" "$?"
+check "fetch fails: says which" "fetch" "$(printf '%s\n' "$out" | sed -n 's/^fail \([a-z-]*\):.*/\1/p')"
+
+# A plugin new in the range, or removed, is not a bump.
+new_project
+mkdir -p "$project/other/.claude-plugin"
+printf '{"name": "o", "version": "2.0.0"}\n' >"$project/other/.claude-plugin/plugin.json"
+repo_git "$project" add other
+repo_git "$project" commit -q -m "Add another plugin"
+check "new manifest: passes, named new" "ok version: other/.claude-plugin/plugin.json new at 2.0.0" \
+    "$(push --check --sweep "$sweep" | grep '^ok version: other')"
+new_project
+repo_git "$project" rm -q plugin/.claude-plugin/plugin.json
+repo_git "$project" commit -q -m "Remove the plugin"
+check "removed manifest: passes, named removed" "ok version: plugin/.claude-plugin/plugin.json removed, was 0.8.22" \
+    "$(push --check --sweep "$sweep" | grep '^ok version')"
+
+new_project
 repo_git "$project" checkout -q -b topic
 refused "no upstream" "fail branch: topic has no upstream" --sweep "$sweep"
 

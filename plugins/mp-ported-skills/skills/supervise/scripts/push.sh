@@ -19,14 +19,17 @@
 #   version       every .claude-plugin/plugin.json the range changes moves
 #                 by a patch bump at most
 #   sweep         the --sweep command, run in DIR with `--range UP..HEAD`
-#                 appended, exits 0; on a hit its output follows, indented
+#                 appended, exits 0; on a hit its output follows, indented.
+#                 CMD is shell code: give one command, since the range is
+#                 appended to its last one
 # Before them it prints `push <branch> to <upstream>: UP..HEAD` and a
 # `commit <sha> <subject>` line for each commit in the range.
 #
 # Without --check, when every check passes, it pushes and prints `pushed
 # <upstream> UP..HEAD`, and appends `ID <upstream> UP HEAD` to the
 # checkout's `git rev-parse --git-path mp-supervise-pushed`, which
-# actions.sh reads to name the push as the supervisor's, not the worker's.
+# actions.sh reads to name the push as the supervisor's, not the worker's;
+# a `note` line follows when that write fails.
 # A push is refused in a background session (CLAUDE_CODE_SESSION_ATTENDED=0):
 # there a push goes only on a standing grant.
 #
@@ -98,11 +101,11 @@ fi
 upname=$(git -C "$DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) ||
     { bad "branch: $branch's upstream $remote/${merge#refs/heads/} does not exist"; exit 2; }
 up=$(git -C "$DIR" rev-parse '@{u}')
-head=$(git -C "$DIR" rev-parse HEAD)
-range="$(short "$up")..$(short "$head")"
+tip=$(git -C "$DIR" rev-parse HEAD)
+range="$(short "$up")..$(short "$tip")"
 
 echo "push $branch to $upname: $range"
-git -C "$DIR" log --format='commit %h %s' "$up..$head"
+git -C "$DIR" log --format='commit %h %s' "$up..$tip"
 
 marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker)
 if [ -f "$marker" ]; then
@@ -111,14 +114,18 @@ else
     ok "marker: no worker marker in the checkout"
 fi
 
-dirty=$(git -C "$DIR" status --porcelain | wc -l | tr -d ' ')
-case "$dirty" in
-    0) ok "tree: clean" ;;
-    1) bad "tree: 1 uncommitted path" ;;
-    *) bad "tree: $dirty uncommitted paths" ;;
-esac
+if ! status=$(git -C "$DIR" status --porcelain 2>&1); then
+    bad "tree: git status failed: $(printf '%s\n' "$status" | head -n 1)"
+else
+    dirty=$(printf '%s' "$status" | grep -c '^')
+    case "$dirty" in
+        0) ok "tree: clean" ;;
+        1) bad "tree: 1 uncommitted path" ;;
+        *) bad "tree: $dirty uncommitted paths" ;;
+    esac
+fi
 
-counts=$(git -C "$DIR" rev-list --left-right --count "$up...$head")
+counts=$(git -C "$DIR" rev-list --left-right --count "$up...$tip")
 behind=${counts%%[[:space:]]*}
 ahead=${counts##*[[:space:]]}
 if [ "$behind" != 0 ]; then
@@ -141,17 +148,21 @@ fi
 version_parts() {
     printf '%s\n' "$1" | sed -n 's/^\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\)$/\1 \2 \3/p'
 }
-manifests=$(git -C "$DIR" diff --name-only "$up" "$head" -- '*.claude-plugin/plugin.json')
+manifests=$(git -C "$DIR" diff --name-only "$up" "$tip" -- '*.claude-plugin/plugin.json')
 if [ -z "$manifests" ]; then
     ok "version: no plugin version change"
 fi
 for f in $manifests; do
-    new=$(git -C "$DIR" show "${head}:$f" 2>/dev/null | jq -r '.version // empty' 2>/dev/null)
-    if ! old=$(git -C "$DIR" show "${up}:$f" 2>/dev/null | jq -r '.version // empty' 2>/dev/null); then
-        old=""
-    fi
-    if [ -z "$old" ] || [ "$old" = "$new" ]; then
-        ok "version: $f ${old:-none} -> ${new:-none} (no bump)"
+    new=$(git -C "$DIR" show "${tip}:$f" 2>/dev/null | jq -r '.version // empty' 2>/dev/null)
+    old=$(git -C "$DIR" show "${up}:$f" 2>/dev/null | jq -r '.version // empty' 2>/dev/null)
+    if [ -z "$old" ]; then
+        ok "version: $f new at ${new:-no version}"
+        continue
+    elif [ -z "$new" ]; then
+        ok "version: $f removed, was $old"
+        continue
+    elif [ "$old" = "$new" ]; then
+        ok "version: $f $old (no bump)"
         continue
     fi
     o=$(version_parts "$old")
@@ -166,7 +177,7 @@ done
 if [ "$NO_SWEEP" = 1 ]; then
     echo "skip sweep: --no-sweep given, the range was not swept"
 else
-    swept=$(cd "$DIR" && sh -c "$SWEEP"' --range "$1"' sh "$up..$head" </dev/null 2>&1)
+    swept=$(cd "$DIR" && sh -c "$SWEEP"' --range "$1"' sh "$up..$tip" </dev/null 2>&1)
     rc=$?
     if [ "$rc" = 0 ]; then
         ok "sweep: clean over $range"
@@ -179,10 +190,12 @@ fi
 [ "$failed" = 0 ] || exit 2
 [ "$CHECK" = 0 ] || exit 0
 
-if ! err=$(git -C "$DIR" push -q "$remote" "$head:$merge" 2>&1); then
+if ! err=$(git -C "$DIR" push -q "$remote" "$tip:$merge" 2>&1); then
     printf '%s\n' "$err" >&2
-    printf 'Error: git push %s %s:%s failed\n' "$remote" "$(short "$head")" "$merge" >&2
+    printf 'Error: git push %s %s:%s failed\n' "$remote" "$(short "$tip")" "$merge" >&2
     exit 3
 fi
-printf '%s %s %s %s\n' "$ID" "$upname" "$up" "$head" >>"$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-pushed)"
 echo "pushed $upname $range"
+record=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-pushed)
+printf '%s %s %s %s\n' "$ID" "$upname" "$up" "$tip" >>"$record" ||
+    echo "note the push was not recorded in $record, so actions.sh will read $upname as the worker's ungranted push"
