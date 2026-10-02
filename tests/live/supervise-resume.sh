@@ -10,7 +10,8 @@
 # a codeword, waits for its turn to end with watch.sh, then asks for the
 # codeword through resume.sh and waits again. Checks that resume.sh woke the
 # original (no copy), and that the answer is in the job's original
-# transcript. Removes the session and the folder. It needs `claude` and two
+# transcript. Removes the session, its marker in this checkout and the
+# folder. It needs `claude` and two
 # model calls; without `claude` it prints SKIP and exits 0.
 #
 # Set MP_LIVE_MODEL to choose the model; it must support auto mode (Haiku
@@ -56,6 +57,10 @@ echo "launched $id"
 cleanup() {
     claude stop "$id" </dev/null >/dev/null 2>&1
     claude rm "$id" </dev/null >/dev/null 2>&1
+    # resume.sh writes the worker's marker in the repo holding the scratch
+    # folder, which is this checkout; release it so this checkout is not
+    # left read-only.
+    sh "$scripts/release.sh" --dir "$scratch" --id "$id" </dev/null >/dev/null 2>&1
     command rm -rf "$scratch"
 }
 

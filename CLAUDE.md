@@ -46,6 +46,8 @@ A live test that starts `claude --bg` in a new scratch folder trusts the folder 
 
 A live test removes every background session it starts, with `claude stop` then `claude rm`, before it exits. A finished session stays listed in `claude agents` until removed, and one left in a checkout makes `supervise`'s `resume.sh` refuse to resume there: two leftover live checks did so in this checkout.
 
+A live test that runs `supervise`'s `resume.sh` (or `launch.sh`) in a scratch folder inside this checkout releases the worker's marker in its cleanup, with `release.sh --dir <scratch> --id <id>`. The marker goes in the repo holding the folder, which is this checkout, so a test that only stops and removes its session leaves this checkout read-only to every attended session: a `git commit` here was refused, naming a worker the test had already removed.
+
 The profile's sessions start in auto mode, so a test that needs a permission prompt launches with `--permission-mode default`.
 
 A pattern `pane-classify.sh` matches comes from a live capture in `tests/fixtures/pane-states/`, recorded in a wide pane and in a narrow one. Claude Code cuts text to fit a narrow pane: the interrupt marker `⎿  Interrupted` rendered as `⎿  Interrup·` at 27 columns, and a pattern built from the full word read that idle session as `working`.
