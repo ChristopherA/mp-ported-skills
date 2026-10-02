@@ -773,6 +773,8 @@ other other-done-nopid /work/project done null
 other other-done-pid /work/project done
 other other-blocked-nopid /work/project blocked null
 other other-odd-nopid /work/project crashed null
+other other-working-nopid /work/project working null
+jq '[.[] | if .id == "7a6a0741" then del(.state) else . end]' "$work/other-odd-nopid.json" >"$work/other-nostate-nopid.json"
 other other-stopped /work/project stopped
 other other-elsewhere /work/other working
 sid=c2a368ee-c513-484c-83d3-581830e209a5
@@ -858,6 +860,10 @@ out=$(resume woke other-blocked-nopid 2>&1); rc=$?
 check "resume: a blocked one with no pid stops the resume" "1 Error: another live background session in /work/project: 7a6a0741 (blocked); not resumed" "$rc $out"
 out=$(resume woke other-odd-nopid 2>&1); rc=$?
 check "resume: an unknown state with no pid stops the resume" "1 Error: another live background session in /work/project: 7a6a0741 (crashed); not resumed" "$rc $out"
+out=$(resume woke other-working-nopid 2>&1); rc=$?
+check "resume: a working one with no pid stops the resume" "1 Error: another live background session in /work/project: 7a6a0741 (working); not resumed" "$rc $out"
+out=$(resume woke other-nostate-nopid 2>&1); rc=$?
+check "resume: no state and no pid stops the resume" "1 Error: another live background session in /work/project: 7a6a0741 (unknown); not resumed" "$rc $out"
 
 # A copy runs without the launch's guards, so it is stopped and removed at
 # once, and the resume retried on the original.
