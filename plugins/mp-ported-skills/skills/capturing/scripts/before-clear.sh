@@ -1,6 +1,8 @@
 #!/bin/sh
 # before-clear.sh -- whether capturing's before-clear question can be asked,
-# and whether one job in it may run unasked (#89).
+# and whether one job in it may run unasked (#89). Capturing's sweep also
+# calls it with --action other to learn whether its findings can be
+# confirmed with the user, or only listed in the report (#105).
 #
 # A supervised worker resumed with `/mp-ported-skills:capturing` has nobody
 # to answer the before-clear question, and blocked on it the way a worker
