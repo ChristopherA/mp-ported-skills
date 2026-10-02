@@ -39,7 +39,7 @@ check() { # <name> <expected> <actual>
 
 # Every variable the scripts read, set or unset here, so the result does not
 # depend on the session running the test.
-unset MP_SUPERVISE_WAIT MP_RESUME_BUDGET CLAUDE_PROJECT_DIR FAKE_AGENTS_FAIL FAKE_BG_OUT FAKE_NO_STATE FAKE_STATE_FILTER FAKE_RM_FAIL CLAUDE_CODE_SESSION_ATTENDED
+unset MP_SUPERVISE_WAIT MP_RESUME_BUDGET CLAUDE_PROJECT_DIR FAKE_AGENTS_FAIL FAKE_BG_OUT FAKE_NO_STATE FAKE_STATE_FILTER FAKE_RM_FAIL FAKE_GH_TITLE FAKE_GH_FAIL CLAUDE_CODE_SESSION_ATTENDED
 cfg="$work/config"
 mkdir -p "$cfg/plugins/cache/mkt/mattpocock-skills/1.2.3/skills/engineering/implement"
 touch "$cfg/plugins/cache/mkt/mattpocock-skills/1.2.3/skills/engineering/implement/SKILL.md"
@@ -402,12 +402,19 @@ case "$1" in
         printf '%s\n' "$@" >"$fake/args"; pwd -P >"$fake/cwd"
         echo "${CLAUDE_CONFIG_DIR-unset}" >"$fake/env"
         if [ -n "${FAKE_BG_OUT+x}" ]; then printf '%s\n' "$FAKE_BG_OUT"; exit 0; fi
-        echo "Starting background service…"; echo "backgrounded · c2a368ee"
+        # A named session's line ends with its name, and with FORCE_COLOR
+        # set the id is colored, as 2.1.288 printed for `claude --bg --name`.
+        name=""; prev=""
+        for a in "$@"; do [ "$prev" = --name ] && name=$a; prev=$a; done
+        echo "Starting background service…"
+        if [ -n "$name" ]; then printf 'backgrounded · \033[36mc2a368ee\033[39m · %s\n' "$name"
+        else echo "backgrounded · c2a368ee"; fi
         if [ -z "${FAKE_NO_STATE:-}" ]; then
             # The daemon records --append-system-prompt first in the
             # job's flags, as a live launch with it did (#88).
             # It records --effort too, as a live `claude --bg --effort
-            # medium` job did on 2.1.286.
+            # medium` job did on 2.1.286, and --name, with the name in
+            # .name, as a live `claude --bg --name` job did on 2.1.288.
             asp=""; effort=""; prev=""
             for a in "$@"; do
                 [ "$prev" = --append-system-prompt ] && asp=$a
@@ -415,10 +422,11 @@ case "$1" in
                 prev=$a
             done
             mkdir -p "$CLAUDE_CONFIG_DIR/jobs/c2a368ee"
-            jq --arg cfg "$CLAUDE_CONFIG_DIR" --arg cwd "$(pwd -P)" --arg asp "$asp" --arg effort "$effort" \
+            jq --arg cfg "$CLAUDE_CONFIG_DIR" --arg cwd "$(pwd -P)" --arg asp "$asp" --arg effort "$effort" --arg name "$name" \
                 ".cwd = \$cwd | .providerEnv.CLAUDE_CONFIG_DIR = \$cfg
                  | if \$asp != \"\" then .respawnFlags = [\"--append-system-prompt\", \$asp] + .respawnFlags else . end
                  | if \$effort != \"\" then .respawnFlags += [\"--effort\", \$effort] else . end
+                 | if \$name != \"\" then .respawnFlags += [\"--name\", \$name] | .name = \$name | .nameSource = \"user\" else . end
                  ${FAKE_STATE_FILTER:-}" \
                 "$FAKE_JOB" >"$CLAUDE_CONFIG_DIR/jobs/c2a368ee/state.json"
         fi ;;
@@ -430,6 +438,22 @@ chmod +x "$work/bin/claude"
 # claude, so stop before any of them runs.
 if [ "$(PATH="$work/bin:$PATH" command -v claude)" != "$work/bin/claude" ]; then
     echo "FAIL fake claude is not first on PATH; not running the rest" >&2
+    exit 1
+fi
+# launch.sh reads the ticket's title with `gh issue view` in the Project
+# folder; the fake serves FAKE_GH_TITLE, or fails with FAKE_GH_FAIL.
+cat >"$work/bin/gh" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >"$FAKE_DIR/gh-args"; pwd -P >"$FAKE_DIR/gh-cwd"
+[ -z "${FAKE_GH_FAIL:-}" ] || { echo "HTTP 404: Not Found" >&2; exit 1; }
+case "$1 $2" in
+    "issue view") printf '%s\n' "${FAKE_GH_TITLE-Add the thing}" ;;
+    *) echo "fake gh: unexpected $*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$work/bin/gh"
+if [ "$(PATH="$work/bin:$PATH" command -v gh)" != "$work/bin/gh" ]; then
+    echo "FAIL fake gh is not first on PATH; not running the rest" >&2
     exit 1
 fi
 # The job a launch writes carries launch.sh's --settings, as the job of a
@@ -547,12 +571,45 @@ EnterWorktree
 {\"worktree\":{\"bgIsolation\":\"none\"}}
 --append-system-prompt
 $no_grants
+--name
+supervise project #56: Add the thing
 --permission-mode
 auto
 /mattpocock-skills:implement #56" "$(command cat "$fake/args")"
 check "launch: runs in the project folder" "$project" "$(command cat "$fake/cwd")"
 check "launch: sets the config dir" "$cfg" "$(command cat "$fake/env")"
 check "launch: stops nothing" "" "$(command cat "$fake/calls" 2>/dev/null)"
+check "launch: reads the ticket's title in the project folder" "issue view 56 --json title --jq .title
+$project" "$(command cat "$fake/gh-args" "$fake/gh-cwd")"
+
+# The worker is named after its Project and ticket (#103), so the Claude
+# app and `claude agents` tell workers apart. A long title is cut.
+name_of() { sed -n '/^--name$/{n;p;}' "$fake/args"; }
+long="Make every supervised worker show its Project and its ticket in the Claude app list"
+(export FAKE_GH_TITLE="$long"; launch --ticket 56 >/dev/null 2>&1)
+check "launch: a long title is cut, with no space before the dots" "supervise project #56: Make every supervised worker show its Project and its..." "$(name_of)"
+check "launch: the cut name is at most 80 characters" "yes" "$([ "$(name_of | tr -d '\n' | LC_ALL=en_US.UTF-8 wc -m)" -le 80 ] && echo yes || echo no)"
+(export FAKE_GH_TITLE="Fix the café sign"; launch --ticket 56 >/dev/null 2>&1)
+check "launch: a title with non-ASCII text is kept whole" "supervise project #56: Fix the café sign" "$(name_of)"
+out=$( (export FAKE_GH_FAIL=1; launch --ticket 56 2>&1) )
+rc=$?
+check "launch: no title still launches" "0" "$rc"
+check "launch: no title names the Project and ticket" "supervise project #56" "$(name_of)"
+check "launch: no title says why" "note: gh issue view 56 failed, so the worker's name leaves out the ticket's title
+c2a368ee" "$out"
+out=$( (export FAKE_GH_TITLE=""; launch --ticket 56 2>&1) )
+check "launch: an empty title names the Project and ticket" "supervise project #56" "$(name_of)"
+mismatch_name() { # <name> <jq filter> <expected message>
+    out=$( (export FAKE_STATE_FILTER="$2"; launch --ticket 56 2>&1) )
+    rc=$?
+    check "launch: $1 exits 2" "2" "$rc"
+    check "launch: $1 stops the session" "stop c2a368ee" "$(command cat "$fake/calls" 2>/dev/null)"
+    check "launch: $1 says why" "$3" "$out"
+}
+mismatch_name "name not recorded" '| .name = "mattpocock skills implementation"' \
+    "Error: session c2a368ee is named 'mattpocock skills implementation', not 'supervise project #56: Add the thing'; stopped it"
+mismatch_name "no name recorded" '| del(.name)' \
+    "Error: session c2a368ee is named '(none recorded)', not 'supervise project #56: Add the thing'; stopped it"
 
 launch --ticket 56 --model claude-opus-5-5 >/dev/null 2>&1
 check "launch: --model passes through" "claude-opus-5-5" "$(sed -n 3p "$fake/args")"
@@ -573,11 +630,12 @@ check "launch: unknown effort refused" "1" "$rc"
 check "launch: unknown effort says why" "Error: --effort is low, medium, high, xhigh or max, not 'extreme'" "$out"
 check "launch: unknown effort never launched" "no" "$([ -f "$fake/args" ] && echo yes || echo no)"
 
-out=$( (export FAKE_STATE_FILTER='| .respawnFlags[-1] = "high"'; launch --ticket 56 --effort medium 2>&1) )
+# The effort value sits before --name and its name, the last two flags.
+out=$( (export FAKE_STATE_FILTER='| .respawnFlags[-3] = "high"'; launch --ticket 56 --effort medium 2>&1) )
 rc=$?
 check "launch: effort not recorded exits 2" "2" "$rc"
 check "launch: effort not recorded stops the session" "stop c2a368ee" "$(command cat "$fake/calls" 2>/dev/null)"
-check "launch: effort not recorded says why" "Error: session c2a368ee does not run at effort medium (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --effort high); stopped it" "$out"
+check "launch: effort not recorded says why" "Error: session c2a368ee does not run at effort medium (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --effort high --name supervise project #56: Add the thing); stopped it" "$out"
 
 out=$(launch --ticket 56 --model claude-haiku-4-5-20251001 2>&1)
 rc=$?
@@ -622,9 +680,9 @@ mismatch "isolation guard on" '| .respawnFlags = ["--disallowedTools", "EnterWor
 mismatch "isolation guard set to another value" '| .respawnFlags = ["--disallowedTools", "EnterWorktree", "--settings", "{\"worktree\":{\"bgIsolation\":\"worktree\"}}", "--permission-mode", "auto"]' \
     "Error: session c2a368ee has the background worktree guard on, so its edits in $project would be refused: bgIsolation none is not in its settings (its flags: --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"worktree\"}} --permission-mode auto); stopped it"
 mismatch "grants not recorded" '| .respawnFlags |= .[2:]' \
-    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5); stopped it"
+    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name supervise project #56: Add the thing); stopped it"
 mismatch "other grants recorded" '| .respawnFlags[1] = "something else"' \
-    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --append-system-prompt something else --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5); stopped it"
+    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --append-system-prompt something else --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name supervise project #56: Add the thing); stopped it"
 mismatch "wrong profile" '| .providerEnv.CLAUDE_CONFIG_DIR = "/elsewhere"' \
     "Error: session c2a368ee runs under config /elsewhere, not $cfg; stopped it"
 mismatch "no profile recorded" '| del(.providerEnv)' \
@@ -742,7 +800,7 @@ check "launch with grants: lists the grants on origin, and only those" "You are 
 - issue-close
 A shared action one of these grants covers goes ahead without asking: when /implement reaches it, take it, and do not end your turn to ask first.
 A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`." \
-    "$(sed -n '/^--append-system-prompt$/,/^--permission-mode$/p' "$fake/args" | sed '1d;$d')"
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d')"
 check "launch with grants: notes the grant committed only locally" "note: docs/agents/supervision.md grants pr-create on the working tree or current branch, not on the committed origin/main; ignored" \
     "$(launch_in "$granted" --ticket 56 2>&1 >/dev/null)"
 check "launch with grants: the job's flags carry them" "--append-system-prompt" \

@@ -4,13 +4,13 @@
 #
 # Runs `claude --bg --model MODEL [--effort LEVEL] --disallowedTools EnterWorktree
 # --settings '{"worktree":{"bgIsolation":"none"}}' --append-system-prompt
-# GRANTS --permission-mode auto '/mattpocock-skills:implement #N'` in DIR with
+# GRANTS --name NAME --permission-mode auto '/mattpocock-skills:implement #N'` in DIR with
 # CLAUDE_CONFIG_DIR set explicitly, so the session runs under this profile
 # whatever the shell would pick for DIR. Then reads the job's state.json,
 # which the background service writes under that config dir, and checks that
 # the session runs under the same config dir, in DIR itself (not a worktree),
 # in auto mode, without EnterWorktree, with the background worktree guard
-# off, with its grants text, and at LEVEL when one was given. A session that fails a check is stopped.
+# off, with its grants text, under NAME, and at LEVEL when one was given. A session that fails a check is stopped.
 # Prints the session's short id.
 #
 # EnterWorktree is denied because /implement workers called it on their own,
@@ -63,6 +63,21 @@
 # live with 2.1.286, a `claude --bg --model claude-opus-5-5 --effort medium`
 # job's flags read ["--model","claude-opus-5-5","--effort","medium", ...]. MP_SUPERVISE_WAIT: seconds to wait for the job's
 # state.json (default 20).
+#
+# The worker is named `supervise <project> #N: <ticket title>` with --name,
+# cut to 80 characters, so `claude agents` and the Claude app tell workers
+# apart (#103): without it, Claude Code named every worker from its first
+# prompt, the same for every ticket. The app adds the machine's name, so the
+# name leaves it out. The title comes from `gh issue view` in DIR; when that
+# fails, the name is `supervise <project> #N` and a note says so. Checked
+# live with 2.1.288: a `claude --bg --name` session's SessionStart title hook
+# (MP_SESSION_TITLE) wrote its own title first, then the name was written
+# over it, and it stayed the last custom-title in the transcript; the job's
+# state.json recorded the name in .name and --name in respawnFlags, so it can
+# be confirmed; a stop and a flagless `claude --bg --resume`, as resume.sh
+# runs, woke the session "with its saved options (..., --name)" and kept the
+# name. The `backgrounded` line then ends ` · <name>`, and with FORCE_COLOR
+# set its id is colored, so both are read past.
 #
 # Before launching, it checks that DIR is a git checkout on its default
 # branch with a clean tree and no other live background session in it
@@ -183,13 +198,27 @@ fi
 GRANTS="$GRANTS
 A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin $default\`."
 
+# The worker's name (#103), in characters, not bytes, whatever the locale.
+top=$(git -C "$DIR" rev-parse --show-toplevel)
+NAME="supervise ${top##*/} #$TICKET"
+if title=$(cd "$DIR" && gh issue view "$TICKET" --json title --jq .title </dev/null 2>/dev/null); then
+    [ -z "$title" ] || NAME="$NAME: $title"
+else
+    printf "note: gh issue view %s failed, so the worker's name leaves out the ticket's title\n" "$TICKET" >&2
+fi
+if [ "$(printf '%s' "$NAME" | LC_ALL=en_US.UTF-8 wc -m)" -gt 80 ]; then
+    NAME="$(printf '%s' "$NAME" | LC_ALL=en_US.UTF-8 cut -c1-77 | sed 's/ *$//')..."
+fi
+
 set -- --model "$MODEL"
 [ -z "$EFFORT" ] || set -- "$@" --effort "$EFFORT"
 out=$(cd "$DIR" && CLAUDE_CONFIG_DIR="$CONFIG" claude --bg "$@" \
     --disallowedTools EnterWorktree --settings "$GUARD_OFF" \
-    --append-system-prompt "$GRANTS" --permission-mode auto \
+    --append-system-prompt "$GRANTS" --name "$NAME" --permission-mode auto \
     "/mattpocock-skills:implement #$TICKET" </dev/null 2>&1)
-id=$(printf '%s\n' "$out" | sed -n 's/^backgrounded · \([0-9a-f][0-9a-f]*\)$/\1/p' | head -n 1)
+esc=$(printf '\033')
+id=$(printf '%s\n' "$out" | sed "s/$esc\[[0-9;]*m//g" |
+    sed -n 's/^backgrounded · \([0-9a-f][0-9a-f]*\)\( · .*\)\{0,1\}$/\1/p' | head -n 1)
 if [ -z "$id" ]; then
     printf 'Error: claude --bg printed no session id:\n%s\n' "$out" >&2
     exit 1
@@ -234,6 +263,8 @@ jq -e '.respawnFlags as $f | [range(0; ($f | length) - 1)]
 jq -e --arg g "$GRANTS" '.respawnFlags as $f | [range(0; ($f | length) - 1)]
         | any(. as $i | $f[$i] == "--append-system-prompt" and $f[$i + 1] == $g)' "$job" >/dev/null ||
     reject "was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
+got=$(jq -r '.name // "(none recorded)"' "$job")
+[ "$got" = "$NAME" ] || reject "is named '$got', not '$NAME'"
 if [ -n "$EFFORT" ]; then
     jq -e --arg e "$EFFORT" '.respawnFlags as $f | [range(0; ($f | length) - 1)]
             | any(. as $i | $f[$i] == "--effort" and $f[$i + 1] == $e)' "$job" >/dev/null ||
