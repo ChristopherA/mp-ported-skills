@@ -16,7 +16,8 @@
 #   gone               not in the list: removed, or never started
 #   unknown <state>    a state this script does not know
 # then `cwd <path>` (where the session runs), and for a blocked session
-# `needs <text>` when its job's state.json under $CLAUDE_CONFIG_DIR names it.
+# `needs <text>`: the action a `Waiting on:` line names (below), or else what
+# its job's state.json under $CLAUDE_CONFIG_DIR names, when it names one.
 #
 # `hang` is a polling-loop state, not something a single classification can
 # see: it needs the session's transcript size at an earlier poll to compare
@@ -46,7 +47,9 @@
 # `status: idle` whose transcript shows the turn ended is reported as done,
 # with a last line `note claude agents still said working`. A done session
 # whose last text has a line starting `Waiting on:` is reported as `blocked
-# input needed`, with a `needs` line naming the action (#88).
+# input needed`, with a `needs` line naming the action (#88). So is a blocked
+# session with no waitingFor whose last text has one; that line wins over
+# the job's needs (#97).
 #
 # Usage:
 #   watch.sh --id ID [--dir DIR [--since FILE]] [--interval SECONDS] [--timeout SECONDS] [--stall SECONDS]
@@ -265,11 +268,13 @@ commits() {
 # report <agents json>: classify, adding the job's needs to a blocked state.
 # A working session whose cwd is not DIR has moved. A working session with
 # status idle whose transcript says its turn ended is done: the state list
-# can go on saying working for hours after that. A done session whose last
-# text has a `Waiting on:` line is `blocked input needed`, with that action
-# as its needs line. With --since, a worktree or
-# branch made in the repo since the snapshot is listed, and makes a working
-# or done session moved.
+# can go on saying working for hours after that. A done session, or a
+# blocked one with no waitingFor, whose last text has a `Waiting on:` line
+# is `blocked input needed`, with that action as its needs line in place of
+# the job's: the service can mark that worker blocked before it is seen
+# done, and the job's needs can name a side question from its report (#97).
+# With --since, a worktree or branch made in the repo since the snapshot is
+# listed, and makes a working or done session moved.
 report() {
     out=$(classify "$1") || return 1
     case $out in
@@ -285,20 +290,23 @@ report() {
                     out=$(printf 'done%s\nnote claude agents still said working' "${out#working}")
                 fi
             fi ;;
-        blocked*)
-            job="$CLAUDE_CONFIG_DIR/jobs/$ID/state.json"
-            if [ -f "$job" ]; then
-                needs=$(jq -r '.needs // empty' "$job" 2>/dev/null)
-                [ -z "$needs" ] || out=$(printf '%s\nneeds %s' "$out" "$needs")
-            fi ;;
     esac
+    waits=""
     case $out in
-        done*)
-            waits=$(waiting_on "$(session_id_of "$1")")
-            if [ -n "$waits" ]; then
-                out=$(printf 'blocked input needed%s\nneeds %s' "${out#done}" "$waits")
-            fi ;;
+        done* | "blocked question"*) waits=$(waiting_on "$(session_id_of "$1")") ;;
     esac
+    if [ -n "$waits" ]; then
+        out=$(printf '%s\nneeds %s' "$(printf '%s\n' "$out" | sed '1s/.*/blocked input needed/')" "$waits")
+    else
+        case $out in
+            blocked*)
+                job="$CLAUDE_CONFIG_DIR/jobs/$ID/state.json"
+                if [ -f "$job" ]; then
+                    needs=$(jq -r '.needs // empty' "$job" 2>/dev/null)
+                    [ -z "$needs" ] || out=$(printf '%s\nneeds %s' "$out" "$needs")
+                fi ;;
+        esac
+    fi
     if [ -n "$SINCE" ]; then
         made=$(made_since)
         if [ -n "$made" ]; then

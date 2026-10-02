@@ -167,12 +167,12 @@ cwd /work/project" "$(watch_file working-idle 9121ff49)"
 # A turn that ended on a `Waiting on:` line, as launch.sh tells a worker to
 # end on an ungranted shared action (#88), is blocked on that action, with it
 # as the needs line, whether claude agents says working or done.
-waiting_on() { # <last text> -- turn-ended, its final text block set to it
+waiting_on() { # <last text> [session id] -- turn-ended, its final text block set to it
     dir="$cfg/projects/-work-project"
     command rm -rf "$cfg/projects"; mkdir -p "$dir"
     jq -c --arg t "$1" 'if .type == "assistant" and .message.content == [{"type": "text"}]
         then .message.content[0].text = $t else . end' "$transcripts/turn-ended.jsonl" \
-        >"$dir/9121ff49-5e25-43f0-bf48-307db0776c36.jsonl"
+        >"$dir/${2:-9121ff49-5e25-43f0-bf48-307db0776c36}.jsonl"
 }
 waiting_on "Committed 3 changes on main.
 
@@ -187,6 +187,29 @@ needs git push origin main" "$(watch_file done 9121ff49)"
 waiting_on "All done; pushed to main. Nothing is Waiting on: anything."
 check "watch: a mention mid-line is not waiting" "done
 cwd /work/project" "$(watch_file done 9121ff49)"
+# The background service can mark that worker blocked with no waitingFor
+# before watch.sh sees it done. The `Waiting on:` line still names what it
+# waits on, and wins over the job's needs summary, which can name a side
+# question from the worker's report (#97).
+blocked_session=91a06a74-3c17-4d7f-a012-61d07453d1c8
+mkdir -p "$cfg/jobs/91a06a74"
+jq '.needs = "clarify: should pid always win?"' "$fixtures/job-state.json" >"$cfg/jobs/91a06a74/state.json"
+waiting_on "Committed 3 changes on main.
+
+\`Waiting on: git push origin main\`" "$blocked_session"
+check "watch: blocked with no waitingFor, waiting on an action" "blocked input needed
+cwd /work/project
+needs git push origin main" "$(sh "$scripts/watch.sh" --id 91a06a74 --file "$work/no-waiting-for.json" </dev/null)"
+waiting_on "Should pid always win?" "$blocked_session"
+check "watch: blocked with no waitingFor and no Waiting on: is a question" "blocked question
+cwd /work/project
+needs clarify: should pid always win?" "$(sh "$scripts/watch.sh" --id 91a06a74 --file "$work/no-waiting-for.json" </dev/null)"
+# A row that names what it waits for is read as before.
+waiting_on "\`Waiting on: git push origin main\`" "$blocked_session"
+check "watch: blocked with a waitingFor ignores Waiting on:" "blocked permission prompt
+cwd /work/project
+needs clarify: should pid always win?" "$(watch_file blocked-permission-prompt 91a06a74)"
+command rm -rf "$cfg/jobs/91a06a74"
 # A worker that entered a worktree has its transcript in the worktree's folder.
 transcript turn-ended -work-project--claude-worktrees-issue-66
 check "watch: transcript found in a worktree's folder" "done
