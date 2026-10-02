@@ -142,8 +142,12 @@ default=${default:-main}
 [ "$branch" = "$default" ] || fail "$DIR is on $branch, not the default branch $default; not launched"
 list=$(CLAUDE_CONFIG_DIR="$CONFIG" claude agents --json --all </dev/null 2>/dev/null) ||
     fail "claude agents --json --all failed, so other sessions in $DIR are unknown; not launched"
+# A row is live unless it is stopped, or done with no pid: a finished worker
+# shows done with no pid before and after claude stop. Any other state,
+# unknown or missing included, counts as live. resume.sh uses the same rule.
 others=$(printf '%s' "$list" | jq -er --arg d "$DIR" '
-    [.[] | select(.kind == "background" and .cwd == $d and .state != "stopped")
+    [.[] | select(.kind == "background" and .cwd == $d and .state != "stopped"
+                  and (.state != "done" or .pid != null))
      | "\(.id) (\(.state // "unknown"))"] | join(", ")' 2>/dev/null) ||
     fail "claude agents --json --all printed no list jq could read, so other sessions in $DIR are unknown; not launched"
 [ -z "$others" ] || fail "another live background session in $DIR: $others; not launched"

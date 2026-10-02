@@ -654,6 +654,29 @@ jq '[.[] | if .id == "7a6a0741" then .state = "stopped" | del(.pid) else . end]'
     "$work/other-in-project.json" >"$work/stopped-in-project.json"
 out=$(LAUNCH_AGENTS="$work/stopped-in-project.json"; export LAUNCH_AGENTS; launch --ticket 56 2>&1); rc=$?
 check "launch: a stopped session in the checkout does not block" "0 c2a368ee" "$rc $out"
+# A finished worker shows done with no pid, before and after claude stop
+# (#96): it is not live. A pid, or any state but done and stopped, is.
+in_project() { # <out> <jq filter on 7a6a0741's row>
+    jq "[.[] | if .id == \"7a6a0741\" then $2 else . end]" "$work/other-in-project.json" >"$work/$1.json"
+}
+in_project done-nopid '.state = "done" | .pid = null'
+out=$(LAUNCH_AGENTS="$work/done-nopid.json"; export LAUNCH_AGENTS; launch --ticket 56 2>&1); rc=$?
+check "launch: a done session with no pid in the checkout does not block" "0 c2a368ee" "$rc $out"
+in_project done-pid '.state = "done"'
+out=$(LAUNCH_AGENTS="$work/done-pid.json"; export LAUNCH_AGENTS; launch --ticket 56 2>&1); rc=$?
+not_launched "a done session with a pid" "Error: another live background session in $project: 7a6a0741 (done); not launched"
+in_project working-nopid '.state = "working" | .pid = null'
+out=$(LAUNCH_AGENTS="$work/working-nopid.json"; export LAUNCH_AGENTS; launch --ticket 56 2>&1); rc=$?
+not_launched "a working session with no pid" "Error: another live background session in $project: 7a6a0741 (working); not launched"
+in_project blocked-nopid '.state = "blocked" | del(.pid)'
+out=$(LAUNCH_AGENTS="$work/blocked-nopid.json"; export LAUNCH_AGENTS; launch --ticket 56 2>&1); rc=$?
+not_launched "a blocked session with no pid" "Error: another live background session in $project: 7a6a0741 (blocked); not launched"
+in_project odd-nopid '.state = "crashed" | .pid = null'
+out=$(LAUNCH_AGENTS="$work/odd-nopid.json"; export LAUNCH_AGENTS; launch --ticket 56 2>&1); rc=$?
+not_launched "an unknown state with no pid" "Error: another live background session in $project: 7a6a0741 (crashed); not launched"
+in_project nostate-nopid 'del(.state) | .pid = null'
+out=$(LAUNCH_AGENTS="$work/nostate-nopid.json"; export LAUNCH_AGENTS; launch --ticket 56 2>&1); rc=$?
+not_launched "no state and no pid" "Error: another live background session in $project: 7a6a0741 (unknown); not launched"
 out=$( (export FAKE_AGENTS_FAIL=1; launch --ticket 56 2>&1) ); rc=$?
 not_launched "an unreadable session list" "Error: claude agents --json --all failed, so other sessions in $project are unknown; not launched"
 # A marker left by a worker that is no longer live does not block, and is
@@ -740,12 +763,16 @@ row() { # <out> <jq filter on the worker's row>
 }
 row pid '.state = "working" | .status = "busy" | .pid = 4242'
 row nopid '.state = "working" | .status = "idle"'
-other() { # <out> <cwd> <state>
-    jq --arg cwd "$2" --arg state "$3" \
-        '. + [{id: "7a6a0741", cwd: $cwd, kind: "background", sessionId: "7a6a0741-0000", name: "x", state: $state, pid: 99}]' \
+other() { # <out> <cwd> <state> [pid, default 99]
+    jq --arg cwd "$2" --arg state "$3" --argjson pid "${4:-99}" \
+        '. + [{id: "7a6a0741", cwd: $cwd, kind: "background", sessionId: "7a6a0741-0000", name: "x", state: $state, pid: $pid}]' \
         "$fixtures/stopped.json" >"$work/$1.json"
 }
 other other-live /work/project working
+other other-done-nopid /work/project done null
+other other-done-pid /work/project done
+other other-blocked-nopid /work/project blocked null
+other other-odd-nopid /work/project crashed null
 other other-stopped /work/project stopped
 other other-elsewhere /work/other working
 sid=c2a368ee-c513-484c-83d3-581830e209a5
@@ -824,6 +851,13 @@ check "resume: another live session, never resumed" "stop c2a368ee" "$(calls)"
 check "resume: another live session is named" "Error: another live background session in /work/project: 7a6a0741 (working); not resumed" "$out"
 check "resume: a stopped one in the checkout is fine" "resumed c2a368ee" "$(resume woke other-stopped 2>&1)"
 check "resume: a live one elsewhere is fine" "resumed c2a368ee" "$(resume woke other-elsewhere 2>&1)"
+check "resume: a done one with no pid in the checkout is fine" "resumed c2a368ee" "$(resume woke other-done-nopid 2>&1)"
+out=$(resume woke other-done-pid 2>&1); rc=$?
+check "resume: a done one with a pid stops the resume" "1 Error: another live background session in /work/project: 7a6a0741 (done); not resumed" "$rc $out"
+out=$(resume woke other-blocked-nopid 2>&1); rc=$?
+check "resume: a blocked one with no pid stops the resume" "1 Error: another live background session in /work/project: 7a6a0741 (blocked); not resumed" "$rc $out"
+out=$(resume woke other-odd-nopid 2>&1); rc=$?
+check "resume: an unknown state with no pid stops the resume" "1 Error: another live background session in /work/project: 7a6a0741 (crashed); not resumed" "$rc $out"
 
 # A copy runs without the launch's guards, so it is stopped and removed at
 # once, and the resume retried on the original.

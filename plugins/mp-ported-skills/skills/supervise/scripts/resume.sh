@@ -87,6 +87,8 @@ sid=$(jq -r '.sessionId // empty' "$job" 2>/dev/null)
 # verdict <agents json>: one word for the session's row: `gone`, `others
 # <list>` (another live background session in its checkout, copies this run
 # made left out), `stopped`, `pid` or `nopid`. Exits non-zero when jq fails.
+# Another session is live unless it is stopped, or done with no pid, the
+# same rule as launch.sh's.
 verdict() {
     printf '%s' "$1" | jq -er --arg id "$ID" --arg d "$DIR" --arg copies "$copies" '
         ($copies | split(" ")) as $mine
@@ -95,7 +97,8 @@ verdict() {
         | if $row == null then "gone"
           else ($row.cwd // $d) as $cwd
                | [$all[] | select(.kind == "background" and .id != $id and .cwd == $cwd
-                               and .state != "stopped" and (.id | IN($mine[]) | not))
+                               and .state != "stopped" and (.state != "done" or .pid != null)
+                               and (.id | IN($mine[]) | not))
                   | "\(.id) (\(.state // "unknown"))"] as $others
                | if ($others | length) > 0 then "others \($cwd): \($others | join(", "))"
                  elif $row.state == "stopped" then "stopped"
