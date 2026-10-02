@@ -21,8 +21,9 @@ Claude Code's auto-mode classifier judges each supervisor push, and it is the on
 
 - In the #96 run the supervisor tried the push after the maintainer had only reported the worker's refusal. The classifier refused it as a bypass of the #66 hook.
 - In the #97 run the supervisor stopped the worker, released its marker, checked the range by hand (fast-forward, clean tree, patch-only bump, sweep clean, tests passing) and asked one question. After the maintainer chose "Push" in the supervisor session, a plain `git push origin main` from the supervisor was allowed and landed.
+- In the #100 run the supervisor ran `push.sh --check`, asked one question, and after the maintainer chose to push, `sh .../push.sh` without `--check` was allowed and landed `0363064..23cbf4e`. No settings rule was needed. The supervisor session was a terminal session.
 
-Two things are still open: whether the classifier treats `sh .../push.sh` after the same go-ahead the way it treated the plain push, and whether that holds when the go-ahead comes from a remote client. Both need a live supervised run, which a worker cannot do. Record the result on #100 and here. If the script is refused, the skill says to report the refusal and stop. The next thing to try is a narrow allow rule for the script in the profile's `settings.json` (the same open question as #80). No settings rule has been needed so far.
+One thing is still open: whether the script push is allowed when the go-ahead comes from a remote client. It needs a live supervised run driven from the Claude app or a phone; record the result on #100 and here. If the script is refused, the skill says to report the refusal and stop. The next thing to try is a narrow allow rule for the script in the profile's `settings.json` (the same open question as #80).
 
 ## Considered Options
 
