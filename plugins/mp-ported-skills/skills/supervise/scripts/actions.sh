@@ -43,6 +43,12 @@
 # own tool use opened, with no command text to classify -- is always
 # `ungranted` too.
 #
+# A branch push.sh pushed for this worker, on the maintainer's approval in
+# the supervisor's session (#100), is labelled `pushed by the supervisor on
+# the maintainer's approval` instead, read from the checkout's
+# `git rev-parse --git-path mp-supervise-pushed`, where push.sh records
+# each push by worker id and upstream branch.
+#
 # The job's state.json and the transcripts are read under
 # $CLAUDE_CONFIG_DIR, the transcript by session id in any project folder,
 # since a worker that entered a worktree has its transcript moved there.
@@ -238,7 +244,12 @@ if commits=$(git -C "$DIR" rev-list "$START..HEAD" 2>/dev/null); then
     branches=$(for c in $commits; do
         git -C "$DIR" for-each-ref --contains "$c" --format='%(refname)' refs/remotes
     done | grep -v '/HEAD$' | sed 's|^refs/remotes/||' | sort -u)
+    pushed=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-pushed 2>/dev/null)
     for b in $branches; do
+        if [ -f "$pushed" ] && awk -v id="$ID" -v b="$b" '$1 == id && $2 == b { found = 1 } END { exit !found }' "$pushed"; then
+            add "branch $b pushed by the supervisor on the maintainer's approval: holds the worker's commits"
+            continue
+        fi
         grant_label push
         add "branch $b $GRANT_LABEL: holds the worker's commits"
     done
