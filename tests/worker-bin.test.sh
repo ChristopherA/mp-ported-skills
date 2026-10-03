@@ -129,6 +129,8 @@ check "gh api issue comment is refused" "exit=1" "$(last "$(worker 0 plain 'gh a
 # A repo flag is read wherever gh takes one (#119).
 check "gh -R before pr merge is refused" "exit=1" "$(last "$(worker 0 plain 'sh -c "gh -R o/r pr merge 5"')")"
 check "gh pr -R o/r merge is refused" "exit=1" "$(last "$(worker 0 plain 'sh -c "gh pr -R o/r merge 5"')")"
+check "gh pr new is refused" "exit=1" "$(last "$(worker 0 plain 'sh -c "gh pr new --fill"')")"
+check "gh pr -R o/r new is refused" "exit=1" "$(last "$(worker 0 plain 'sh -c "gh pr -R o/r new --fill"')")"
 check "gh issue --repo=o/r close is refused" "exit=1" "$(last "$(worker 0 plain 'sh -c "gh issue --repo=o/r close 3"')")"
 check "gh issue create --repo o/r is refused" "exit=1" "$(last "$(worker 0 plain 'sh -c "gh issue create --title x --repo o/r"')")"
 check "gh issue -R=o/r comment is refused" "exit=1" "$(last "$(worker 0 plain 'sh -c "gh issue -R=o/r comment 3 --body x"')")"

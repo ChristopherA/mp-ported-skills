@@ -1304,5 +1304,30 @@ command succeeded ungranted: gh issue -R o/r comment 104 --edit-last
 command succeeded ungranted: gh issue create --title y --repo=o/r" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo4" --start "$gstart" </dev/null | grep '^command')"
 
+# gh pr new is gh's alias for gh pr create (#120), and is read the same.
+{
+    bash_call p1 'gh pr create --fill'
+    bash_call p2 'gh pr new --fill'
+    bash_call p3 'gh pr -R o/r new --fill'
+} >"$cfg/projects/-work-project/$sid.jsonl"
+new_grant_repo grepo5 '## Grants
+
+- pr-create
+'
+check "actions: gh pr new cites the pr-create grant as gh pr create does" \
+    "command succeeded granted (pr-create): gh pr create --fill
+command succeeded granted (pr-create): gh pr new --fill
+command succeeded granted (pr-create): gh pr -R o/r new --fill" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo5" --start "$gstart" </dev/null | grep '^command')"
+new_grant_repo grepo6 '## Grants
+
+- issue-close
+'
+check "actions: an ungranted gh pr new" \
+    "command succeeded ungranted: gh pr create --fill
+command succeeded ungranted: gh pr new --fill
+command succeeded ungranted: gh pr -R o/r new --fill" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo6" --start "$gstart" </dev/null | grep '^command')"
+
 echo "supervise: $pass passed, $fail failed"
 [ "$fail" = 0 ]

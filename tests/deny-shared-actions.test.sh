@@ -107,6 +107,7 @@ check "piped into sh" "deny" "$(decision 0 auto 'echo git push | sh')"
 check "here-string into bash" "deny" "$(decision 0 auto 'bash <<< "git push"')"
 check "gh pr create piped into bash" "deny" "$(decision 0 auto 'printf "gh pr create --fill" | bash')"
 check "gh -R before pr create" "deny" "$(decision 0 auto 'gh -R o/r pr create --fill')"
+check "gh pr new, gh's alias for pr create" "deny" "$(decision 0 auto 'gh pr new --title x --body y')"
 check "gh --repo=o/r before issue close" "deny" "$(decision 0 auto 'gh --repo=o/r issue close 3')"
 check "gh issue comment" "deny" "$(decision 0 auto 'gh issue comment 104 --body-file note.md')"
 check "gh issue create" "deny" "$(decision 0 auto 'gh issue create --title x --body y --label ready-for-agent')"
@@ -119,7 +120,7 @@ check "gh issue create piped into sh" "deny" "$(decision 0 auto 'echo gh issue c
 # A repo flag is read wherever gh takes one: before the subcommand,
 # between it and its action, or after the action (#119), in each spelling.
 for form in 'issue close 3' 'issue comment 3 --body y' 'issue create --title x' 'issue new --title x' \
-    'pr create --fill' 'pr merge 5'; do
+    'pr create --fill' 'pr new --fill' 'pr merge 5'; do
     sub=${form%% *} rest=${form#* }
     for repo in '-R o/r' '-R=o/r' '--repo o/r' '--repo=o/r'; do
         check "gh $repo $form" "deny" "$(decision 0 auto "gh $repo $form")"
@@ -171,6 +172,8 @@ check "a granted issue close goes through, note cited or not" "" \
     "$(decision 0 auto 'gh issue close 42 --comment done' "$granted")"
 check "an ungranted action in the same checkout still refuses" "deny" \
     "$(decision 0 auto 'gh pr create --title x --body y' "$granted")"
+check "an ungranted gh pr new in the same checkout refuses" "deny" \
+    "$(decision 0 auto 'gh pr new --title x --body y' "$granted")"
 check "gh api is never granted, even alongside a push grant" "deny" \
     "$(decision 0 auto 'gh api -X PUT repos/o/r/pulls/5/merge' "$granted")"
 # A comment or new ticket (#110), granted on its own, by gh issue or the
@@ -247,6 +250,16 @@ check "an ungranted issue comment beside an issue-create grant refuses" "deny" \
     "$(decision 0 auto 'gh issue comment 104 --body y' "$granted")"
 check "a GraphQL createIssue is not the issue-create grant" "deny" \
     "$(decision 0 auto "gh api graphql -f query='mutation { createIssue(input: {repositoryId: \"R_1\", title: \"x\"}) { issue { number } } }'" "$granted")"
+# gh pr new is gh's alias for gh pr create (#120): the same grant covers it.
+printf '## Grants\n\n- pr-create\n' >"$granted/docs/agents/supervision.md"
+git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "pr-create only"
+git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+check "a granted pr create goes through" "" \
+    "$(decision 0 auto 'gh pr create --fill' "$granted")"
+check "a granted gh pr new goes through" "" \
+    "$(decision 0 auto 'gh pr new --fill' "$granted")"
+check "a granted gh pr -R o/r new goes through" "" \
+    "$(decision 0 auto 'gh pr -R o/r new --fill' "$granted")"
 command rm -rf "$granted" "$remote" "$ungranted"
 
 # A command that is not a shared action goes through.

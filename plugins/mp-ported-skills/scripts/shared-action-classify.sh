@@ -79,7 +79,7 @@ gh_words() {
 classify_gh() {
     gh_words "$@"
     case "$gh_sub/$gh_act" in
-    pr/create) matched="gh pr create" ;;
+    pr/create | pr/new) matched="gh pr create" ;;
     pr/merge) matched="gh pr merge" ;;
     issue/close) matched="gh issue close" ;;
     issue/comment)
