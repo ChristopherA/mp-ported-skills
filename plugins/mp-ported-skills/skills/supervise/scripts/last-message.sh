@@ -50,7 +50,9 @@ fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 case $COUNT in
     '' | *[!0-9]* | 0 | 0*) fail "--count must be a whole number of 1 or more" ;;
 esac
-: "${CLAUDE_CONFIG_DIR:=$HOME/.claude}"
+# claude agents and the transcripts both follow the config dir, so an unset
+# one would read another profile's sessions.
+[ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the worker's profile is unknown"
 
 agents=$(claude agents --json --all </dev/null 2>/dev/null) &&
     printf '%s' "$agents" | jq -e 'type == "array"' >/dev/null 2>&1 ||
@@ -66,13 +68,19 @@ done
 [ -n "$transcript" ] || fail "no transcript for worker $ID (session $sid) under $CLAUDE_CONFIG_DIR/projects"
 
 # One JSON value: the last COUNT messages' text, and the transcript's last
-# conversation row, to tell whether the turn is over.
+# conversation row, to tell whether the turn is over. Claude Code writes an
+# assistant row per content block, so rows sharing a message id are one
+# message; a row with no id is a message of its own.
 read_out=$(jq -s --argjson n "$COUNT" '
     [.[] | select(.isSidechain | not)] as $rows
     | {
-        texts: ([$rows[] | select(.type == "assistant")
-                 | [.message.content[]? | select(.type == "text") | .text // empty]
-                 | select(length > 0) | join("\n\n")] | .[-$n:]),
+        texts: ([$rows | to_entries[] | select(.value.type == "assistant")
+                 | {key: (.value.message.id // "row \(.key)"),
+                    text: [.value.message.content[]? | select(.type == "text") | .text // empty]}]
+                | reduce .[] as $r ([];
+                    if length > 0 and .[-1].key == $r.key
+                    then .[-1].text += $r.text else . + [$r] end)
+                | [.[] | select(.text | length > 0) | .text | join("\n\n")] | .[-$n:]),
         last: ([$rows[] | select(.type == "user" or .type == "assistant" or .type == "system")] | last)
       }' "$transcript" 2>/dev/null) || fail "the transcript $transcript could not be read"
 

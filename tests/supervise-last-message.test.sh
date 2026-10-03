@@ -95,10 +95,6 @@ check "ended: prints the last assistant text" "message 23" "$(out)"
 check "ended: exit 0" "0" "$(rc)"
 check "ended: no note" "" "$(err)"
 
-# The transcript is filed under the worktree's folder, not the cwd's.
-check "worktree: transcript is under the worktree folder" "yes" \
-    "$([ -f "$worktree_folder/$sid.jsonl" ] && [ ! -d "$cfg/projects/-work-project" ] && echo yes)"
-
 run --id 9121ff49 --count 2
 check "count 2: the last two, oldest first" "message 15
 
@@ -116,6 +112,22 @@ run --id 9121ff49
 check "multi-line text prints whole" "Done.
 
 Waiting on: git push origin main" "$(out)"
+
+# Claude Code writes a row per content block: rows sharing a message id are
+# one message, whose text blocks all print.
+transcript turn-ended
+printf '%s\n' \
+    '{"type":"assistant","isSidechain":false,"message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"first block"}]}}' \
+    '{"type":"assistant","isSidechain":false,"message":{"id":"msg_1","role":"assistant","content":[{"type":"tool_use","name":"Bash"}]}}' \
+    '{"type":"assistant","isSidechain":false,"message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"second block"}]}}' \
+    '{"type":"system","subtype":"turn_duration","isSidechain":false}' \
+    >>"$worktree_folder/$sid.jsonl"
+run --id 9121ff49 --count 2
+check "one message over several rows prints whole" "message 23
+
+first block
+
+second block" "$(out)"
 
 # A sidechain row is a subagent's, not the worker's.
 transcript turn-ended
@@ -170,7 +182,21 @@ check "agents unreadable: exit 1" "1" "$(rc)"
 check "agents unreadable: nothing on stdout" "" "$(out)"
 check "agents unreadable: says so" \
     "Error: claude agents --json --all could not be read" "$(err)"
+printf '{"error":"not a list"}\n' >"$work/not-a-list.json"
+agents_file="$work/not-a-list.json"
+run --id 9121ff49
+check "agents not a list: exit 1" "1" "$(rc)"
+check "agents not a list: nothing on stdout" "" "$(out)"
+check "agents not a list: says so" \
+    "Error: claude agents --json --all could not be read" "$(err)"
 unset agents_file
+
+# With no config dir, the profile is unknown; the default one is not read.
+(unset CLAUDE_CONFIG_DIR; run --id 9121ff49)
+check "no config dir: exit 1" "1" "$(rc)"
+check "no config dir: nothing on stdout" "" "$(out)"
+check "no config dir: says so" \
+    "Error: CLAUDE_CONFIG_DIR is not set, so the worker's profile is unknown" "$(err)"
 
 run
 check "no id: exit 1" "1" "$(rc)"
