@@ -129,6 +129,33 @@ commit_file "$repo" docs/agents/supervision.md \
 push_main "$repo"
 check "pr-merge: cites the action" "pr-merge" "$(grant pr-merge)"
 
+# issue-comment and issue-create (#110), each granted on its own.
+commit_file "$repo" docs/agents/supervision.md \
+'## Grants
+
+- issue-comment: findings from a capture
+' "grant issue-comment"
+push_main "$repo"
+check "issue-comment: cites the whole bullet" "issue-comment: findings from a capture" "$(grant issue-comment)"
+out=$(grant issue-create); rc=$?
+check "issue-comment: issue-create not granted" "1 " "$rc $out"
+commit_file "$repo" docs/agents/supervision.md \
+'## Grants
+
+- issue-create
+- pr-merge
+' "grant issue-create"
+push_main "$repo"
+check "issue-create: cites the action" "issue-create" "$(grant issue-create)"
+out=$(grant issue-comment); rc=$?
+check "issue-create: issue-comment not granted" "1 " "$rc $out"
+commit_file "$repo" docs/agents/supervision.md \
+'## Grants
+
+- pr-merge
+' "back to pr-merge only"
+push_main "$repo"
+
 # A grant on the working tree, not committed to origin/main: ignored, with a
 # note on stderr.
 printf '## Grants\n\n- push\n' >"$repo/docs/agents/supervision.md"

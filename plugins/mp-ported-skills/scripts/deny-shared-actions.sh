@@ -5,16 +5,18 @@
 #
 # A Claude Code background session (`claude --bg`) launched in auto mode --
 # /supervise's workers, or any other unattended auto-mode session -- must
-# not push, open a PR, or close an issue by itself: main has no branch
-# protection, and the auto-mode classifier only makes a judgment call, not a
-# rule. This hook refuses a Bash command that runs `git push`,
-# `gh pr create`, `gh pr merge`, `gh issue close`, or a `gh api` write that
+# not push, open a PR, or close, comment on or open an issue by itself:
+# main has no branch protection, and the auto-mode classifier only makes a
+# judgment call, not a rule. This hook refuses a Bash command that runs
+# `git push`, `gh pr create`, `gh pr merge`, `gh issue close`,
+# `gh issue comment`, `gh issue create` (#110), or a `gh api` write that
 # reaches the same actions, and points the worker at the supervisor and
 # docs/agents/supervision.md (#58) as the route to a shared action -- unless
 # `grant.sh` finds a standing grant for that same action on the committed
 # default branch, in which case this hook lets the command through. A `git
-# push` whose destination grant.sh cannot name (one of the gh api forms, or
-# a command piped into a shell) is never granted: a grant covers a form this
+# push` or gh write whose action grant.sh cannot name (a gh api form other
+# than an issue comment or a new issue, or a command piped into a shell) is
+# never granted: a grant covers a form this
 # hook can tell apart from the others, and those cannot be told apart from
 # each other, so they stay refused on purpose.
 #
@@ -201,7 +203,7 @@ if [ -z "$matched" ] && [ -n "$piped" ]; then
     has() { printf '%s\n' "$words" | grep -qx -- "$1"; }
     if has git && has push; then
         matched="git push (piped into a shell)"
-    elif has gh && { { has pr && { has create || has merge; }; } || { has issue && has close; }; }; then
+    elif has gh && { { has pr && { has create || has merge; }; } || { has issue && { has close || has comment || has create || has new; }; }; }; then
         matched="gh (piped into a shell)"
     fi
 fi
@@ -209,7 +211,7 @@ fi
 [ -n "$matched" ] || exit 0
 
 # A standing grant lets this exact form through. Only a form grant.sh can
-# name maps to an action; the gh api forms and the piped-into-a-shell
+# name maps to an action; the other gh api forms and the piped-into-a-shell
 # fallback stay refused, since a grant names an action, not an arbitrary
 # command. MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS, set by actions.sh's own
 # probe of whether a past command matches a refused form at all, skips this

@@ -108,6 +108,13 @@ check "here-string into bash" "deny" "$(decision 0 auto 'bash <<< "git push"')"
 check "gh pr create piped into bash" "deny" "$(decision 0 auto 'printf "gh pr create --fill" | bash')"
 check "gh -R before pr create" "deny" "$(decision 0 auto 'gh -R o/r pr create --fill')"
 check "gh --repo=o/r before issue close" "deny" "$(decision 0 auto 'gh --repo=o/r issue close 3')"
+check "gh issue comment" "deny" "$(decision 0 auto 'gh issue comment 104 --body-file note.md')"
+check "gh issue create" "deny" "$(decision 0 auto 'gh issue create --title x --body y --label ready-for-agent')"
+check "gh -R before issue comment" "deny" "$(decision 0 auto 'gh -R o/r issue comment 3 --body y')"
+check "gh api implicit POST of an issue comment" "deny" "$(decision 0 auto 'gh api repos/o/r/issues/104/comments -f body=x')"
+check "gh api implicit POST of a new issue" "deny" "$(decision 0 auto 'gh api repos/o/r/issues -f title=x')"
+check "gh issue comment piped into bash" "deny" "$(decision 0 auto 'printf "gh issue comment 3 --body y" | bash')"
+check "gh issue create piped into sh" "deny" "$(decision 0 auto 'echo gh issue create --fill | sh')"
 
 # A git alias in the repo's own config is resolved, since the hook runs
 # in the session's working directory.
@@ -136,7 +143,7 @@ git -C "$granted" remote add origin "$remote"
 git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
 git -C "$granted" remote set-head origin main
 mkdir -p "$granted/docs/agents"
-printf '## Grants\n\n- push\n- issue-close: routine\n' >"$granted/docs/agents/supervision.md"
+printf '## Grants\n\n- push\n- issue-close: routine\n- issue-comment\n' >"$granted/docs/agents/supervision.md"
 git -C "$granted" add docs/agents/supervision.md
 git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -m grants
 git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
@@ -150,6 +157,18 @@ check "an ungranted action in the same checkout still refuses" "deny" \
     "$(decision 0 auto 'gh pr create --title x --body y' "$granted")"
 check "gh api is never granted, even alongside a push grant" "deny" \
     "$(decision 0 auto 'gh api -X PUT repos/o/r/pulls/5/merge' "$granted")"
+# A comment or new ticket (#110), granted on its own, by gh issue or the
+# gh api write that does the same.
+check "a granted issue comment goes through" "" \
+    "$(decision 0 auto 'gh issue comment 104 --body-file note.md' "$granted")"
+check "an issue comment through gh api goes through on the same grant" "" \
+    "$(decision 0 auto 'gh api repos/o/r/issues/104/comments -f body=x' "$granted")"
+check "an ungranted issue create beside an issue-comment grant refuses" "deny" \
+    "$(decision 0 auto 'gh issue create --title x --body y' "$granted")"
+check "a new issue through gh api refuses without an issue-create grant" "deny" \
+    "$(decision 0 auto 'gh api repos/o/r/issues -f title=x' "$granted")"
+check "an issue comment piped into a shell is never granted" "deny" \
+    "$(decision 0 auto 'echo gh issue comment 3 --body y | sh' "$granted")"
 check "git -C into a granted repo goes through from elsewhere" "" \
     "$(decision 0 auto "git -C $granted push" "$outside")"
 check "git -C into an ungranted repo is refused from a granted one" "deny" \
@@ -164,6 +183,15 @@ mkdir -p "$ungranted/docs/agents"
 printf '## Grants\n\n- push\n' >"$ungranted/docs/agents/supervision.md"
 check "a grant only in the working tree, not pushed, still refuses" "deny" \
     "$(decision 0 auto 'git push' "$ungranted")"
+printf '## Grants\n\n- issue-create\n' >"$granted/docs/agents/supervision.md"
+git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "issue-create only"
+git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+check "a granted issue create goes through" "" \
+    "$(decision 0 auto 'gh issue create --title x --body y --label ready-for-agent' "$granted")"
+check "a new issue through gh api goes through on the same grant" "" \
+    "$(decision 0 auto 'gh api repos/o/r/issues -f title=x' "$granted")"
+check "an ungranted issue comment beside an issue-create grant refuses" "deny" \
+    "$(decision 0 auto 'gh issue comment 104 --body y' "$granted")"
 command rm -rf "$granted" "$remote" "$ungranted"
 
 # A command that is not a shared action goes through.
@@ -189,6 +217,7 @@ check "git commit whose message says push" "" \
 check "git status" "" "$(decision 0 auto 'git status')"
 check "a git-named command that is not git" "" "$(decision 0 auto 'mygit push')"
 check "gh issue list is not gh issue close" "" "$(decision 0 auto 'gh issue list')"
+check "gh api read of an issue's comments" "" "$(decision 0 auto 'gh api repos/o/r/issues/104/comments')"
 check "env with no git/gh is unaffected" "" "$(decision 0 auto 'env NODE_ENV=test npm test')"
 
 # Accepted over-refusal: the splitter does not parse quoting, so a

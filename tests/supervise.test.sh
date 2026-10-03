@@ -560,7 +560,7 @@ check "launch: prints the id" "c2a368ee" "$out"
 # The worker is told its Project's standing grants (#88). $project has no
 # origin, so it has none, and an ungranted action ends the turn on one line.
 no_grants="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/main, holds no standing grant.
-A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`."
+A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`."
 check "launch: flags and the command" "--bg
 --model
 claude-sonnet-5
@@ -769,14 +769,14 @@ git init -q --bare "$work/granted.git"
 git init -q -b main "$granted"
 granted_git() { git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@" >/dev/null 2>&1; }
 mkdir -p "$granted/docs/agents"
-printf '# Supervision\n\n## Grants\n\n- push: to main, once tests pass\n- issue-close\n\n## Other\n\n- pr-merge\n' \
+printf '# Supervision\n\n## Grants\n\n- push: to main, once tests pass\n- issue-close\n- issue-comment: findings\n\n## Other\n\n- pr-merge\n' \
     >"$granted/docs/agents/supervision.md"
 granted_git add docs
 granted_git commit -m grants
 granted_git remote add origin "$work/granted.git"
 granted_git push origin main
 granted_git remote set-head origin main
-printf '# Supervision\n\n## Grants\n\n- push: to main, once tests pass\n- issue-close\n- pr-create\n\n## Other\n\n- pr-merge\n' \
+printf '# Supervision\n\n## Grants\n\n- push: to main, once tests pass\n- issue-close\n- issue-comment: findings\n- pr-create\n\n## Other\n\n- pr-merge\n' \
     >"$granted/docs/agents/supervision.md"
 granted_git commit -am 'local grant'
 launch_in() { # <dir> [args...] -- launch.sh --dir <dir> with the fake claude
@@ -787,11 +787,12 @@ launch_in() { # <dir> [args...] -- launch.sh --dir <dir> with the fake claude
 }
 out=$(launch_in "$granted" --ticket 56 2>/dev/null); rc=$?
 check "launch with grants: exit 0" "0 c2a368ee" "$rc $out"
-check "launch with grants: lists the grants on origin, and only those" "You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/main (push is git push; pr-create, pr-merge and issue-close are gh pr create, gh pr merge and gh issue close):
+check "launch with grants: lists the grants on origin, and only those" "You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/main (push is git push; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create):
 - push: to main, once tests pass
 - issue-close
-A shared action one of these grants covers goes ahead without asking: when /implement reaches it, take it, and do not end your turn to ask first.
-A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`." \
+- issue-comment: findings
+A shared action one of these grants covers goes ahead without asking: when /implement or a capture reaches it, take it, and do not end your turn to ask first.
+A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`." \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d')"
 check "launch with grants: notes the grant committed only locally" "note: docs/agents/supervision.md grants pr-create on the working tree or current branch, not on the committed origin/main; ignored" \
     "$(launch_in "$granted" --ticket 56 2>&1 >/dev/null)"
@@ -1065,7 +1066,7 @@ jq -c 'select(.message.content | any(.id == "toolu_01XdkrXwv1TnYznyvLWKGaRN" or 
 check "actions: a push recorded on the result, whatever the command" "$pushed
 command succeeded ungranted: sh scripts/ship.sh -- push 66-deny-shared-actions-to-background-workers" "$(actions)"
 
-# gh writes the hook lets through are listed; reads, and a commit message
+# gh writes are listed, refused by the hook or not; reads, and a commit message
 # that names one, are not.
 {
     bash_call w1 'gh issue comment 74 --body "done"'
@@ -1075,7 +1076,7 @@ command succeeded ungranted: sh scripts/ship.sh -- push 66-deny-shared-actions-t
     bash_call r2 'gh pr list --state all'
     bash_call r3 'git commit -m "then gh issue close 74"'
 } >"$cfg/projects/-work-project/$sid.jsonl"
-check "actions: gh writes the hook allows" "$others
+check "actions: gh writes, refused or not" "$others
 command succeeded ungranted: gh issue comment 74 --body \"done\"
 command failed ungranted: gh -R o/r pr review 72 --approve
 command succeeded ungranted: cd /work/project && gh issue edit 74 --add-label ready" "$(actions)"
@@ -1244,6 +1245,33 @@ check "actions: a working-tree-only grant is reported, not silent" \
     "note docs/agents/supervision.md grants push on the working tree or current branch, not on the committed origin/main; ignored" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo2" --start "$gstart" </dev/null | grep '^note docs/agents/supervision.md grants push' | sort -u)"
 repo_git "$grepo2" checkout -q -- docs/agents/supervision.md
+
+# A worker's comment and new ticket (#110) cite their own grants, by gh
+# issue or the gh api write that does the same; with no grant, ungranted.
+{
+    bash_call c1 'gh issue comment 104 --body-file "$CLAUDE_JOB_DIR/tmp/c.md"'
+    bash_call c2 'gh issue create --title "x" --body-file b.md --label ready-for-agent'
+    bash_call c3 'gh api repos/o/r/issues/104/comments -f body=x'
+} >"$cfg/projects/-work-project/$sid.jsonl"
+new_grant_repo grepo3 '## Grants
+
+- issue-comment: findings for open tickets
+- issue-create
+'
+check "actions: a granted comment and issue create are cited" \
+    "command succeeded granted (issue-comment: findings for open tickets): gh issue comment 104 --body-file \"\$CLAUDE_JOB_DIR/tmp/c.md\"
+command succeeded granted (issue-create): gh issue create --title \"x\" --body-file b.md --label ready-for-agent
+command succeeded granted (issue-comment: findings for open tickets): gh api repos/o/r/issues/104/comments -f body=x" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo3" --start "$gstart" </dev/null | grep '^command')"
+new_grant_repo grepo4 '## Grants
+
+- issue-close
+'
+check "actions: an ungranted comment and issue create" \
+    "command succeeded ungranted: gh issue comment 104 --body-file \"\$CLAUDE_JOB_DIR/tmp/c.md\"
+command succeeded ungranted: gh issue create --title \"x\" --body-file b.md --label ready-for-agent
+command succeeded ungranted: gh api repos/o/r/issues/104/comments -f body=x" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo4" --start "$gstart" </dev/null | grep '^command')"
 
 echo "supervise: $pass passed, $fail failed"
 [ "$fail" = 0 ]

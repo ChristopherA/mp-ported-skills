@@ -29,7 +29,13 @@ sh "${CLAUDE_SKILL_DIR}/scripts/before-clear.sh" --action other </dev/null
 ```
 
 - `attended`: confirm each finding on its own, one AskUserQuestion per finding, with the fact and its intended target in the question and the options comment, new ticket and skip, the recommended route first and marked `(Recommended)`. Write each as it is confirmed, before asking the next.
-- `ungranted` (nobody can answer, such as a `/supervise` worker resumed with `/mp-ported-skills:capturing`): post nothing. List each finding in the report with its intended target and text, the same way the report lists an ungranted before-clear job.
+- `ungranted` (nobody can answer, such as a `/supervise` worker resumed with `/mp-ported-skills:capturing`): ask nothing. Check each finding by the shared action that posts it, `issue-comment` for a comment on an open ticket and `issue-create` for a new ticket:
+
+  ```sh
+  sh "${CLAUDE_SKILL_DIR}/scripts/before-clear.sh" --action <issue-comment|issue-create> </dev/null
+  ```
+
+  Post each finding that comes back `granted: <citation>`, with no confirmation, and report that line as what let it post unasked. List each that comes back `ungranted` in the report with its intended target, its text and the command that would post it, and leave it unposted. Exit 1 is a usage error or a `grant.sh` failure: post nothing, and list the finding with its command and the error. The grant read is this repo's, so a finding for a ticket in another repo is listed, never posted.
 
 Done when every item has a home or a named reason it has none. If nothing needs capturing, say so plainly.
 
@@ -51,11 +57,11 @@ Run `git status` and compare it with what this session changed. Show the user an
 
 ## 6. Report
 
-- What was routed where, what stays open, and what has no home. Name each finding with the comment or ticket it became, or, when nobody could confirm it, its intended target and text, left unposted, and each finding the user skipped.
+- What was routed where, what stays open, and what has no home. Name each finding with the comment or ticket it became, and the `granted: <citation>` line when it posted unasked; or, when nobody could confirm it and no grant covered it, its intended target, text and command, left unposted; and each finding the user skipped.
 - **One first next step**, from this repo's tracker only: the `in-motion` ticket when one is labelled, or, when it has open sub-issues, its next child as `resuming` case 1 defines it; otherwise a ticket with the `ready-for-agent` role's label string from `docs/agents/triage-labels.md`, with every blocker closed and not labelled `parked`, lowest number first, and why that one. `resuming`'s cases 1 and 2 define this rule, so an edit to one is made to both. When this repo has no tracker, there is no next ticket; list tickets this session left open in other repos as work for a session started in that repo.
 - **Safe to clear**, only when moves 1-5 actually happened. Otherwise say what is missing.
 
-Then gather the **before-clear jobs**: small actions that finish this session's work, such as a push, closing a ticket, or a plugin update after a version bump. A push, a ticket close or a PR maps to one of the four shared actions `supervise`'s `grant.sh` knows (push, pr-create, pr-merge, issue-close); a plugin update maps to none of them.
+Then gather the **before-clear jobs**: small actions that finish this session's work, such as a push, closing a ticket, or a plugin update after a version bump. A push, a ticket close or a PR maps to one of the shared actions `supervise`'s `grant.sh` knows (push, pr-create, pr-merge, issue-close); a plugin update maps to none of them.
 
 Find out whether anyone can answer a question here, from the first job:
 

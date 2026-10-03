@@ -179,7 +179,7 @@ marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 errs=$(mktemp) || fail "mktemp failed, so the grants cannot be read; not launched"
 granted=""
-for action in push pr-create pr-merge issue-close; do
+for action in push pr-create pr-merge issue-close issue-comment issue-create; do
     cited=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$action" </dev/null 2>"$errs") &&
         granted="$granted
 - $cited"
@@ -192,13 +192,13 @@ for action in push pr-create pr-merge issue-close; do
 done
 command rm -f "$errs"
 if [ -n "$granted" ]; then
-    GRANTS="You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/$default (push is git push; pr-create, pr-merge and issue-close are gh pr create, gh pr merge and gh issue close):$granted
-A shared action one of these grants covers goes ahead without asking: when /implement reaches it, take it, and do not end your turn to ask first."
+    GRANTS="You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/$default (push is git push; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create):$granted
+A shared action one of these grants covers goes ahead without asking: when /implement or a capture reaches it, take it, and do not end your turn to ask first."
 else
     GRANTS="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/$default, holds no standing grant."
 fi
 GRANTS="$GRANTS
-A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin $default\`."
+A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin $default\`."
 
 # The worker's name (#103), in characters, not bytes, whatever the locale.
 top=$(git -C "$DIR" rev-parse --show-toplevel)

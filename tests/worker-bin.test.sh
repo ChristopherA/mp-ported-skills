@@ -123,12 +123,15 @@ check "the real gh was not run" "0" "$(printf '%s\n' "$out" | grep -c 'real gh')
 check "gh pr view goes to the real gh" "real gh: pr view 5" "$(worker 0 plain 'gh pr view 5' | head -n 1)"
 check "gh api write is refused" "exit=1" "$(last "$(worker 0 plain 'gh api -X PUT repos/o/r/pulls/5/merge')")"
 check "gh api read goes through" "real gh: api repos/o/r/pulls/5" "$(worker 0 plain 'gh api repos/o/r/pulls/5' | head -n 1)"
+check "gh issue comment from a script is refused" "exit=1" "$(last "$(worker 0 plain 'sh -c "gh issue comment 104 --body x"')")"
+check "gh issue create is refused" "exit=1" "$(last "$(worker 0 plain 'gh issue create --title x --body y')")"
+check "gh api issue comment is refused" "exit=1" "$(last "$(worker 0 plain 'gh api repos/o/r/issues/104/comments -f body=x')")"
 
 # A standing grant on the committed default branch lets the matching
 # action through; gh api stays refused alongside it (#58).
 repo granted
 mkdir -p granted/docs/agents
-printf '## Grants\n\n- push\n- issue-close\n' >granted/docs/agents/supervision.md
+printf '## Grants\n\n- push\n- issue-close\n- issue-comment\n- issue-create\n' >granted/docs/agents/supervision.md
 git -C granted add docs/agents/supervision.md
 git -C granted -c commit.gpgsign=false commit -q -m grants
 git -C granted push -q origin main 2>/dev/null
@@ -149,6 +152,12 @@ check "the ungranted remote did not move" "$before" "$(git -C plain.git rev-pars
 git -C granted -c commit.gpgsign=false commit -q --allow-empty -m from-outside
 check "git -C into a granted repo goes through from an ungranted one" "exit=0" \
     "$(last "$(worker 0 plain 'git -C ../granted push -q origin main')")"
+check "a granted issue comment from a script reaches the real gh" "real gh: issue comment 104 --body x" \
+    "$(worker 0 granted 'sh -c "gh issue comment 104 --body x"' | head -n 1)"
+check "a granted issue create reaches the real gh" "real gh: issue create --title x --body y" \
+    "$(worker 0 granted 'gh issue create --title x --body y' | head -n 1)"
+check "a granted issue comment through gh api reaches the real gh" "real gh: api repos/o/r/issues/104/comments -f body=x" \
+    "$(worker 0 granted 'gh api repos/o/r/issues/104/comments -f body=x' | head -n 1)"
 check "an ungranted action beside a grant is refused" "exit=1" \
     "$(last "$(worker 0 granted 'gh pr merge 5')")"
 check "gh api is never granted" "exit=1" \

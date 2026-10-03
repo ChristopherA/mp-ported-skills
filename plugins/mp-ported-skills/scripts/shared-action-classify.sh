@@ -67,13 +67,17 @@ classify_gh() {
     pr/create) matched="gh pr create" ;;
     pr/merge) matched="gh pr merge" ;;
     issue/close) matched="gh issue close" ;;
+    issue/comment) matched="gh issue comment" ;;
+    issue/create | issue/new) matched="gh issue create" ;;
     api/*)
         # A write through the REST or GraphQL API reaches the same
         # actions: a POST, PUT, PATCH or DELETE on pulls, issues, merges,
         # contents or the git data API, or a GraphQL mutation. gh sends POST
-        # by default once a field or input is given.
+        # by default once a field or input is given. A POST to an issue's
+        # comments, or to a repo's issues, is named as the issue comment or
+        # new issue it makes, so the grant for that action covers it.
         shift
-        _cmethod="" _cfields="" _ctarget="" _cgraphql=""
+        _cmethod="" _cfields="" _ctarget="" _cgraphql="" _cissue=""
         while [ $# -gt 0 ]; do
             case "$1" in
             -X | --method) _cmethod=${2:-}; if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
@@ -82,6 +86,8 @@ classify_gh() {
             -f | -F | --field | --raw-field | --input) _cfields=yes; if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
             -f* | -F* | --field=* | --raw-field=* | --input=*) _cfields=yes; shift ;;
             graphql) _cgraphql=yes; shift ;;
+            */issues/[0-9]*/comments | */issues/[0-9]*/comments/) _ctarget=yes; _cissue=comment; shift ;;
+            repos/*/*/issues | /repos/*/*/issues | repos/*/*/issues/ | /repos/*/*/issues/) _ctarget=yes; _cissue=create; shift ;;
             *pulls* | *issues* | *merges* | *contents* | */git/*) _ctarget=yes; shift ;;
             *) shift ;;
             esac
@@ -90,6 +96,10 @@ classify_gh() {
         [ -n "$_cmethod" ] || { [ -n "$_cfields" ] && _cmethod=POST; } || _cmethod=GET
         if [ -n "$_cgraphql" ]; then
             case "${classify_text:-}" in *mutation*) matched="gh api graphql mutation" ;; esac
+        elif [ -n "$_ctarget" ] && [ "$_cmethod" = POST ] && [ "$_cissue" = comment ]; then
+            matched="gh api POST (issue comment)"
+        elif [ -n "$_ctarget" ] && [ "$_cmethod" = POST ] && [ "$_cissue" = create ]; then
+            matched="gh api POST (issue create)"
         elif [ -n "$_ctarget" ] && [ "$_cmethod" != GET ]; then
             matched="gh api $_cmethod"
         fi
@@ -98,8 +108,9 @@ classify_gh() {
 }
 
 # The action a grant names for a matched form, or nothing for a form no
-# grant covers: the gh api forms and the piped-into-a-shell fallback, which
-# do not say which of the four actions they reach.
+# grant covers: the piped-into-a-shell fallback and the other gh api forms,
+# which do not say which action they reach. The two gh api POSTs above that
+# name an issue comment or a new issue map to that action (#110).
 grant_action() { # <matched>
     case "$1" in
     "git push (piped"* | "gh (piped"*) ;;
@@ -107,5 +118,7 @@ grant_action() { # <matched>
     "gh pr create"*) echo pr-create ;;
     "gh pr merge"*) echo pr-merge ;;
     "gh issue close"*) echo issue-close ;;
+    "gh issue comment"* | "gh api POST (issue comment)") echo issue-comment ;;
+    "gh issue create"* | "gh api POST (issue create)") echo issue-create ;;
     esac
 }

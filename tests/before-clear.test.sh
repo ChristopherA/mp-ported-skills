@@ -85,6 +85,28 @@ out=$(bc 0 issue-close); rc=$?
 check "unattended, ungranted: exit 0" "0" "$rc"
 check "unattended, ungranted: prints ungranted" "ungranted" "$out"
 
+# A capture's findings (#110): a comment on an open ticket maps to
+# issue-comment and a new ticket to issue-create, each granted or not on
+# its own, the same as a push. Attended, both still ask.
+for action in issue-comment issue-create; do
+    out=$(bc 0 "$action"); rc=$?
+    check "unattended, no $action grant: exit 0" "0" "$rc"
+    check "unattended, no $action grant: ungranted" "ungranted" "$out"
+    check "attended, $action: still asks" "attended" "$(bc 1 "$action")"
+done
+commit_file "$repo" docs/agents/supervision.md '## Grants
+
+- push
+- issue-comment: findings for open tickets
+- issue-create
+' "grant the capture's findings"
+push_main "$repo"
+out=$(bc 0 issue-comment); rc=$?
+check "unattended, issue-comment granted: exit 0" "0" "$rc"
+check "unattended, issue-comment granted: cites the grant" "granted: issue-comment: findings for open tickets" "$out"
+check "unattended, issue-create granted: cites the grant" "granted: issue-create" "$(bc 0 issue-create)"
+check "attended, issue-comment granted: still asks" "attended" "$(bc 1 issue-comment)"
+
 # Unattended, a pushed grant exists but on another ref: a working-tree-only
 # grant is ignored the way grant.sh ignores it, with the same note, and the
 # job still reads ungranted, not granted.

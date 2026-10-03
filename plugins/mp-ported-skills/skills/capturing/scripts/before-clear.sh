@@ -2,7 +2,10 @@
 # before-clear.sh -- whether capturing's before-clear question can be asked,
 # and whether one job in it may run unasked (#89). Capturing's sweep also
 # calls it with --action other to learn whether its findings can be
-# confirmed with the user, or only listed in the report (#105).
+# confirmed with the user (#105), then once per finding, with issue-comment
+# for a comment on an open ticket or issue-create for a new ticket, to
+# learn whether that finding may be posted unasked or only listed in the
+# report (#110).
 #
 # A supervised worker resumed with `/mp-ported-skills:capturing` has nobody
 # to answer the before-clear question, and blocked on it the way a worker
@@ -19,9 +22,9 @@
 # nothing in supervision.md for it to match.
 #
 # Usage:
-#   before-clear.sh --action <push|pr-create|pr-merge|issue-close|other> [--dir DIR]
+#   before-clear.sh --action <push|pr-create|pr-merge|issue-close|issue-comment|issue-create|other> [--dir DIR]
 #
-# DIR defaults to the working directory, and is read only for the four
+# DIR defaults to the working directory, and is read only for the six
 # shared actions; `other` needs no git checkout.
 #
 # Prints:
@@ -45,7 +48,7 @@ while [ $# -gt 0 ]; do
         --action) need_value "$@"; ACTION="$2"; shift 2 ;;
         --dir)    need_value "$@"; DIR="$2"; shift 2 ;;
         --help)
-            printf 'Usage: before-clear.sh --action <push|pr-create|pr-merge|issue-close|other> [--dir DIR]\n'
+            printf 'Usage: before-clear.sh --action <push|pr-create|pr-merge|issue-close|issue-comment|issue-create|other> [--dir DIR]\n'
             printf 'Prints attended, "granted: <citation>", or ungranted.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
@@ -53,9 +56,9 @@ while [ $# -gt 0 ]; do
 done
 fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 case "$ACTION" in
-    push | pr-create | pr-merge | issue-close | other) ;;
+    push | pr-create | pr-merge | issue-close | issue-comment | issue-create | other) ;;
     '') fail "--action is required" ;;
-    *) fail "--action must be push, pr-create, pr-merge, issue-close or other, not '$ACTION'" ;;
+    *) fail "--action must be push, pr-create, pr-merge, issue-close, issue-comment, issue-create or other, not '$ACTION'" ;;
 esac
 
 if [ "${CLAUDE_CODE_SESSION_ATTENDED:-1}" != 0 ]; then

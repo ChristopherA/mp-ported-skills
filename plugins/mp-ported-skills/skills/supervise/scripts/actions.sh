@@ -41,7 +41,8 @@
 # `note` line naming it as ignored, not silently treated as absent.
 # A branch line's action is always push. A command line's action is a
 # light word-token
-# guess (push, pr-create, pr-merge or issue-close) from its text and the
+# guess (push, pr-create, pr-merge, issue-close, issue-comment or
+# issue-create) from its text and the
 # recorded op, good enough to cite a grant, not an enforcement check; a gh
 # write the hook's own scan would not single out, or one this guess cannot
 # name, stays ungranted. A `children` entry -- a PR or issue the worker's
@@ -205,10 +206,14 @@ calls() {
                   + (if $ops != "" then " -- " + $ops else "" end))}' "$1" 2>/dev/null
 }
 
-# action_for <cmd> <ops>: push, pr-create, pr-merge, issue-close, or empty.
-# A light word-token heuristic for citing a grant on the report line, not an
-# enforcement check -- deny-shared-actions.sh is the enforcement layer, and
-# this only has to agree with it closely enough to cite the right grant.
+# action_for <cmd> <ops>: push, pr-create, pr-merge, issue-close,
+# issue-comment, issue-create, or empty. A light word-token heuristic for
+# citing a grant on the report line, not an enforcement check --
+# deny-shared-actions.sh is the enforcement layer, and this only has to
+# agree with it closely enough to cite the right grant. A `gh api` call
+# naming an issue's comments reads as issue-comment (#110); one creating an
+# issue through gh api is not told apart from the other issue writes, and
+# stays ungranted.
 action_for() {
     words=$(printf '%s %s' "$1" "$2" | tr -c 'A-Za-z0-9_-' '\n')
     has() { printf '%s\n' "$words" | grep -qx -- "$1"; }
@@ -216,6 +221,9 @@ action_for() {
     elif has gh && has pr && has create; then echo pr-create
     elif has gh && has pr && has merge; then echo pr-merge
     elif has gh && has issue && has close; then echo issue-close
+    elif has gh && has issue && has comment; then echo issue-comment
+    elif has gh && has issue && { has create || has new; }; then echo issue-create
+    elif has gh && has api && has issues && has comments; then echo issue-comment
     else echo ""
     fi
 }

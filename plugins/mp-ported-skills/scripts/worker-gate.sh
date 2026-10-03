@@ -8,7 +8,7 @@
 # Bash command's text, this reads the arguments git or gh was actually
 # started with, so a push inside a script, behind a variable or under
 # `find -exec` is caught too. Both classify with shared-action-classify.sh
-# and ask skills/supervise/scripts/grant.sh about the same four actions.
+# and ask skills/supervise/scripts/grant.sh about the same actions.
 #
 # Outside an unattended session (CLAUDE_CODE_SESSION_ATTENDED other than 0,
 # or unset) it runs the real program untouched. A refusal prints the reason

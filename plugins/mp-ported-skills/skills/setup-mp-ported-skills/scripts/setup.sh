@@ -296,7 +296,8 @@ itself one by editing this file.
 ## Grants
 
 <!-- One grant per line, as `- <action>` or `- <action>: <note>`.
-     <action> is push, pr-create, pr-merge or issue-close.
+     <action> is push, pr-create, pr-merge, issue-close, issue-comment
+     or issue-create.
      Example: `- push: release branches only` -->
 DOC
     echo "  + docs/agents/supervision.md  written, in project $proj"
