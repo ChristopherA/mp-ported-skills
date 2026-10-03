@@ -155,18 +155,12 @@ gh_write_words() {
     done
     [ "${1##*/}" = gh ] || return 0
     shift
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            -R | --repo) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
-            --repo=* | -R?*) shift ;;
-            *) break ;;
-        esac
-    done
-    case "${1:-}" in
+    gh_words "$@"
+    case "$gh_sub" in
         pr | issue) ;;
         *) return 0 ;;
     esac
-    case "${2:-}" in
+    case "$gh_act" in
         '' | -* | view | list | status | diff | checks | checkout) return 0 ;;
     esac
     echo yes

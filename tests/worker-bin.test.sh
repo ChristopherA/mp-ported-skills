@@ -126,6 +126,14 @@ check "gh api read goes through" "real gh: api repos/o/r/pulls/5" "$(worker 0 pl
 check "gh issue comment from a script is refused" "exit=1" "$(last "$(worker 0 plain 'sh -c "gh issue comment 104 --body x"')")"
 check "gh issue create is refused" "exit=1" "$(last "$(worker 0 plain 'gh issue create --title x --body y')")"
 check "gh api issue comment is refused" "exit=1" "$(last "$(worker 0 plain 'gh api repos/o/r/issues/104/comments -f body=x')")"
+# A repo flag is read wherever gh takes one (#119).
+check "gh -R before pr merge is refused" "exit=1" "$(last "$(worker 0 plain 'sh -c "gh -R o/r pr merge 5"')")"
+check "gh pr -R o/r merge is refused" "exit=1" "$(last "$(worker 0 plain 'sh -c "gh pr -R o/r merge 5"')")"
+check "gh issue --repo=o/r close is refused" "exit=1" "$(last "$(worker 0 plain 'sh -c "gh issue --repo=o/r close 3"')")"
+check "gh issue create --repo o/r is refused" "exit=1" "$(last "$(worker 0 plain 'sh -c "gh issue create --title x --repo o/r"')")"
+check "gh issue -R=o/r comment is refused" "exit=1" "$(last "$(worker 0 plain 'sh -c "gh issue -R=o/r comment 3 --body x"')")"
+check "gh issue -R o/r view goes to the real gh" "real gh: issue -R o/r view 3" \
+    "$(worker 0 plain 'gh issue -R o/r view 3' | head -n 1)"
 
 # A standing grant on the committed default branch lets the matching
 # action through; gh api stays refused alongside it (#58).
@@ -164,6 +172,10 @@ check "a granted repo's issue comment --edit-last is refused" "exit=1" \
     "$(last "$(worker 0 granted 'gh issue comment 104 --edit-last --body x')")"
 check "a granted repo's issue comment --delete-last is refused" "exit=1" \
     "$(last "$(worker 0 granted 'sh -c "gh issue comment 104 --delete-last --yes"')")"
+check "a granted repo's gh issue -R o/r comment reaches the real gh" "real gh: issue -R o/r comment 3 --body x" \
+    "$(worker 0 granted 'sh -c "gh issue -R o/r comment 3 --body x"' | head -n 1)"
+check "a granted repo's gh issue -R o/r comment --edit-last is refused" "exit=1" \
+    "$(last "$(worker 0 granted 'sh -c "gh issue -R o/r comment 3 --edit-last"')")"
 check "a granted repo's REST PATCH of an issue comment is refused" "exit=1" \
     "$(last "$(worker 0 granted 'gh api -X PATCH repos/o/r/issues/comments/99 -f body=x')")"
 check "a granted repo's REST DELETE of an issue comment is refused" "exit=1" \

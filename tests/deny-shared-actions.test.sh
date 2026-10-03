@@ -116,6 +116,20 @@ check "gh api implicit POST of a new issue" "deny" "$(decision 0 auto 'gh api re
 check "gh issue comment piped into bash" "deny" "$(decision 0 auto 'printf "gh issue comment 3 --body y" | bash')"
 check "gh issue create piped into sh" "deny" "$(decision 0 auto 'echo gh issue create --fill | sh')"
 
+# A repo flag is read wherever gh takes one: before the subcommand,
+# between it and its action, or after the action (#119), in each spelling.
+for form in 'issue close 3' 'issue comment 3 --body y' 'issue create --title x' 'issue new --title x' \
+    'pr create --fill' 'pr merge 5'; do
+    sub=${form%% *} rest=${form#* }
+    for repo in '-R o/r' '-R=o/r' '--repo o/r' '--repo=o/r'; do
+        check "gh $repo $form" "deny" "$(decision 0 auto "gh $repo $form")"
+        check "gh $sub $repo $rest" "deny" "$(decision 0 auto "gh $sub $repo $rest")"
+        check "gh $form $repo" "deny" "$(decision 0 auto "gh $form $repo")"
+    done
+done
+check "gh issue -R o/r view is a read" "" "$(decision 0 auto 'gh issue -R o/r view 3')"
+check "gh pr --repo o/r list is a read" "" "$(decision 0 auto 'gh pr --repo o/r list')"
+
 # A git alias in the repo's own config is resolved, since the hook runs
 # in the session's working directory.
 scratch=$(mktemp -d)
@@ -198,6 +212,14 @@ check "a REST DELETE of an issue comment is not the comment grant" "deny" \
     "$(decision 0 auto 'gh api --method DELETE repos/o/r/issues/comments/99' "$granted")"
 check "a GraphQL addComment is not the comment grant" "deny" \
     "$(decision 0 auto "gh api graphql -f query='mutation { addComment(input: {subjectId: \"I_1\", body: \"y\"}) { clientMutationId } }'" "$granted")"
+# A repo flag after the subcommand changes neither the grant nor its limit
+# (#119).
+check "gh issue -R o/r comment goes through on the comment grant" "" \
+    "$(decision 0 auto 'gh issue -R o/r comment 3 --body x' "$granted")"
+check "gh issue -R o/r comment --edit-last is not the comment grant" "deny" \
+    "$(decision 0 auto 'gh issue -R o/r comment 3 --edit-last' "$granted")"
+check "gh issue comment --delete-last --repo=o/r is not the comment grant" "deny" \
+    "$(decision 0 auto 'gh issue comment 3 --delete-last --repo=o/r --yes' "$granted")"
 check "git -C into a granted repo goes through from elsewhere" "" \
     "$(decision 0 auto "git -C $granted push" "$outside")"
 check "git -C into an ungranted repo is refused from a granted one" "deny" \

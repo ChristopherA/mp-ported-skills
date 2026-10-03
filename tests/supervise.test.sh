@@ -1259,6 +1259,10 @@ repo_git "$grepo2" checkout -q -- docs/agents/supervision.md
     bash_call c8 'gh api -X PATCH repos/o/r/issues/comments/99 -f body=x'
     bash_call c9 "gh api graphql -f query='mutation { addComment(input: {subjectId: 1, body: 2}) { clientMutationId } }'"
     bash_call c10 "gh api graphql -f query='mutation { createIssue(input: {repositoryId: 1, title: 2}) { issue { number } } }'"
+    bash_call c11 'gh issue -R o/r comment 104 --body x'
+    bash_call c12 'gh issue -R o/r comment 104 --edit-last'
+    bash_call c13 'gh issue create --title y --repo=o/r'
+    bash_call c14 'gh issue -R o/r view 104'
 } >"$cfg/projects/-work-project/$sid.jsonl"
 new_grant_repo grepo3 '## Grants
 
@@ -1275,7 +1279,10 @@ command succeeded ungranted: gh issue comment 104 --edit-last --body x
 command succeeded ungranted: gh issue comment 104 --delete-last --yes
 command succeeded ungranted: gh api -X PATCH repos/o/r/issues/comments/99 -f body=x
 command succeeded ungranted: gh api graphql -f query='mutation { addComment(input: {subjectId: 1, body: 2}) { clientMutationId } }'
-command succeeded ungranted: gh api graphql -f query='mutation { createIssue(input: {repositoryId: 1, title: 2}) { issue { number } } }'" \
+command succeeded ungranted: gh api graphql -f query='mutation { createIssue(input: {repositoryId: 1, title: 2}) { issue { number } } }'
+command succeeded granted (issue-comment: findings for open tickets): gh issue -R o/r comment 104 --body x
+command succeeded ungranted: gh issue -R o/r comment 104 --edit-last
+command succeeded granted (issue-create): gh issue create --title y --repo=o/r" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo3" --start "$gstart" </dev/null | grep '^command')"
 new_grant_repo grepo4 '## Grants
 
@@ -1291,7 +1298,10 @@ command succeeded ungranted: gh issue comment 104 --edit-last --body x
 command succeeded ungranted: gh issue comment 104 --delete-last --yes
 command succeeded ungranted: gh api -X PATCH repos/o/r/issues/comments/99 -f body=x
 command succeeded ungranted: gh api graphql -f query='mutation { addComment(input: {subjectId: 1, body: 2}) { clientMutationId } }'
-command succeeded ungranted: gh api graphql -f query='mutation { createIssue(input: {repositoryId: 1, title: 2}) { issue { number } } }'" \
+command succeeded ungranted: gh api graphql -f query='mutation { createIssue(input: {repositoryId: 1, title: 2}) { issue { number } } }'
+command succeeded ungranted: gh issue -R o/r comment 104 --body x
+command succeeded ungranted: gh issue -R o/r comment 104 --edit-last
+command succeeded ungranted: gh issue create --title y --repo=o/r" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo4" --start "$gstart" </dev/null | grep '^command')"
 
 echo "supervise: $pass passed, $fail failed"

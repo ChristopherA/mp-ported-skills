@@ -54,16 +54,26 @@ classify_git() {
     fi
 }
 
-classify_gh() {
-    # A repo given before the subcommand: `gh -R o/r pr create`.
-    while [ $# -gt 0 ]; do
+# gh_words <args after "gh">: sets gh_sub and gh_act to the subcommand and
+# its action, passing over a repo flag (-R <repo>, -R=<repo>, -R<repo>,
+# --repo <repo>, --repo=<repo>) wherever gh takes one: before the
+# subcommand, between it and its action, or after the action (#119).
+# actions.sh reads gh commands with it too.
+gh_words() {
+    gh_sub="" gh_act=""
+    while [ $# -gt 0 ] && [ -z "$gh_act" ]; do
         case "$1" in
-        -R | --repo) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
-        --repo=* | -R?*) shift ;;
-        *) break ;;
+        -R | --repo) if [ $# -ge 2 ]; then shift 2; else shift; fi; continue ;;
+        --repo=* | -R?*) shift; continue ;;
         esac
+        if [ -z "$gh_sub" ]; then gh_sub=$1; else gh_act=$1; fi
+        shift
     done
-    case "${1:-}/${2:-}" in
+}
+
+classify_gh() {
+    gh_words "$@"
+    case "$gh_sub/$gh_act" in
     pr/create) matched="gh pr create" ;;
     pr/merge) matched="gh pr merge" ;;
     issue/close) matched="gh issue close" ;;
@@ -71,9 +81,10 @@ classify_gh() {
         # The comment grant posts a new comment only (#113). Editing or
         # deleting the last one is named apart, so no grant covers it. Any
         # word that is the flag counts, even one gh would read as a body;
-        # the first one found names the form, and both are refused.
+        # the first one found names the form, and both are refused. Every
+        # word is looked at, the ones before the action included, since a
+        # repo flag may stand between the subcommand and its action.
         matched="gh issue comment"
-        shift 2
         for _carg in "$@"; do
             case "$_carg" in
             --edit-last | --edit-last=*) matched="gh issue comment (edit)"; break ;;
@@ -94,8 +105,13 @@ classify_gh() {
         # header's value -- leaves it a plain gh api write, never granted,
         # as is a PATCH or DELETE of a comment (#113). A GraphQL mutation is
         # never granted either, addComment and createIssue included; ADR
-        # 0005 says why.
-        shift
+        # 0005 says why. The words after `api`, past any repo flag before
+        # it, are the request.
+        while [ $# -gt 0 ] && [ "$1" != api ]; do
+            case "$1" in -R | --repo) shift ;; esac
+            [ $# -gt 0 ] && shift
+        done
+        [ $# -gt 0 ] && shift
         _cmethod="" _cfields="" _ctarget="" _cgraphql="" _cissue="" _cwords=0
         while [ $# -gt 0 ]; do
             case "$1" in
