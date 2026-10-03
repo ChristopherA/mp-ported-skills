@@ -77,12 +77,13 @@ It prints one line for each PR or issue in the worker's job, each remote branch 
 - **`gone`**: the id; the session was removed and there is nothing to open. Release its marker (below).
 - **`unknown ...`**, or exit 124: the state, the id, and its last output (below). Exit 1: `claude agents` could not be read, so the worker's state is unknown; report that, never that it is gone.
 
-To read a worker's last output, take the last text it wrote from its transcript, found by the job's `sessionId` in any project folder, since a worker that entered a worktree has its transcript moved:
+To read a worker's last output, print its last message from its transcript, which `last-message.sh` finds by the job's `sessionId` in any project folder, since a worker that entered a worktree has its transcript moved:
 
 ```sh
-sid=$(claude agents --json --all </dev/null | jq -r '.[] | select((.id // "") | startswith("ID")) | .sessionId // empty')
-jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text' "$CLAUDE_CONFIG_DIR"/projects/*/"$sid".jsonl | tail -40
+sh "${CLAUDE_SKILL_DIR}/scripts/last-message.sh" --id ID </dev/null
 ```
+
+`--count N` prints its last N messages, oldest first. A `note:` line says when the message may not be the worker's last word: its turn ended with background agents pending, whose reports start another turn, so the message is often an interim "waiting for agents" note; or its turn has not ended. Report it as such, not as the worker's summary. Exit 1, with nothing printed but an `Error:` line, means no message was read (no such worker, no transcript, or none written yet); report that, never an empty output as the worker's.
 
 Not `claude logs ID`: it prints the worker's raw terminal stream, cursor moves and colour codes included, which reads as noise (`[42B[38;2;215;119;87m✻`) rather than as the worker's words.
 

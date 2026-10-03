@@ -11,6 +11,8 @@ Each file opens with the transcript's first 12 rows: the header rows and the `/i
 | `waiting-on-agents.jsonl` | a `turn_duration` row with `pendingBackgroundAgentCount: 2`: the turn ended while two review agents ran, and their reports started the next turn |
 | `turn-ended.jsonl` | the final summary and a `turn_duration` row with no pending agents, then `last-prompt` and `cost-state` |
 
+`tests/supervise-last-message.test.sh` reads `turn-ended.jsonl`, `waiting-on-agents.jsonl` and `just-launched.jsonl` for the `last-message.sh` tests, filling each text block with a marker naming its row, since the fixtures keep no text.
+
 The recorded worker entered a worktree during its run, and its whole transcript, including the rows written before that, was moved to the worktree's project folder. The rows after the move carry the worktree's `cwd`.
 
 `shared-actions.jsonl` is cut differently, from the `/implement #66` worker that opened PR #72 (Claude Code 2.1.284), for the `actions.sh` tests. It holds only the rows for six Bash calls and their results, in order: a `gh issue view`, a `git commit` whose message names `git push`, the `git push origin HEAD:main` the auto-mode classifier refused, the `git push -u` of its own branch, a `gh pr create` refused for its runtime variable, and the `gh pr create` that opened PR #72. Each row keeps `type`, `isSidechain`, the message's role, each tool call's `id`, `name` and `command`, each result's `tool_use_id`, `is_error` and the first line of its content (the classifier's refusal cut to its first sentence), and the result's `toolUseResult.gitOperation`, which Claude Code records for a commit, push or PR. Home paths become `/work/project` and `/work/config`.
