@@ -5,7 +5,8 @@
 # PATH that serves fixture JSON: no issue-tracker config, `gh` failing (report
 # says unreached), a hung `gh` (report says timed out within its budget), each
 # of the seven weighing cases, a ticket labelled in-motion or parked, the next
-# child of an in-motion parent, and label strings read from
+# child of an in-motion parent, the /supervise offer beside /implement (with a
+# fake `claude` serving `claude agents`), and label strings read from
 # triage-labels.md. Also checks that no plugin hook runs state.sh. Touches
 # nothing outside its own mktemp directory.
 #
@@ -55,9 +56,20 @@ case "$1 $2" in
 esac
 EOF
 chmod +x "$work/bin/gh"
+cat >"$work/bin/claude" <<'EOF'
+#!/bin/sh
+# Serves `claude agents --json --all` from a fixture; anything else fails.
+[ "$*" = "agents --json --all" ] || exit 1
+[ -n "${FAKE_CLAUDE_FAIL:-}" ] && { echo "claude: failed" >&2; exit 1; }
+cat "$FAKE_GH/agents.json"
+EOF
+chmod +x "$work/bin/claude"
 PATH="$work/bin:$PATH"
 export FAKE_GH="$work/gh"
-unset FAKE_GH_FAIL FAKE_GH_SLEEP MP_RESUME_BUDGET CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ATTENDED 2>/dev/null || true
+printf '[]' >"$FAKE_GH/agents.json"
+# state.sh reads `claude agents`; never let it reach the real one.
+[ "$(command -v claude)" = "$work/bin/claude" ] || { echo "FAIL fake claude is not first on PATH"; exit 1; }
+unset FAKE_GH_FAIL FAKE_CLAUDE_FAIL FAKE_GH_SLEEP MP_RESUME_BUDGET CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ATTENDED 2>/dev/null || true
 
 issues() { printf '%s' "$1" >"$FAKE_GH/issues.json"; }
 prs() { printf '%s' "$1" >"$FAKE_GH/prs.json"; }
@@ -292,6 +304,83 @@ g push -q
 g checkout -q -b feature
 check "case 1: off the default branch" "1 work in flight: on feature not main" "$(next "$(run)")"
 g checkout -q main
+
+# --- the /supervise offer ---------------------------------------------------
+# When the next step is /implement #N, state.sh says whether /supervise would
+# take it: launch.sh's entry checks (default branch, clean tree, no other live
+# background session) and step.sh's (nothing else in flight).
+sup() { printf '%s\n' "$1" | sed -n 's/^supervise: //p'; }
+real=$(cd "$proj" && pwd -P)
+offer="/mp-ported-skills:supervise $proj --model claude-opus-5-5 --effort medium (you type it; user-invoked)"
+agents() { printf '%s' "$1" >"$FAKE_GH/agents.json"; }
+row() { # <id> <state> <pid or null> [cwd] [kind]
+    jq -nc --arg id "$1" --arg s "$2" --argjson pid "$3" --arg cwd "${4:-$real}" --arg k "${5:-background}" \
+        '{id: $id, kind: $k, cwd: $cwd, state: $s, pid: $pid}'
+}
+
+issues "$(list "$(issue 52 ready-for-agent)")"
+out=$(run)
+check "supervise: offered for case 2 on a clean default branch" "$offer" "$(sup "$out")"
+check "supervise: next line unchanged" "2 /implement #52 (you type it; user-invoked): #52 t52" "$(next "$out")"
+check "supervise: the folder as given, . by default" \
+    "/mp-ported-skills:supervise . --model claude-opus-5-5 --effort medium (you type it; user-invoked)" \
+    "$(sup "$(cd "$proj" && sh "$state" </dev/null 2>&1)")"
+agents "$(list "$(row aa11 stopped null)" "$(row bb22 done null)" "$(row cc33 working 12 /elsewhere)" \
+    "$(row dd44 working 13 "$real" interactive)")"
+check "supervise: stopped, finished, elsewhere and interactive sessions do not count" "$offer" "$(sup "$(run)")"
+agents "$(list "$(row aa11 stopped null)" "$(row ee55 working 14)" "$(row ff66 done 15)")"
+check "supervise: not offered beside a live background session" \
+    "not offered: another live background session in $real: ee55 (working), ff66 (done)" "$(sup "$(run)")"
+agents '[]'
+check "supervise: not offered when claude agents fails" \
+    "not offered: claude agents --json --all failed, so other sessions in $real are unknown" \
+    "$(sup "$(FAKE_CLAUDE_FAIL=1 run)")"
+agents 'not json'
+check "supervise: not offered when claude agents prints no list" \
+    "not offered: claude agents --json --all printed no list jq could read, so other sessions in $real are unknown" \
+    "$(sup "$(run)")"
+agents '[]'
+
+# An in-motion parent whose next child is ready-for-agent is also /implement.
+issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)")"
+list "$(issue 52 ready-for-agent)" >"$FAKE_GH/sub-24.json"
+check "supervise: offered for an in-motion parent's next child" "$offer" "$(sup "$(run)")"
+echo x >"$proj/scratch"
+out=$(run)
+check "supervise: dirty tree, next is still the child" "1 work in flight: 1 uncommitted paths, in motion #24 t24; next child #52 (ready-for-agent, /implement #52, you type it; user-invoked): t52" "$(next "$out")"
+check "supervise: not offered on a dirty tree" "not offered: 1 uncommitted paths; commit or clear them first" "$(sup "$out")"
+command rm -f "$proj/scratch"
+g checkout -q -b side
+check "supervise: not offered off the default branch" "not offered: on side, not the default branch main" "$(sup "$(run)")"
+g checkout -q main
+g commit -q --allow-empty -m wip2
+check "supervise: not offered with unpushed commits" "not offered: 1 unpushed commits; push them first" "$(sup "$(run)")"
+g push -q
+prs '[{"number":61,"title":"own pr","headRefName":"y","isCrossRepository":false}]'
+check "supervise: not offered with an open PR" "not offered: open PR #61 own pr [y]; settle it first" "$(sup "$(run)")"
+prs '[]'
+
+# step.sh takes only the first in-motion ticket's child.
+issues "$(list "$(issue 23 ready-for-human,in-motion)" "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)")"
+check "supervise: not offered for a second in-motion ticket's child" \
+    "not offered: other work in flight: in motion #23 t23; #24 t24; next child #52 (ready-for-agent, /implement #52, you type it; user-invoked): t52" \
+    "$(sup "$(run)")"
+issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)")"
+
+# Any other step: no offer at all.
+list "$(issue 26 ready-for-human)" >"$FAKE_GH/sub-24.json"
+check "supervise: no offer when the next child is by hand" "" "$(sup "$(run)")"
+command rm -f "$FAKE_GH/sub-24.json"
+check "supervise: no offer for an in-motion ticket" "" "$(sup "$(run)")"
+issues "$(list "$(issue 31 needs-triage)" "$(issue 52 ready-for-agent)")"
+out=$(run)
+check "supervise: still offered when the runner-up is not /implement" "$offer" "$(sup "$out")"
+issues "$(list "$(issue 81 ready-for-human)" "$(issue 31 needs-triage)")"
+check "supervise: no offer for triage" "" "$(sup "$(run)")"
+issues '[]'
+check "supervise: no offer when nothing is in motion" "" "$(sup "$(run)")"
+check "supervise: no offer when the tracker is unreached" "" "$(sup "$(FAKE_GH_FAIL=1 run)")"
+issues "$saved_issues"
 
 # --- label strings from triage-labels.md ------------------------------------
 sed 's/^\(| `ready-for-agent` *| \)`ready-for-agent`/\1`AFK`/' "$root/docs/agents/triage-labels.md" >"$proj/docs/agents/triage-labels.md"

@@ -16,6 +16,8 @@
 set -u
 
 dir=${1:-$PWD}
+# The folder as the caller named it, for the /supervise command.
+shown=${1:-.}
 case ${MP_RESUME_BUDGET:-} in
     '' | *[!0-9]*) budget=30 ;;
     *) budget=$MP_RESUME_BUDGET ;;
@@ -306,6 +308,42 @@ gather() {
         else add_case "7 nothing in motion"; add_case "$ideas"; fi
     fi
     printf '%s' "$cases" | sed -n '1s/^/next: /p; 2s/^/runner-up: /p'
+
+    # --- the /supervise offer (#111) ---------------------------------------
+    # When the next step is /implement #N, whether /supervise would run it:
+    # step.sh takes it only with nothing else in flight (its patterns are
+    # copied here), and launch.sh only on the default branch, with a clean
+    # tree and no other live background session in the folder.
+    first=$(printf '%s' "$cases" | sed -n 1p)
+    impl=$(printf '%s\n' "$first" | sed -n \
+        -e 's/^2 \/implement #\([0-9][0-9]*\) .*/\1/p' \
+        -e 's/^1 work in flight: .*; next child #\([0-9][0-9]*\) ([^,)]*, \/implement #\1, .*/\1/p')
+    [ -n "$impl" ] || return 0
+    stepped=$(printf '%s\n' "$first" | sed -n \
+        -e 's/^2 \/implement #\([0-9][0-9]*\) .*/\1/p' \
+        -e 's/^1 work in flight: in motion #[0-9][0-9]* [^;]*; next child #\([0-9][0-9]*\) ([^,)]*, \/implement #\1, .*/\1/p')
+    not=
+    if [ "$dirty" -gt 0 ]; then not="$dirty uncommitted paths; commit or clear them first"
+    elif [ "$branch" != "$default" ]; then not="on $branch, not the default branch $default"
+    elif [ "$unpushed" -gt 0 ]; then not="$unpushed unpushed commits; push them first"
+    elif [ -n "${own:-}" ]; then not="open PR $own; settle it first"
+    elif [ -z "$stepped" ]; then not="other work in flight: ${inflight#, }"
+    else
+        here=$(pwd -P)
+        # A row is live unless stopped, or done with no pid, as in launch.sh.
+        if ! list=$(claude agents --json --all </dev/null 2>/dev/null); then
+            not="claude agents --json --all failed, so other sessions in $here are unknown"
+        elif ! others=$(printf '%s' "$list" | jq -er --arg d "$here" '
+            [.[] | select(.kind == "background" and .cwd == $d and .state != "stopped"
+                          and (.state != "done" or .pid != null))
+             | "\(.id) (\(.state // "unknown"))"] | join(", ")' 2>/dev/null); then
+            not="claude agents --json --all printed no list jq could read, so other sessions in $here are unknown"
+        elif [ -n "$others" ]; then
+            not="another live background session in $here: $others"
+        fi
+    fi
+    if [ -n "$not" ]; then echo "supervise: not offered: $not"
+    else echo "supervise: /mp-ported-skills:supervise $shown --model claude-opus-5-5 --effort medium $you_type"; fi
 }
 
 # gather runs in the background so the watchdog can stop a hung `gh`. The EXIT
