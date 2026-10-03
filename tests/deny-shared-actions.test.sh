@@ -129,6 +129,8 @@ for form in 'issue close 3' 'issue comment 3 --body y' 'issue create --title x' 
 done
 check "gh issue -R o/r view is a read" "" "$(decision 0 auto 'gh issue -R o/r view 3')"
 check "gh pr --repo o/r list is a read" "" "$(decision 0 auto 'gh pr --repo o/r list')"
+check "gh -R o/r api write is still read past the flag" "deny" "$(decision 0 auto 'gh -R o/r api -X PUT repos/o/r/pulls/5/merge')"
+check "gh --repo o/r api read is still a read" "" "$(decision 0 auto 'gh --repo o/r api repos/o/r/pulls/5')"
 
 # A git alias in the repo's own config is resolved, since the hook runs
 # in the session's working directory.
