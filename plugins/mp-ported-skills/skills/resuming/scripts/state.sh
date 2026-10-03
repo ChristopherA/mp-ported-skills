@@ -319,30 +319,30 @@ gather() {
         -e 's/^2 \/implement #\([0-9][0-9]*\) .*/\1/p' \
         -e 's/^1 work in flight: .*; next child #\([0-9][0-9]*\) ([^,)]*, \/implement #\1, .*/\1/p')
     [ -n "$impl" ] || return 0
-    stepped=$(printf '%s\n' "$first" | sed -n \
+    step_n=$(printf '%s\n' "$first" | sed -n \
         -e 's/^2 \/implement #\([0-9][0-9]*\) .*/\1/p' \
         -e 's/^1 work in flight: in motion #[0-9][0-9]* [^;]*; next child #\([0-9][0-9]*\) ([^,)]*, \/implement #\1, .*/\1/p')
-    not=
-    if [ "$dirty" -gt 0 ]; then not="$dirty uncommitted paths; commit or clear them first"
-    elif [ "$branch" != "$default" ]; then not="on $branch, not the default branch $default"
-    elif [ "$unpushed" -gt 0 ]; then not="$unpushed unpushed commits; push them first"
-    elif [ -n "${own:-}" ]; then not="open PR $own; settle it first"
-    elif [ -z "$stepped" ]; then not="other work in flight: ${inflight#, }"
+    refusal=
+    if [ "$dirty" -gt 0 ]; then refusal="$dirty uncommitted paths; commit or clear them first"
+    elif [ "$branch" != "$default" ]; then refusal="on $branch, not the default branch $default"
+    elif [ "$unpushed" -gt 0 ]; then refusal="$unpushed unpushed commits; push them first"
+    elif [ -n "${own:-}" ]; then refusal="open PR $own; settle it first"
+    elif [ -z "$step_n" ]; then refusal="other work in flight: ${inflight#, }"
     else
         here=$(pwd -P)
         # A row is live unless stopped, or done with no pid, as in launch.sh.
         if ! list=$(claude agents --json --all </dev/null 2>/dev/null); then
-            not="claude agents --json --all failed, so other sessions in $here are unknown"
+            refusal="claude agents --json --all failed, so other sessions in $here are unknown"
         elif ! others=$(printf '%s' "$list" | jq -er --arg d "$here" '
             [.[] | select(.kind == "background" and .cwd == $d and .state != "stopped"
                           and (.state != "done" or .pid != null))
              | "\(.id) (\(.state // "unknown"))"] | join(", ")' 2>/dev/null); then
-            not="claude agents --json --all printed no list jq could read, so other sessions in $here are unknown"
+            refusal="claude agents --json --all printed no list jq could read, so other sessions in $here are unknown"
         elif [ -n "$others" ]; then
-            not="another live background session in $here: $others"
+            refusal="another live background session in $here: $others"
         fi
     fi
-    if [ -n "$not" ]; then echo "supervise: not offered: $not"
+    if [ -n "$refusal" ]; then echo "supervise: not offered: $refusal"
     else echo "supervise: /mp-ported-skills:supervise $shown --model claude-opus-5-5 --effort medium $you_type"; fi
 }
 
