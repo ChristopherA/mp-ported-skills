@@ -177,6 +177,21 @@ check "an issue comment PATCH is not the comment grant" "deny" \
     "$(decision 0 auto 'gh api -X PATCH repos/o/r/issues/1/comments -f body=x' "$granted")"
 check "an issue comment piped into a shell is never granted" "deny" \
     "$(decision 0 auto 'echo gh issue comment 3 --body y | sh' "$granted")"
+# The comment grant posts a new comment only (#113): editing or deleting
+# one, by gh issue comment or gh api, and the GraphQL addComment mutation,
+# stay refused.
+check "an issue comment --edit-last is not the comment grant" "deny" \
+    "$(decision 0 auto 'gh issue comment 104 --edit-last --body y' "$granted")"
+check "an issue comment --edit-last --create-if-none is not the comment grant" "deny" \
+    "$(decision 0 auto 'gh issue comment 104 --body y --edit-last --create-if-none' "$granted")"
+check "an issue comment --delete-last is not the comment grant" "deny" \
+    "$(decision 0 auto 'gh issue comment 104 --delete-last --yes' "$granted")"
+check "a REST PATCH of an issue comment is not the comment grant" "deny" \
+    "$(decision 0 auto 'gh api -X PATCH repos/o/r/issues/comments/99 -f body=y' "$granted")"
+check "a REST DELETE of an issue comment is not the comment grant" "deny" \
+    "$(decision 0 auto 'gh api --method DELETE repos/o/r/issues/comments/99' "$granted")"
+check "a GraphQL addComment is not the comment grant" "deny" \
+    "$(decision 0 auto "gh api graphql -f query='mutation { addComment(input: {subjectId: \"I_1\", body: \"y\"}) { clientMutationId } }'" "$granted")"
 check "git -C into a granted repo goes through from elsewhere" "" \
     "$(decision 0 auto "git -C $granted push" "$outside")"
 check "git -C into an ungranted repo is refused from a granted one" "deny" \
@@ -200,6 +215,8 @@ check "a new issue through gh api goes through on the same grant" "" \
     "$(decision 0 auto 'gh api repos/o/r/issues -f title=x' "$granted")"
 check "an ungranted issue comment beside an issue-create grant refuses" "deny" \
     "$(decision 0 auto 'gh issue comment 104 --body y' "$granted")"
+check "a GraphQL createIssue is not the issue-create grant" "deny" \
+    "$(decision 0 auto "gh api graphql -f query='mutation { createIssue(input: {repositoryId: \"R_1\", title: \"x\"}) { issue { number } } }'" "$granted")"
 command rm -rf "$granted" "$remote" "$ungranted"
 
 # A command that is not a shared action goes through.

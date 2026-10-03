@@ -67,7 +67,19 @@ classify_gh() {
     pr/create) matched="gh pr create" ;;
     pr/merge) matched="gh pr merge" ;;
     issue/close) matched="gh issue close" ;;
-    issue/comment) matched="gh issue comment" ;;
+    issue/comment)
+        # The comment grant posts a new comment only (#113). Editing or
+        # deleting the last one is named apart, so no grant covers it. Any
+        # word that is the flag counts, even one gh would read as a body.
+        matched="gh issue comment"
+        shift 2
+        for _carg in "$@"; do
+            case "$_carg" in
+            --edit-last | --edit-last=*) matched="gh issue comment (edit)" ;;
+            --delete-last | --delete-last=*) matched="gh issue comment (delete)"; break ;;
+            esac
+        done
+        ;;
     issue/create | issue/new) matched="gh issue create" ;;
     api/*)
         # A write through the REST or GraphQL API reaches the same
@@ -78,7 +90,12 @@ classify_gh() {
         # new issue it makes, so the grant for that action covers it (#110):
         # only when that path, matched whole, is the one word not taken by
         # a method or field flag. Any other word -- a second path, a
-        # header's value -- leaves it a plain gh api write, never granted.
+        # header's value -- leaves it a plain gh api write, never granted,
+        # as is a PATCH or DELETE of a comment (#113). A GraphQL mutation is
+        # never granted either, addComment and createIssue included: one
+        # document can hold several mutations under aliases, its text can
+        # come from a file or variables this scan does not read, and
+        # addComment also comments on pull requests.
         shift
         _cmethod="" _cfields="" _ctarget="" _cgraphql="" _cissue="" _cwords=0
         while [ $# -gt 0 ]; do
@@ -120,8 +137,9 @@ classify_gh() {
 
 # The action a grant names for a matched form, or nothing for a form no
 # grant covers: the piped-into-a-shell fallback and the other gh api forms,
-# which do not say which action they reach. The two gh api POSTs above that
-# name an issue comment or a new issue map to that action (#110).
+# which do not say which action they reach, and an issue comment's edit or
+# delete (#113). The two gh api POSTs above that name an issue comment or a
+# new issue map to that action (#110).
 grant_action() { # <matched>
     case "$1" in
     "git push (piped"* | "gh (piped"*) ;;
@@ -129,7 +147,7 @@ grant_action() { # <matched>
     "gh pr create"*) echo pr-create ;;
     "gh pr merge"*) echo pr-merge ;;
     "gh issue close"*) echo issue-close ;;
-    "gh issue comment"* | "gh api POST (issue comment)") echo issue-comment ;;
+    "gh issue comment" | "gh api POST (issue comment)") echo issue-comment ;;
     "gh issue create"* | "gh api POST (issue create)") echo issue-create ;;
     esac
 }

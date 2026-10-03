@@ -158,6 +158,20 @@ check "a granted issue create reaches the real gh" "real gh: issue create --titl
     "$(worker 0 granted 'gh issue create --title x --body y' | head -n 1)"
 check "a granted issue comment through gh api reaches the real gh" "real gh: api repos/o/r/issues/104/comments -f body=x" \
     "$(worker 0 granted 'gh api repos/o/r/issues/104/comments -f body=x' | head -n 1)"
+# The comment grant posts a new comment only (#113), and no grant covers
+# a GraphQL mutation.
+check "a granted repo's issue comment --edit-last is refused" "exit=1" \
+    "$(last "$(worker 0 granted 'gh issue comment 104 --edit-last --body x')")"
+check "a granted repo's issue comment --delete-last is refused" "exit=1" \
+    "$(last "$(worker 0 granted 'sh -c "gh issue comment 104 --delete-last --yes"')")"
+check "a granted repo's REST PATCH of an issue comment is refused" "exit=1" \
+    "$(last "$(worker 0 granted 'gh api -X PATCH repos/o/r/issues/comments/99 -f body=x')")"
+check "a granted repo's REST DELETE of an issue comment is refused" "exit=1" \
+    "$(last "$(worker 0 granted 'gh api -X DELETE repos/o/r/issues/comments/99')")"
+check "a granted repo's GraphQL addComment is refused" "exit=1" \
+    "$(last "$(worker 0 granted 'gh api graphql -f query="mutation { addComment(input: {subjectId: 1, body: 2}) { clientMutationId } }"')")"
+check "a granted repo's GraphQL createIssue is refused" "exit=1" \
+    "$(last "$(worker 0 granted 'gh api graphql -f query="mutation { createIssue(input: {repositoryId: 1, title: 2}) { issue { number } } }"')")"
 check "an ungranted action beside a grant is refused" "exit=1" \
     "$(last "$(worker 0 granted 'gh pr merge 5')")"
 check "gh api is never granted" "exit=1" \
