@@ -64,12 +64,12 @@
 # job's flags read ["--model","claude-opus-5-5","--effort","medium", ...]. MP_SUPERVISE_WAIT: seconds to wait for the job's
 # state.json (default 20).
 #
-# The worker is named `supervise <project> #N: <ticket title>` with --name,
+# The worker is named `worker <project> #N: <ticket title>` with --name,
 # cut to 80 characters, so `claude agents` and the Claude app tell workers
 # apart (#103): without it, Claude Code named every worker from its first
 # prompt, the same for every ticket. The app adds the machine's name, so the
 # name leaves it out. The title comes from `gh issue view` in DIR; when that
-# fails, the name is `supervise <project> #N` and a note says so. Checked
+# fails, the name is `worker <project> #N` and a note says so. Checked
 # live with 2.1.288: a `claude --bg --name` session's SessionStart title hook
 # (MP_SESSION_TITLE) wrote its own title first, then the name was written
 # over it, and it stayed the last custom-title in the transcript; the job's
@@ -202,7 +202,7 @@ A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue c
 
 # The worker's name (#103), in characters, not bytes, whatever the locale.
 top=$(git -C "$DIR" rev-parse --show-toplevel)
-NAME="supervise ${top##*/} #$TICKET"
+NAME="worker ${top##*/} #$TICKET"
 NAME_MAX=80
 if title=$(cd "$DIR" && gh issue view "$TICKET" --json title --jq .title </dev/null 2>&1); then
     [ -z "$title" ] || NAME="$NAME: $title"

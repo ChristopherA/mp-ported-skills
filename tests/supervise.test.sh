@@ -571,7 +571,7 @@ EnterWorktree
 --append-system-prompt
 $no_grants
 --name
-supervise project #56: Add the thing
+worker project #56: Add the thing
 --permission-mode
 auto
 /mattpocock-skills:implement #56" "$(command cat "$fake/args")"
@@ -584,20 +584,20 @@ $project" "$(command cat "$fake/gh-args" "$fake/gh-cwd")"
 # The worker is named after its Project and ticket (#103), so the Claude
 # app and `claude agents` tell workers apart. A long title is cut.
 name_of() { sed -n '/^--name$/{n;p;}' "$fake/args"; }
-long="Make every supervised worker show its Project and its ticket in the Claude app list"
+long="Make every supervised worker show its Project and its ID in the Claude app list"
 (export FAKE_GH_TITLE="$long"; launch --ticket 56 >/dev/null 2>&1)
-check "launch: a long title is cut, with no space before the dots" "supervise project #56: Make every supervised worker show its Project and its..." "$(name_of)"
+check "launch: a long title is cut, with no space before the dots" "worker project #56: Make every supervised worker show its Project and its ID..." "$(name_of)"
 check "launch: the cut name is at most 80 characters" "yes" "$([ "$(name_of | tr -d '\n' | LC_ALL=en_US.UTF-8 wc -m)" -le 80 ] && echo yes || echo no)"
 (export FAKE_GH_TITLE="Fix the café sign"; launch --ticket 56 >/dev/null 2>&1)
-check "launch: a title with non-ASCII text is kept whole" "supervise project #56: Fix the café sign" "$(name_of)"
+check "launch: a title with non-ASCII text is kept whole" "worker project #56: Fix the café sign" "$(name_of)"
 out=$( (export FAKE_GH_FAIL=1; launch --ticket 56 2>&1) )
 rc=$?
 check "launch: no title still launches" "0" "$rc"
-check "launch: no title names the Project and ticket" "supervise project #56" "$(name_of)"
+check "launch: no title names the Project and ticket" "worker project #56" "$(name_of)"
 check "launch: no title says why" "note: gh issue view 56 failed (HTTP 404: Not Found), so the worker's name leaves out the ticket's title
 c2a368ee" "$out"
 out=$( (export FAKE_GH_TITLE=""; launch --ticket 56 2>&1) )
-check "launch: an empty title names the Project and ticket" "supervise project #56" "$(name_of)"
+check "launch: an empty title names the Project and ticket" "worker project #56" "$(name_of)"
 
 launch --ticket 56 --model claude-opus-5-5 >/dev/null 2>&1
 check "launch: --model passes through" "claude-opus-5-5" "$(sed -n 3p "$fake/args")"
@@ -623,7 +623,7 @@ out=$( (export FAKE_STATE_FILTER='| .respawnFlags[-3] = "high"'; launch --ticket
 rc=$?
 check "launch: effort not recorded exits 2" "2" "$rc"
 check "launch: effort not recorded stops the session" "stop c2a368ee" "$(command cat "$fake/calls" 2>/dev/null)"
-check "launch: effort not recorded says why" "Error: session c2a368ee does not run at effort medium (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --effort high --name supervise project #56: Add the thing); stopped it" "$out"
+check "launch: effort not recorded says why" "Error: session c2a368ee does not run at effort medium (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --effort high --name worker project #56: Add the thing); stopped it" "$out"
 
 out=$(launch --ticket 56 --model claude-haiku-4-5-20251001 2>&1)
 rc=$?
@@ -668,9 +668,9 @@ mismatch "isolation guard on" '| .respawnFlags = ["--disallowedTools", "EnterWor
 mismatch "isolation guard set to another value" '| .respawnFlags = ["--disallowedTools", "EnterWorktree", "--settings", "{\"worktree\":{\"bgIsolation\":\"worktree\"}}", "--permission-mode", "auto"]' \
     "Error: session c2a368ee has the background worktree guard on, so its edits in $project would be refused: bgIsolation none is not in its settings (its flags: --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"worktree\"}} --permission-mode auto); stopped it"
 mismatch "grants not recorded" '| .respawnFlags |= .[2:]' \
-    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name supervise project #56: Add the thing); stopped it"
+    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
 mismatch "other grants recorded" '| .respawnFlags[1] = "something else"' \
-    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --append-system-prompt something else --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name supervise project #56: Add the thing); stopped it"
+    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --append-system-prompt something else --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
 mismatch "wrong profile" '| .providerEnv.CLAUDE_CONFIG_DIR = "/elsewhere"' \
     "Error: session c2a368ee runs under config /elsewhere, not $cfg; stopped it"
 mismatch "no profile recorded" '| del(.providerEnv)' \
@@ -680,9 +680,9 @@ mismatch "another folder" '| .cwd = "/elsewhere"' \
 mismatch "a worktree" '| .worktreePath = "/w/.claude/worktrees/x"' \
     "Error: session c2a368ee was placed in worktree /w/.claude/worktrees/x, not $project; stopped it"
 mismatch "name not recorded" '| .name = "mattpocock skills implementation"' \
-    "Error: session c2a368ee is named 'mattpocock skills implementation', not 'supervise project #56: Add the thing'; stopped it"
+    "Error: session c2a368ee is named 'mattpocock skills implementation', not 'worker project #56: Add the thing'; stopped it"
 mismatch "no name recorded" '| del(.name)' \
-    "Error: session c2a368ee is named '(none recorded)', not 'supervise project #56: Add the thing'; stopped it"
+    "Error: session c2a368ee is named '(none recorded)', not 'worker project #56: Add the thing'; stopped it"
 
 out=$( (export FAKE_NO_STATE=1 MP_SUPERVISE_WAIT=1; launch --ticket 56 2>&1) )
 rc=$?
