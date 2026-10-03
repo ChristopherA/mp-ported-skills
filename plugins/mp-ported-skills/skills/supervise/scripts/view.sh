@@ -81,6 +81,8 @@ while [ $# -gt 0 ]; do
 done
 fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 [ -z "$SESSION" ] || [ -z "$ITERM$PANE" ] || fail "--session names a tmux session, not an iTerm2 pane"
+[ -z "$PANE" ] || [ -n "$CLOSE" ] || fail "--pane goes with --close"
+[ -z "$ITERM" ] || [ -z "$CLOSE" ] || fail "--close takes --pane, not --iterm, for an iTerm2 pane"
 [ -n "$SESSION" ] || SESSION="mp-supervise"
 case $SESSION in
     '' | *[!A-Za-z0-9_-]*) fail "--session takes letters, digits, - and _, not '$SESSION'" ;;
@@ -88,7 +90,8 @@ esac
 
 panes=${MP_PANE_DIR:-$(CDPATH= cd -- "$(dirname -- "$0")/../../iterm-pane/scripts" && pwd)}
 
-# Sets PS, PW and PT from a pane's coordinates, `SESSION WINDOW TAB`.
+# Sets PANE_SESSION, PANE_WINDOW and PANE_TAB from a pane's coordinates,
+# `SESSION WINDOW TAB`.
 pane_coords() {
     set -f
     set -- $1
@@ -97,18 +100,19 @@ pane_coords() {
     case "$1" in '' | *[!A-Za-z0-9:-]*) return 1 ;; esac
     case "$2" in '' | *[!0-9]*) return 1 ;; esac
     case "$3" in '' | *[!0-9]*) return 1 ;; esac
-    PS=$1 PW=$2 PT=$3
+    PANE_SESSION=$1 PANE_WINDOW=$2 PANE_TAB=$3
 }
-pane_state() { sh "$panes/pane-classify.sh" --session "$PS" --window "$PW" --tab "$PT" </dev/null 2>/dev/null; }
-pane_close() { sh "$panes/pane-close.sh" --session "$PS" --window "$PW" --tab "$PT" --force </dev/null >/dev/null; }
+pane_state() { sh "$panes/pane-classify.sh" --session "$PANE_SESSION" --window "$PANE_WINDOW" --tab "$PANE_TAB" </dev/null 2>/dev/null; }
+pane_close() { sh "$panes/pane-close.sh" --session "$PANE_SESSION" --window "$PANE_WINDOW" --tab "$PANE_TAB" --force </dev/null >/dev/null; }
 
 if [ -n "$CLOSE" ] && [ -n "$PANE" ]; then
     pane_coords "$PANE" || fail "--pane needs 'SESSION WINDOW TAB', not '$PANE'"
+    [ -f "$panes/pane-close.sh" ] || fail "no iterm-pane scripts in ${panes:-the iterm-pane skill}"
     if [ "$(pane_state)" = gone ]; then
-        echo "pane $PS already closed"
+        echo "pane $PANE_SESSION already closed"
     else
-        pane_close || fail "iTerm2 could not close pane $PS"
-        echo "closed pane $PS"
+        pane_close || fail "iTerm2 could not close pane $PANE_SESSION"
+        echo "closed pane $PANE_SESSION"
     fi
     exit 0
 fi
@@ -144,26 +148,23 @@ if [ -n "$ITERM" ]; then
     # reopened.
     sh_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
     line="cd $(sh_quote "$DIR") && exec env CLAUDE_CONFIG_DIR=$(sh_quote "$CLAUDE_CONFIG_DIR") $(sh_quote "$claude") attach $ID"
-    err=$(mktemp)
-    if ! coords=$(sh "$panes/pane-open.sh" --direction vertical --command "$line" </dev/null 2>"$err"); then
-        why=$(head -n 1 "$err")
-        command rm -f "$err"
+    [ -f "$panes/pane-open.sh" ] || fail "no iterm-pane scripts in ${panes:-the iterm-pane skill}, so no pane can open; watch with claude attach $ID"
+    if ! coords=$(sh "$panes/pane-open.sh" --direction vertical --command "$line" </dev/null 2>&1); then
+        why=$(printf '%s\n' "$coords" | head -n 1 | sed 's/^Error: //')
         fail "no iTerm2 pane opened (${why:-pane-open.sh failed}); watch with claude attach $ID"
     fi
-    command rm -f "$err"
     pane_coords "$(printf '%s\n' "$coords" | head -n 1)" ||
         fail "pane-open.sh printed no pane coordinates; watch with claude attach $ID"
     # claude attach for an id it cannot open exits at once; iTerm2 then
     # closes the pane, or leaves it at a shell or ended.
     sleep "$wait"
-    case $(pane_state) in
-        gone) fail "claude attach $ID exited at once, so no viewer is open; watch with claude attach $ID" ;;
-        shell)
-            pane_close
-            fail "claude attach $ID exited at once, so no viewer is open; watch with claude attach $ID" ;;
-    esac
-    echo "viewer iterm pane $PS $PW $PT runs claude attach $ID"
-    echo "close: view.sh --close --pane '$PS $PW $PT'"
+    state=$(pane_state)
+    if [ "$state" = gone ] || [ "$state" = shell ]; then
+        [ "$state" = gone ] || pane_close
+        fail "claude attach $ID exited at once, so no viewer is open; watch with claude attach $ID"
+    fi
+    echo "viewer iterm pane $PANE_SESSION $PANE_WINDOW $PANE_TAB runs claude attach $ID"
+    echo "close: view.sh --close --pane '$PANE_SESSION $PANE_WINDOW $PANE_TAB'"
     exit 0
 fi
 

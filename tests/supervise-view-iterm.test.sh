@@ -112,6 +112,13 @@ check "close, bad pane: exit 1" 1 "$rc"
 check "close, bad pane: says so" "Error: --pane needs 'SESSION WINDOW TAB', not 'F1C3A2B4-0D6E 4242'" "$out"
 out=$(view --close --pane 'F1C3A2B4 4242 2;x'); rc=$?
 check "close, bad tab: exit 1" 1 "$rc"
+check "close, bad tab: says so" "Error: --pane needs 'SESSION WINDOW TAB', not 'F1C3A2B4 4242 2;x'" "$out"
+out=$(view --close --iterm); rc=$?
+check "close --iterm without a pane: exit 1" 1 "$rc"
+check "close --iterm without a pane: says so" "Error: --close takes --pane, not --iterm, for an iTerm2 pane" "$out"
+out=$(view --iterm --id $id --dir "$project" --pane 'F1C3A2B4-0D6E 4242 2'); rc=$?
+check "pane without close: exit 1" 1 "$rc"
+check "pane without close: says so" "Error: --pane goes with --close" "$out"
 check "close, bad: touches no pane" "" "$(calls)"
 
 # --- no pane possible: one line, no viewer ---------------------------------
@@ -128,7 +135,7 @@ check "no pane possible: pane-open is never called" "" "$(calls)"
 touch "$fake/open-fails"
 out=$(view --iterm --id $id --dir "$project"); rc=$?
 check "pane-open fails: exit 1" 1 "$rc"
-check "pane-open fails: names why" "Error: no iTerm2 pane opened (Error: could not determine calling TTY); watch with claude attach $id" "$out"
+check "pane-open fails: names why" "Error: no iTerm2 pane opened (could not determine calling TTY); watch with claude attach $id" "$out"
 command rm -f "$fake/open-fails"
 calls >/dev/null
 
@@ -137,6 +144,10 @@ check "bad id: exit 1" 1 "$rc"
 check "bad id: says so" "Error: --id needs a session id, not 'c2a368ee;x'" "$out"
 out=$(view --iterm --id $id --session watch-x --dir "$project"); rc=$?
 check "iterm with a tmux session name: exit 1" 1 "$rc"
+check "iterm with a tmux session name: says so" "Error: --session names a tmux session, not an iTerm2 pane" "$out"
+out=$( (MP_PANE_DIR="$work/none"; export MP_PANE_DIR; view --iterm --id $id --dir "$project") ); rc=$?
+check "no pane scripts: exit 1" 1 "$rc"
+check "no pane scripts: says so" "Error: no iterm-pane scripts in $work/none, so no pane can open; watch with claude attach $id" "$out"
 
 echo "supervise-view-iterm: $pass passed, $fail failed"
 [ "$fail" = 0 ]

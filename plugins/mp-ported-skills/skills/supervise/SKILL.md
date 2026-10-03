@@ -171,13 +171,13 @@ With `--watch iterm`, the viewer is an iTerm2 split pane beside this session, op
 sh "${CLAUDE_SKILL_DIR}/scripts/view.sh" --iterm --id ID --dir "<project folder>" </dev/null
 ```
 
-It splits this session's pane through `iterm-pane`'s `pane-open.sh`, and the pane's first command changes into the folder and runs `exec env CLAUDE_CONFIG_DIR=<this profile> <claude> attach ID`, since the pane's login shell does not inherit the profile. The pane's shell ends with the viewer, so under a profile that closes a session when it ends (iTerm2's default) the pane closes by itself when the worker is stopped; the Report step closes it in any case. It prints `viewer iterm pane <session> <window> <tab> runs claude attach ID` and the `close:` command; keep the coordinates for that command, and pass both lines on to the maintainer. Exit 1: no pane opened, with one line naming why: this session runs inside tmux, is not in iTerm2, or was started by the `claude remote-control` server from the app (its terminal is the server's own pane), or `pane-open.sh` failed. Report that line and go on without a viewer.
+It splits this session's pane through `iterm-pane`'s `pane-open.sh`, and the pane's first command changes into the folder and runs `exec env CLAUDE_CONFIG_DIR=<this profile> <claude> attach ID`, since the pane's login shell does not inherit the profile. The pane's shell ends with the viewer, so under a profile that closes a session when it ends (iTerm2's default profile does) the pane should close by itself when the worker is stopped; that is untested with a live split, and the Report step closes it in any case. It prints `viewer iterm pane <session> <window> <tab> runs claude attach ID` and the `close:` command; keep the coordinates for that command, and pass both lines on to the maintainer. Exit 1: no pane opened, with one line naming why: this session runs inside tmux, is not in iTerm2, or was started by the `claude remote-control` server from the app (its terminal is the server's own pane), or `pane-open.sh` failed. Report that line and go on without a viewer.
 
 Never open a viewer at any other time, and never in a loop. Attaching wakes a stopped session, so a viewer opened between `resume.sh`'s stop and its resume makes the resume start a copy and splits the worker (#55).
 
 Tell the maintainer, with the watch command (`tmux attach -t mp-supervise`, or `tmux -CC attach -t mp-supervise` in iTerm2) or the pane:
 
 - the viewer is live: what they type there reaches the worker as a prompt, and answering a permission prompt there is fine;
-- attaching to the worker by hand (`claude attach ID`, or a viewer of their own) between a stop and a resume splits the worker. Leaving the tmux session (`Ctrl+B d`) is always safe.
+- attaching to the worker by hand (`claude attach ID`, or a viewer of their own) between a stop and a resume splits the worker. Leaving the tmux session (`Ctrl+B d`) is always safe; with `--watch iterm`, leave the pane for the supervisor to close.
 
 Done when the report names the ticket, the outcome, the shared actions (or `none`), either its commits or the id with `claude attach`, and the run record's comment.
