@@ -8,7 +8,12 @@
 #                                      (a PR or issue it opened)
 #   branch <remote/branch> ungranted: holds the worker's commits
 #                                      each remote-tracking branch in DIR
-#                                      holding a commit in START..HEAD
+#                                      holding a commit in START..HEAD that
+#                                      the worker pushed
+#   branch <remote/branch> pushed by someone else: holds the worker's commits
+#                                      each such branch the worker did not
+#                                      push (the maintainer's terminal, or a
+#                                      plain push by the supervisor)
 #   command <status> ungranted: <cmd>  each Bash call in the worker's
 #                                      transcript, or a subagent's, that is
 #                                      a shared action
@@ -42,6 +47,14 @@
 # name, stays ungranted. A `children` entry -- a PR or issue the worker's
 # own tool use opened, with no command text to classify -- is always
 # `ungranted` too.
+#
+# A branch counts as the worker's push only when a call in its transcript,
+# or a subagent's, that succeeded or has no result (it may have landed)
+# pushed to it: a push Claude Code recorded on the result, or a push
+# command whose text names the branch, or names no branch at all
+# (`git push`, `HEAD`, `--all`), since that could be any. A refused or
+# failed push does not count (#98). When a transcript could not be read,
+# every branch is read as the worker's, since nothing clears it.
 #
 # A branch push.sh pushed for this worker, on the maintainer's approval in
 # the supervisor's session (#100), is labelled `pushed by the supervisor on
@@ -179,6 +192,7 @@ calls() {
         | select($ops != "" or ($cmd | test("\\bgh\\b|push|send-pack|alias")))
         | ($cmd | split("\n")) as $lines
         | {cmd: $cmd, ops: $ops, recorded: ($ops != ""),
+           pushed: ($result.op.push.branch? // ""),
            status: (if $result == null then "no result"
                      elif ($result.error | not) then "succeeded"
                      elif ($result.text | test("denied by the Claude Code auto mode classifier|on its own \\(#66\\)")) then "refused"
@@ -201,6 +215,91 @@ action_for() {
     elif has gh && has issue && has close; then echo issue-close
     else echo ""
     fi
+}
+
+# push_targets <cmd> <recorded branch>: the branch names a succeeded push
+# reached, one per line, or `*` when it may have reached any. The recorded
+# branch is what Claude Code saw; the command's own `git push` words name
+# the rest. Split as gh_write splits, with redirections dropped first so
+# `2>&1` is not read as a refspec.
+push_targets() {
+    [ -z "$2" ] || printf '%s\n' "$2"
+    segments=$(printf '%s\n' "$1" | sed -E 's/[0-9]*[<>]+(&[0-9-]+| *[^ &|;<>]+)//g' |
+        sed -E 's/(&&|\|\||[;&|()`])/\n/g' | tr -d "\"'\\\\")
+    oldIFS=$IFS
+    IFS='
+'
+    set -f
+    named=""
+    for seg in $segments; do
+        IFS=$oldIFS
+        # shellcheck disable=SC2086
+        t=$(push_words $seg)
+        [ -z "$t" ] || named="$named$t
+"
+    done
+    set +f
+    IFS=$oldIFS
+    if [ -n "$named" ]; then
+        printf '%s' "$named"
+    elif [ -z "$2" ]; then
+        echo '*'
+    fi
+}
+
+# push_words <word>...: for a `git push` or `git send-pack`, the branch
+# names its refspecs push to, and `*` when it names none, or one that
+# cannot be read as a branch.
+push_words() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            [A-Za-z_]*=* | env | command | exec | time | nohup) shift ;;
+            *) break ;;
+        esac
+    done
+    [ "${1##*/}" = git ] || return 0
+    shift
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -C | -c) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
+            -*) shift ;;
+            *) break ;;
+        esac
+    done
+    case "${1:-}" in
+        push) ;;
+        send-pack) echo '*'; return 0 ;;
+        *) return 0 ;;
+    esac
+    shift
+    remote=""
+    any=""
+    refs=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --all | --mirror | --branches) any=yes ;;
+            -o | --push-option | --repo | --receive-pack | --exec) [ $# -lt 2 ] || shift ;;
+            -*) ;;
+            *)
+                if [ -z "$remote" ]; then
+                    remote=$1
+                else
+                    dst=${1#+}
+                    dst=${dst##*:}
+                    dst=${dst#refs/heads/}
+                    case "$dst" in
+                        '' | HEAD | @ | *'*'*) any=yes ;;
+                        *) refs="$refs$dst
+" ;;
+                    esac
+                fi ;;
+        esac
+        shift
+    done
+    if [ -n "$any" ] || [ -z "$refs" ]; then
+        echo '*'
+    fi
+    printf '%s' "$refs"
 }
 
 # grant_label <action>: sets GRANT_LABEL to "ungranted", or
@@ -239,31 +338,25 @@ else
     [ -n "$sid" ] || note "job state $job names no session, so its commands were not read"
 fi
 
-if commits=$(git -C "$DIR" rev-list "$START..HEAD" 2>/dev/null); then
-    # Filtered on the full name: origin/HEAD's short name is just `origin`.
-    branches=$(for c in $commits; do
-        git -C "$DIR" for-each-ref --contains "$c" --format='%(refname)' refs/remotes
-    done | grep -v '/HEAD$' | sed 's|^refs/remotes/||' | sort -u)
-    pushed=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-pushed 2>/dev/null)
-    for b in $branches; do
-        if [ -f "$pushed" ] && awk -v id="$ID" -v b="$b" '$1 == id && $2 == b { found = 1 } END { exit !found }' "$pushed"; then
-            add "branch $b pushed by the supervisor on the maintainer's approval: holds the worker's commits"
-            continue
-        fi
-        grant_label push
-        add "branch $b $GRANT_LABEL: holds the worker's commits"
-    done
-else
-    note "git rev-list $START..HEAD failed in $DIR, so remote branches were not read"
-fi
+# The transcripts are read before the branches, so each branch line knows
+# whether the worker pushed it; command lines still print after the branch
+# lines.
+commands=""
+worker_pushes=""
+unread=""
+[ -n "$sid" ] || unread=yes
 
 if [ -n "$sid" ]; then
     set -- "$CLAUDE_CONFIG_DIR"/projects/*/"$sid".jsonl
-    [ -f "$1" ] || note "no transcript for session $sid under $CLAUDE_CONFIG_DIR/projects, so its commands were not read"
+    if [ ! -f "$1" ]; then
+        note "no transcript for session $sid under $CLAUDE_CONFIG_DIR/projects, so its commands were not read"
+        unread=yes
+    fi
     for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$sid".jsonl "$CLAUDE_CONFIG_DIR"/projects/*/"$sid"/subagents/*.jsonl; do
         [ -f "$t" ] || continue
         if ! rows=$(calls "$t"); then
             note "transcript $t could not be read, so its commands were not read"
+            unread=yes
             continue
         fi
         oldIFS=$IFS
@@ -277,14 +370,44 @@ if [ -n "$sid" ]; then
                 ops=$(printf '%s' "$row" | jq -r .ops)
                 status=$(printf '%s' "$row" | jq -r .status)
                 rest=$(printf '%s' "$row" | jq -r .rest)
-                grant_label "$(action_for "$cmd" "$ops")"
-                add "command $status $GRANT_LABEL: $rest"
+                action=$(action_for "$cmd" "$ops")
+                grant_label "$action"
+                commands="${commands}command $status $GRANT_LABEL: $rest
+"
+                if { [ "$status" = succeeded ] || [ "$status" = "no result" ]; } && [ "$action" = push ]; then
+                    worker_pushes="$worker_pushes$(push_targets "$cmd" "$(printf '%s' "$row" | jq -r .pushed)")
+"
+                fi
             fi
         done
         set +f
         IFS=$oldIFS
     done
 fi
+
+if commits=$(git -C "$DIR" rev-list "$START..HEAD" 2>/dev/null); then
+    # Filtered on the full name: origin/HEAD's short name is just `origin`.
+    branches=$(for c in $commits; do
+        git -C "$DIR" for-each-ref --contains "$c" --format='%(refname)' refs/remotes
+    done | grep -v '/HEAD$' | sed 's|^refs/remotes/||' | sort -u)
+    pushed=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-pushed 2>/dev/null)
+    for b in $branches; do
+        if [ -f "$pushed" ] && awk -v id="$ID" -v b="$b" '$1 == id && $2 == b { found = 1 } END { exit !found }' "$pushed"; then
+            add "branch $b pushed by the supervisor on the maintainer's approval: holds the worker's commits"
+            continue
+        fi
+        if [ -z "$unread" ] && ! printf '%s\n' "$worker_pushes" | grep -qxF -e '*' -e "${b#*/}"; then
+            add "branch $b pushed by someone else: holds the worker's commits"
+            continue
+        fi
+        grant_label push
+        add "branch $b $GRANT_LABEL: holds the worker's commits"
+    done
+else
+    note "git rev-list $START..HEAD failed in $DIR, so remote branches were not read"
+fi
+
+actions="$actions$commands"
 
 printf '%s%s' "$actions" "$notes"
 [ -n "$actions$notes" ] || echo none

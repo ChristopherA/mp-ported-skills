@@ -1026,8 +1026,10 @@ repo_git "$repo" push -q origin main 2>/dev/null
 git -C "$repo" remote set-head origin main
 start=$(git -C "$repo" rev-parse HEAD)
 repo_git "$repo" commit -q --allow-empty -m "worker's commit"
-repo_git "$repo" push -q origin HEAD:66-topic 2>/dev/null
-pushed="branch origin/66-topic ungranted: holds the worker's commits"
+repo_git "$repo" push -q origin HEAD:66-deny-shared-actions-to-background-workers 2>/dev/null
+pushed="branch origin/66-deny-shared-actions-to-background-workers ungranted: holds the worker's commits"
+# The same branch when the transcript holds no push of the worker's to it.
+others="branch origin/66-deny-shared-actions-to-background-workers pushed by someone else: holds the worker's commits"
 
 sid=c2a368ee-c513-484c-83d3-581830e209a5
 job() { # [jq filter] -- install job c2a368ee's state.json
@@ -1073,7 +1075,7 @@ command succeeded ungranted: sh scripts/ship.sh -- push 66-deny-shared-actions-t
     bash_call r2 'gh pr list --state all'
     bash_call r3 'git commit -m "then gh issue close 74"'
 } >"$cfg/projects/-work-project/$sid.jsonl"
-check "actions: gh writes the hook allows" "$pushed
+check "actions: gh writes the hook allows" "$others
 command succeeded ungranted: gh issue comment 74 --body \"done\"
 command failed ungranted: gh -R o/r pr review 72 --approve
 command succeeded ungranted: cd /work/project && gh issue edit 74 --add-label ready" "$(actions)"
@@ -1083,8 +1085,13 @@ transcript just-launched -work-project "$sid"
 mkdir -p "$cfg/projects/-work-project/$sid/subagents"
 jq -c 'select(.message.content | any(.id == "toolu_01U84F8dsqTtkMoD2YxRkZgs" or .tool_use_id == "toolu_01U84F8dsqTtkMoD2YxRkZgs")) | .isSidechain = true' \
     "$transcripts/shared-actions.jsonl" >"$cfg/projects/-work-project/$sid/subagents/agent-a1.jsonl"
-check "actions: a subagent's push is listed" "$pushed
+check "actions: a subagent's push is listed" "$others
 command refused ungranted: git push origin HEAD:main 2>&1" "$(actions)"
+# A subagent's push that succeeded makes the branch the worker's.
+jq -c 'select(.message.content | any(.id == "toolu_01XdkrXwv1TnYznyvLWKGaRN" or .tool_use_id == "toolu_01XdkrXwv1TnYznyvLWKGaRN"))' \
+    "$transcripts/shared-actions.jsonl" >>"$cfg/projects/-work-project/$sid/subagents/agent-a1.jsonl"
+check "actions: a subagent's succeeded push is the worker's" "$pushed" "$(actions | grep '^branch')"
+command rm -rf "$cfg/projects/-work-project/$sid"
 
 # A multi-line command is listed by its first line.
 transcript just-launched -work-project "$sid"
@@ -1099,8 +1106,38 @@ job
 main_start=$(git -C "$repo" rev-parse HEAD)
 repo_git "$repo" commit -q --allow-empty -m "pushed to main"
 repo_git "$repo" push -q origin HEAD:main 2>/dev/null
-check "actions: a push to main, not origin/HEAD" "branch origin/main ungranted: holds the worker's commits" \
+check "actions: a push to main, not origin/HEAD" "branch origin/main pushed by someone else: holds the worker's commits" \
     "$(actions "$main_start")"
+
+# Whose push a branch is (#98). The #96 run: the hook refused the worker's
+# push to main, and the maintainer pushed main from their own terminal. A
+# refused or failed push is not the worker's.
+{
+    bash_call p1 'git push origin main 2>&1; echo "rc=$?"' true
+    bash_call p2 'git push origin HEAD:main' true
+} >"$cfg/projects/-work-project/$sid.jsonl"
+check "actions: a refused push, then the maintainer's" "branch origin/main pushed by someone else: holds the worker's commits
+command failed ungranted: git push origin main 2>&1; echo \"rc=\$?\"
+command failed ungranted: git push origin HEAD:main" "$(actions "$main_start")"
+mine() { # <command> -- the branch line when the worker's one call succeeded
+    bash_call p1 "$1" >"$cfg/projects/-work-project/$sid.jsonl"
+    actions "$main_start" | grep '^branch'
+}
+check "actions: a succeeded push naming main is the worker's" "branch origin/main ungranted: holds the worker's commits" \
+    "$(mine 'cd /work/project && git push origin main 2>&1 | tail -3')"
+check "actions: a refspec's destination names the branch" "branch origin/main ungranted: holds the worker's commits" \
+    "$(mine 'git -C /work/project push -u origin +HEAD:refs/heads/main')"
+check "actions: a push naming no branch could be any" "branch origin/main ungranted: holds the worker's commits" \
+    "$(mine 'git push')"
+check "actions: a push to another branch is not this one" "branch origin/main pushed by someone else: holds the worker's commits" \
+    "$(mine 'git push origin feature 2>/dev/null')"
+check "actions: a push with no result may have landed" "branch origin/main ungranted: holds the worker's commits" \
+    "$(printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"git push origin main"}}]}}' \
+        >"$cfg/projects/-work-project/$sid.jsonl"; actions "$main_start" | grep '^branch')"
+# An unreadable transcript clears no one: the branch stays the worker's.
+printf 'not json\n' >"$cfg/projects/-work-project/$sid.jsonl"
+check "actions: an unreadable transcript leaves the branch the worker's" "branch origin/main ungranted: holds the worker's commits" \
+    "$(actions "$main_start" | grep '^branch')"
 repo_git "$repo" push -q -f origin "$start:main" 2>/dev/null
 
 # Nothing shared: the worker's commits are only local, and it ran no
@@ -1168,7 +1205,7 @@ new_grant_repo() { # <folder var name> <grant file content>: a repo with the
     repo_git "$grepo" push -q origin main 2>/dev/null
     gstart=$(git -C "$grepo" rev-parse HEAD)
     repo_git "$grepo" commit -q --allow-empty -m "worker's commit"
-    repo_git "$grepo" push -q origin HEAD:66-topic 2>/dev/null
+    repo_git "$grepo" push -q origin HEAD:66-deny-shared-actions-to-background-workers 2>/dev/null
 }
 grant_n=1
 
@@ -1182,7 +1219,7 @@ new_grant_repo grepo1 '## Grants
 - push: release branches only
 '
 check "actions: a granted push is cited, not ungranted" \
-    "branch origin/66-topic granted (push: release branches only): holds the worker's commits
+    "branch origin/66-deny-shared-actions-to-background-workers granted (push: release branches only): holds the worker's commits
 command refused granted (push: release branches only): git push origin HEAD:main 2>&1
 command succeeded granted (push: release branches only): git push -u origin 66-deny-shared-actions-to-background-workers 2>&1 -- push 66-deny-shared-actions-to-background-workers
 command failed ungranted: gh pr create --repo ChristopherA/mp-ported-skills --title \"Deny shared actions to background workers\" --body-file \"\$CLAUDE_JOB_DIR/tmp/pr-body.md\" --head 66-deny-shared-actions-to-background-workers --base main 2>&1
@@ -1195,7 +1232,7 @@ new_grant_repo grepo2 '## Grants
 - pr-create
 '
 check "actions: an unmatched grant leaves the push ungranted" \
-    "branch origin/66-topic ungranted: holds the worker's commits" \
+    "branch origin/66-deny-shared-actions-to-background-workers ungranted: holds the worker's commits" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo2" --start "$gstart" </dev/null | grep '^branch')"
 
 # A grant present only on the working tree (never pushed to origin/main) is

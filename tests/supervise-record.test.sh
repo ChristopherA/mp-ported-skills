@@ -175,7 +175,7 @@ check "record: the whole record" "## Supervised run of #56
 - human interventions: 1 wait on a human (approve Bash: git push), 1 message typed into the worker
 - shared actions:
   - pr 72 ungranted: https://github.com/ChristopherA/mp-ported-skills/pull/72
-  - branch origin/56-topic ungranted: holds the worker's commits
+  - branch origin/56-topic pushed by someone else: holds the worker's commits
 - outcome: 2 commits after $short, PR #72, ticket #56 CLOSED" "$out"
 
 # The zone follows MP_SMART_ZONE_K, as the status line does.

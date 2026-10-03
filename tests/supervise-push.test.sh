@@ -241,8 +241,10 @@ check "actions: the supervisor's push, not the worker's" \
     "$(sh "$scripts/actions.sh" --id 3fb49286 --dir "$project" --start "$start" </dev/null)"
 mkdir -p "$CLAUDE_CONFIG_DIR/jobs/4aa00000"
 command cp -f "$CLAUDE_CONFIG_DIR/jobs/3fb49286/state.json" "$CLAUDE_CONFIG_DIR/jobs/4aa00000/state.json"
+# Another worker's run is not covered by push.sh's record, and its empty
+# transcript holds no push of its own (#98).
 check "actions: another worker's run is not covered" \
-    "branch origin/main ungranted: holds the worker's commits" \
+    "branch origin/main pushed by someone else: holds the worker's commits" \
     "$(sh "$scripts/actions.sh" --id 4aa00000 --dir "$project" --start "$start" </dev/null)"
 
 echo "supervise-push: $pass passed, $fail failed"
