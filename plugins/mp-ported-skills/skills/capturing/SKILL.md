@@ -61,7 +61,7 @@ Run `git status` and compare it with what this session changed. Show the user an
 - **One first next step**, from this repo's tracker only: the `in-motion` ticket when one is labelled, or, when it has open sub-issues, its next child as `resuming` case 1 defines it; otherwise a ticket with the `ready-for-agent` role's label string from `docs/agents/triage-labels.md`, with every blocker closed and not labelled `parked`, lowest number first, and why that one. `resuming`'s cases 1 and 2 define this rule, so an edit to one is made to both. When this repo has no tracker, there is no next ticket; list tickets this session left open in other repos as work for a session started in that repo.
 - **Safe to clear**, only when moves 1-5 actually happened. Otherwise say what is missing.
 
-Then gather the **before-clear jobs**: small actions that finish this session's work, such as a push, closing a ticket, or a plugin update after a version bump. A push, a ticket close or a PR maps to one of the shared actions `supervise`'s `grant.sh` knows (push, pr-create, pr-merge, issue-close); a plugin update maps to none of them.
+Then gather the **before-clear jobs**: small actions that finish this session's work, such as a push, closing a ticket, or a plugin update after a version bump. A push, a ticket close or a PR maps to a shared action `supervise`'s `grant.sh` knows: push, pr-create, pr-merge or issue-close. A plugin update maps to none.
 
 Find out whether anyone can answer a question here, from the first job:
 

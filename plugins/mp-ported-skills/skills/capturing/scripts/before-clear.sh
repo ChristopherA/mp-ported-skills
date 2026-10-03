@@ -24,7 +24,7 @@
 # Usage:
 #   before-clear.sh --action <push|pr-create|pr-merge|issue-close|issue-comment|issue-create|other> [--dir DIR]
 #
-# DIR defaults to the working directory, and is read only for the six
+# DIR defaults to the working directory, and is read only for the
 # shared actions; `other` needs no git checkout.
 #
 # Prints:

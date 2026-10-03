@@ -75,31 +75,42 @@ classify_gh() {
         # contents or the git data API, or a GraphQL mutation. gh sends POST
         # by default once a field or input is given. A POST to an issue's
         # comments, or to a repo's issues, is named as the issue comment or
-        # new issue it makes, so the grant for that action covers it.
+        # new issue it makes, so the grant for that action covers it (#110):
+        # only when that path, matched whole, is the one word not taken by
+        # a method or field flag. Any other word -- a second path, a
+        # header's value -- leaves it a plain gh api write, never granted.
         shift
-        _cmethod="" _cfields="" _ctarget="" _cgraphql="" _cissue=""
+        _cmethod="" _cfields="" _ctarget="" _cgraphql="" _cissue="" _cwords=0
         while [ $# -gt 0 ]; do
             case "$1" in
-            -X | --method) _cmethod=${2:-}; if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
-            -X* ) _cmethod=${1#-X}; shift ;;
-            --method=*) _cmethod=${1#--method=}; shift ;;
-            -f | -F | --field | --raw-field | --input) _cfields=yes; if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
-            -f* | -F* | --field=* | --raw-field=* | --input=*) _cfields=yes; shift ;;
-            graphql) _cgraphql=yes; shift ;;
-            */issues/[0-9]*/comments | */issues/[0-9]*/comments/) _ctarget=yes; _cissue=comment; shift ;;
-            repos/*/*/issues | /repos/*/*/issues | repos/*/*/issues/ | /repos/*/*/issues/) _ctarget=yes; _cissue=create; shift ;;
-            *pulls* | *issues* | *merges* | *contents* | */git/*) _ctarget=yes; shift ;;
-            *) shift ;;
+            -X | --method) _cmethod=${2:-}; if [ $# -ge 2 ]; then shift 2; else shift; fi; continue ;;
+            -X* ) _cmethod=${1#-X}; shift; continue ;;
+            --method=*) _cmethod=${1#--method=}; shift; continue ;;
+            -f | -F | --field | --raw-field | --input) _cfields=yes; if [ $# -ge 2 ]; then shift 2; else shift; fi; continue ;;
+            -f* | -F* | --field=* | --raw-field=* | --input=*) _cfields=yes; shift; continue ;;
+            -*) shift; continue ;;
             esac
+            _cwords=$((_cwords + 1))
+            case "$1" in
+            graphql) _cgraphql=yes ;;
+            *pulls* | *issues* | *merges* | *contents* | */git/*)
+                _ctarget=yes
+                if printf '%s\n' "$1" | grep -Eqx '/?repos/[^/]+/[^/]+/issues/[0-9]+/comments/?'; then
+                    _cissue=comment
+                elif printf '%s\n' "$1" | grep -Eqx '/?repos/[^/]+/[^/]+/issues/?'; then
+                    _cissue=create
+                fi
+                ;;
+            esac
+            shift
         done
+        [ "$_cwords" -eq 1 ] || _cissue=""
         _cmethod=$(printf '%s' "$_cmethod" | tr '[:lower:]' '[:upper:]')
         [ -n "$_cmethod" ] || { [ -n "$_cfields" ] && _cmethod=POST; } || _cmethod=GET
         if [ -n "$_cgraphql" ]; then
             case "${classify_text:-}" in *mutation*) matched="gh api graphql mutation" ;; esac
-        elif [ -n "$_ctarget" ] && [ "$_cmethod" = POST ] && [ "$_cissue" = comment ]; then
-            matched="gh api POST (issue comment)"
-        elif [ -n "$_ctarget" ] && [ "$_cmethod" = POST ] && [ "$_cissue" = create ]; then
-            matched="gh api POST (issue create)"
+        elif [ -n "$_ctarget" ] && [ "$_cmethod" = POST ] && [ -n "$_cissue" ]; then
+            matched="gh api POST (issue $_cissue)"
         elif [ -n "$_ctarget" ] && [ "$_cmethod" != GET ]; then
             matched="gh api $_cmethod"
         fi

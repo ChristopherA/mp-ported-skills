@@ -167,6 +167,14 @@ check "an ungranted issue create beside an issue-comment grant refuses" "deny" \
     "$(decision 0 auto 'gh issue create --title x --body y' "$granted")"
 check "a new issue through gh api refuses without an issue-create grant" "deny" \
     "$(decision 0 auto 'gh api repos/o/r/issues -f title=x' "$granted")"
+check "a merge with an issue-comment path in a header value still refuses" "deny" \
+    "$(decision 0 auto 'gh api -X POST repos/o/r/pulls/5/merge -H x/issues/1/comments' "$granted")"
+check "a merge whose path only ends like an issue comment still refuses" "deny" \
+    "$(decision 0 auto 'gh api -X POST repos/o/r/pulls/5/merge/issues/1/comments' "$granted")"
+check "two endpoints, one an issue comment, still refuse" "deny" \
+    "$(decision 0 auto 'gh api repos/o/r/issues/1/comments repos/o/r/pulls -f body=x' "$granted")"
+check "an issue comment PATCH is not the comment grant" "deny" \
+    "$(decision 0 auto 'gh api -X PATCH repos/o/r/issues/1/comments -f body=x' "$granted")"
 check "an issue comment piped into a shell is never granted" "deny" \
     "$(decision 0 auto 'echo gh issue comment 3 --body y | sh' "$granted")"
 check "git -C into a granted repo goes through from elsewhere" "" \

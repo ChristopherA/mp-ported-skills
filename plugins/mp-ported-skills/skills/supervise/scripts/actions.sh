@@ -39,13 +39,12 @@
 # branch as committed on origin -- never the working tree, so a grant a
 # worker commits locally but cannot push stays ungranted, reported as a
 # `note` line naming it as ignored, not silently treated as absent.
-# A branch line's action is always push. A command line's action is a
-# light word-token
-# guess (push, pr-create, pr-merge, issue-close, issue-comment or
-# issue-create) from its text and the
-# recorded op, good enough to cite a grant, not an enforcement check; a gh
-# write the hook's own scan would not single out, or one this guess cannot
-# name, stays ungranted. A `children` entry -- a PR or issue the worker's
+# A branch line's action is always push. A command line's action is the
+# one the hook's own scan names for it (push, pr-create, pr-merge,
+# issue-close, issue-comment or issue-create), or, when the scan names
+# none, a light word-token guess from its text and the recorded op, good
+# enough to cite a grant, not an enforcement check; a gh write neither
+# names stays ungranted. A `children` entry -- a PR or issue the worker's
 # own tool use opened, with no command text to classify -- is always
 # `ungranted` too.
 #
@@ -122,8 +121,27 @@ note() { notes="${notes}note $1
 # grant_label, below, is what cites the grant on the line. Run in DIR, where
 # it looks up git aliases.
 refused() {
-    [ -n "$(jq -cn --arg c "$1" '{permission_mode: "auto", tool_name: "Bash", tool_input: {command: $c}}' |
-        (cd "$DIR" && CLAUDE_CODE_SESSION_ATTENDED=0 MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS=1 sh "$hook"))" ]
+    [ -n "$(hook_reason "$1")" ]
+}
+
+# hook_reason <command>: the hook's refusal reason for it, or empty, under
+# the same terms as refused.
+hook_reason() {
+    jq -cn --arg c "$1" '{permission_mode: "auto", tool_name: "Bash", tool_input: {command: $c}}' |
+        (cd "$DIR" && CLAUDE_CODE_SESSION_ATTENDED=0 MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS=1 sh "$hook") |
+        jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null
+}
+
+# hook_action <command>: the action a grant names for the form the hook
+# matched in it (grant_action, in the classifier the hook and the wrappers
+# share), or empty when it matched none or a form no grant covers.
+. "$SCRIPT_DIR/../../../scripts/shared-action-classify.sh"
+hook_action() {
+    reason=$(hook_reason "$1")
+    [ -n "$reason" ] || return 0
+    form=${reason#*cannot run \'}
+    form=${form%%\' on its own*}
+    grant_action "$form"
 }
 
 # gh_write_words <word>...: prints yes when the words run `gh pr` or
@@ -207,23 +225,20 @@ calls() {
 }
 
 # action_for <cmd> <ops>: push, pr-create, pr-merge, issue-close,
-# issue-comment, issue-create, or empty. A light word-token heuristic for
-# citing a grant on the report line, not an enforcement check --
-# deny-shared-actions.sh is the enforcement layer, and this only has to
-# agree with it closely enough to cite the right grant. A `gh api` call
-# naming an issue's comments reads as issue-comment (#110); one creating an
-# issue through gh api is not told apart from the other issue writes, and
-# stays ungranted.
+# issue-comment, issue-create, or empty. The action of the form the hook
+# itself matched, so the line cites the grant the hook would have let the
+# command through on (#110). When the hook matched no form a grant names --
+# a script whose push Claude Code recorded on the result, say -- a light
+# word-token guess, good enough to cite, not an enforcement check.
 action_for() {
+    hooked=$(hook_action "$1")
+    if [ -n "$hooked" ]; then echo "$hooked"; return; fi
     words=$(printf '%s %s' "$1" "$2" | tr -c 'A-Za-z0-9_-' '\n')
     has() { printf '%s\n' "$words" | grep -qx -- "$1"; }
     if has push || has send-pack; then echo push
     elif has gh && has pr && has create; then echo pr-create
     elif has gh && has pr && has merge; then echo pr-merge
     elif has gh && has issue && has close; then echo issue-close
-    elif has gh && has issue && has comment; then echo issue-comment
-    elif has gh && has issue && { has create || has new; }; then echo issue-create
-    elif has gh && has api && has issues && has comments; then echo issue-comment
     else echo ""
     fi
 }

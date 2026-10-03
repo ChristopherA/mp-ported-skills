@@ -1252,6 +1252,8 @@ repo_git "$grepo2" checkout -q -- docs/agents/supervision.md
     bash_call c1 'gh issue comment 104 --body-file "$CLAUDE_JOB_DIR/tmp/c.md"'
     bash_call c2 'gh issue create --title "x" --body-file b.md --label ready-for-agent'
     bash_call c3 'gh api repos/o/r/issues/104/comments -f body=x'
+    bash_call c4 'gh api repos/o/r/issues -f title=x'
+    bash_call c5 'gh issue create --title "a comment to close"'
 } >"$cfg/projects/-work-project/$sid.jsonl"
 new_grant_repo grepo3 '## Grants
 
@@ -1261,7 +1263,9 @@ new_grant_repo grepo3 '## Grants
 check "actions: a granted comment and issue create are cited" \
     "command succeeded granted (issue-comment: findings for open tickets): gh issue comment 104 --body-file \"\$CLAUDE_JOB_DIR/tmp/c.md\"
 command succeeded granted (issue-create): gh issue create --title \"x\" --body-file b.md --label ready-for-agent
-command succeeded granted (issue-comment: findings for open tickets): gh api repos/o/r/issues/104/comments -f body=x" \
+command succeeded granted (issue-comment: findings for open tickets): gh api repos/o/r/issues/104/comments -f body=x
+command succeeded granted (issue-create): gh api repos/o/r/issues -f title=x
+command succeeded granted (issue-create): gh issue create --title \"a comment to close\"" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo3" --start "$gstart" </dev/null | grep '^command')"
 new_grant_repo grepo4 '## Grants
 
@@ -1270,7 +1274,9 @@ new_grant_repo grepo4 '## Grants
 check "actions: an ungranted comment and issue create" \
     "command succeeded ungranted: gh issue comment 104 --body-file \"\$CLAUDE_JOB_DIR/tmp/c.md\"
 command succeeded ungranted: gh issue create --title \"x\" --body-file b.md --label ready-for-agent
-command succeeded ungranted: gh api repos/o/r/issues/104/comments -f body=x" \
+command succeeded ungranted: gh api repos/o/r/issues/104/comments -f body=x
+command succeeded ungranted: gh api repos/o/r/issues -f title=x
+command succeeded ungranted: gh issue create --title \"a comment to close\"" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo4" --start "$gstart" </dev/null | grep '^command')"
 
 echo "supervise: $pass passed, $fail failed"
