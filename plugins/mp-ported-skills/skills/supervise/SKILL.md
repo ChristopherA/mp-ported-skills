@@ -54,7 +54,7 @@ Run it with the Bash tool's `run_in_background`, since a ticket outlasts a foreg
 
 ## 4. Report
 
-One report, by the first line `watch.sh` printed. Whatever the outcome, it lists the shared actions the worker took, with `<cwd>` from `watch.sh` and `<start>` from step 1:
+One report, by the first line `watch.sh` printed. Whatever the outcome, it lists the shared actions the worker took, with `<cwd>` from `watch.sh` and `<start>` from step 1. For a settled run, take them after the capture and any push (Capture, below), since the capture can take shared actions of its own:
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/actions.sh" --id ID --dir "<cwd>" --start <start> </dev/null
@@ -62,9 +62,9 @@ sh "${CLAUDE_SKILL_DIR}/scripts/actions.sh" --id ID --dir "<cwd>" --start <start
 
 It prints one line for each PR or issue in the worker's job, each remote branch holding its commits, and each push, PR or issue command in its transcript or a subagent's, with whether it `succeeded`, was `refused`, `failed` or has `no result`. A command counts when the #66 hook would refuse it, when it runs a `gh pr` or `gh issue` subcommand that is not read-only, or when Claude Code recorded a push or PR on its result. It prints `none` only when it found nothing and read every source. A branch or command line is marked `granted (<citation>)` when a standing grant in `docs/agents/supervision.md` covers it, read only from the default branch as committed on origin (#58); otherwise `ungranted`. A branch line reads `pushed by the supervisor on the maintainer's approval` instead when `push.sh` pushed it for this worker (Push on approval, below). It reads `pushed by someone else`, neither granted nor ungranted, when no call in the worker's transcripts that succeeded or has no result pushed to it, such as a branch the maintainer pushed from their own terminal; a refused or failed push of the worker's does not count (#98). When a transcript could not be read, the branch is read as the worker's. Report a `granted` line too -- it is what the maintainer's standing grant already approved, not something to re-approve -- report every `ungranted` line as a shared action the maintainer did not approve, a `pushed by someone else` line as no action of the worker's, and every `note` line as a source that was not read, never as no actions.
 
-- **`done`**: the ticket and its commits, `git -C <cwd> log --oneline <start>..HEAD`, the shared actions, and whether the ticket is closed (`gh issue view N --json state`). `done` means only that the worker's turn ended: with no commits and the ticket open, read its last output (below), since it may have ended on a question asked in plain text, and report that as blocked with `claude attach ID`. Otherwise stop the worker, which is still live: `claude stop ID`, then release its marker (below). When `cwd` is not the Project folder, say the commits sit in that checkout, on a branch nobody pushes.
+- **`done`**: the ticket and its commits, `git -C <cwd> log --oneline <start>..HEAD`, the shared actions, and whether the ticket is closed (`gh issue view N --json state`). `done` means only that the worker's turn ended: with no commits and the ticket open, read its last output (below), since it may have ended on a question asked in plain text, and report that as blocked with `claude attach ID`. Otherwise the work is settled: send the capture first (Capture, below), unless this `done` is the capture's own. Then stop the worker, which is still live: `claude stop ID`, then release its marker (below). When `cwd` is not the Project folder, say the commits sit in that checkout, on a branch nobody pushes, and send no capture: the worker is out of its folder, as for `moved`.
 - **`moved`**: stop the worker at once, `claude stop ID`, and release its marker (below). Report where it went: the `cwd` line, with its commits there, `git -C <cwd> log --oneline <start>..HEAD` on `git -C <cwd> branch --show-current`, when `cwd` is not the Project folder; and every `worktree`, `branch` and `commit` line. Say the commits sit on a branch nobody pushes. A worktree inside the Project folder, such as one under `.claude/worktrees/`, also leaves its folder untracked there, so `state.sh` reports work in flight until the maintainer removes the worktree; say so. Moving or salvaging the commits is the maintainer's. An `other` line alongside these is still another session's worktree, not the worker's; report it as such, not as part of why the worker moved.
-- **`blocked input needed`** whose `needs` line is a `git push` no grant covers: follow Push on approval, below, instead of the rest of this item. Do not tell the maintainer to push from a terminal, with a `!` command, or by telling the worker: the first two do not work from a remote client, and the hook refuses the third.
+- **`blocked input needed`** whose `needs` line is a `git push` no grant covers: the work is settled. Send the capture first (Capture, below), unless this block is the capture's own, then follow Push on approval, below, instead of the rest of this item. Do not tell the maintainer to push from a terminal, with a `!` command, or by telling the worker: the first two do not work from a remote client, and the hook refuses the third.
 - **`blocked permission prompt`**, **`blocked input needed`**, **`blocked question`**: what it waits for (the `needs` line), the id, and the command to open it, in a fenced code block of its own:
 
   ```sh
@@ -108,7 +108,7 @@ sh "${CLAUDE_SKILL_DIR}/scripts/view.sh" --close --pane '<session> <window> <tab
 
 It prints `closed pane <session>`, or `pane <session> already closed` when iTerm2 closed it with the viewer. It closes the pane whatever runs there, so never call it while the worker runs. While the worker is left running (`blocked`, `hang`), leave its viewer open, in either mode: it is where the maintainer answers.
 
-Then record the run, whatever the outcome, with the same `<cwd>` and `<start>` and the ticket's number:
+Then record the run, whatever the outcome, with the same `<cwd>` and `<start>` and the ticket's number. For a settled run, record it after the capture and any push, once the worker is stopped, so its `captures and clears` field counts the capture and its shared actions show the push:
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/record.sh" --id ID --dir "<cwd>" --start <start> --ticket N > "<scratchpad>/run-record.md" </dev/null
@@ -122,9 +122,40 @@ gh issue comment N --body-file "<scratchpad>/run-record.md"
 
 `record.sh --session <session id>` in place of `--id` records a plain interactive session, such as a hand-run `/implement` of a ticket the same size, leaving out the job's fields: that is the baseline a supervised run is compared against.
 
+## Capture
+
+A worker whose work is settled ends with `/mp-ported-skills:capturing` in its own session, before any push and before it is stopped for good: only that session holds what it decided and learned. A peaked zone, a long ticket, or a context near or past compaction is no reason to skip it or move it to a fresh session.
+
+- **When:** as soon as the work is settled, before any push: after `done` with the work committed, and after `blocked input needed` whose `needs` line is a `git push` no grant covers.
+- **Not** after `moved`, `hang`, any other block, `stopped` or `gone`, nor after `done` with `cwd` outside the Project folder: a worker left running is the maintainer's to answer, and one out of its folder is stopped as it stands.
+
+Capturing after the push cost a second round of Push on approval each time the capture committed (#67, #98), and its report then described push state from before the push. So the capture goes first, and one push covers the work and the capture's commits.
+
+1. Take a fresh snapshot, since the worker's first watch is over:
+
+   ```sh
+   sh "${CLAUDE_SKILL_DIR}/scripts/watch.sh" --dir "<project folder>" --snapshot > "<scratchpad>/snapshot-capture.txt" </dev/null
+   ```
+
+2. Send the capture as a follow-up (Follow-ups, below), and with `--watch tmux` or `--watch iterm` open the viewer again once it prints `resumed ID`:
+
+   ```sh
+   sh "${CLAUDE_SKILL_DIR}/scripts/resume.sh" --id ID --dir "<project folder>" --prompt "/mp-ported-skills:capturing" </dev/null
+   ```
+
+3. Watch it as in Watch (section 3), with `--since "<scratchpad>/snapshot-capture.txt"`, and go on by its first line:
+   - **`done`**, with nothing waiting on a push: the Report step for `done`, with no second capture.
+   - **`blocked input needed`** on a `git push` no grant covers: the capture committed, or the work was already waiting on the push. Push on approval, below, once, over everything from `<start>` to HEAD.
+   - **`blocked question`** with no `Waiting on:` line: report it as the Report step says for `blocked question`. A capture that ends by listing its unposted findings can read as a question when one of them ends on a decision (#110); when the last output is the capture's finished report, say so.
+   - **Any other state**: the Report step for that state.
+4. Pass on the capture's report, from its last output, in this run's report:
+   - its unposted findings, and its ungranted before-clear jobs, as items for the maintainer, leaving out any the supervisor then does itself (the push, a plugin update);
+   - its next step, and when that differs from what `step.sh` now prints for the folder, say so and give `step.sh`'s;
+   - push state as it stands after Push on approval, not as the capture described it: the capture wrote before the push.
+
 ## Push on approval
 
-A worker blocked on a `git push` no grant covers has finished its work and committed it. The supervisor checks the commits, asks the maintainer once, and on a yes pushes them itself, so the push needs no terminal and no `!` command and works from a remote client (docs/adr/0007).
+A worker blocked on a `git push` no grant covers has finished its work and committed it. The capture runs first (Capture, above), so this runs once, after it, over the work and any commits the capture made. The supervisor checks the commits, asks the maintainer once, and on a yes pushes them itself, so the push needs no terminal and no `!` command and works from a remote client (docs/adr/0007).
 
 1. Stop the worker, `claude stop ID`, and release its marker (above). With `--watch tmux` or `--watch iterm`, close the viewer.
 2. Check, without pushing:
@@ -143,11 +174,11 @@ A worker blocked on a `git push` no grant covers has finished its work and commi
 
    It runs every check again, pushes only the checked commit, to the branch's upstream, and prints `pushed <upstream> A..B`. It records the push in the checkout, so `actions.sh` names the branch as pushed by the supervisor on the maintainer's approval, not as the worker's. Exit 2: a check failed since the question; report it and push nothing. Exit 3: the push failed; report its error. If a permission check refuses the push, report the refusal and stop. Do not route around it.
 5. When a `version` line showed a bump of a plugin this profile has installed, update it through Bash: `claude plugin marketplace update <marketplace> && claude plugin update <plugin>@<marketplace>`, and report the version it installed.
-6. Go on with the Report step for `done`: the shared actions, the ticket's state and the run record, taken now, after the stop, so the record carries the worker's cost and the push.
+6. Go on with the Report step for `done`, with no second capture: the shared actions, the ticket's state, the capture's report and the run record, taken now, after the capture, the stop and the push, so the record carries the worker's cost, the capture and the push.
 
 ## Follow-ups
 
-No command sends input to a running background session, so a follow-up to a worker, such as `/mp-ported-skills:capturing` after `done`, goes by stop and resume:
+No command sends input to a running background session, so a follow-up to a worker, such as the capture (Capture, above), goes by stop and resume:
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/resume.sh" --id ID --dir "<project folder>" --prompt "<prompt>" </dev/null
@@ -180,4 +211,4 @@ Tell the maintainer, with the watch command (`tmux attach -t mp-supervise`, or `
 - the viewer is live: what they type there reaches the worker as a prompt, and answering a permission prompt there is fine;
 - attaching to the worker by hand (`claude attach ID`, or a viewer of their own) between a stop and a resume splits the worker. Leaving the tmux session (`Ctrl+B d`) is always safe; with `--watch iterm`, leave the pane for the supervisor to close.
 
-Done when the report names the ticket, the outcome, the shared actions (or `none`), either its commits or the id with `claude attach`, and the run record's comment.
+Done when the report names the ticket, the outcome, the shared actions (or `none`), either its commits or the id with `claude attach`, the capture's report for a settled run, and the run record's comment.

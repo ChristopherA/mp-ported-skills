@@ -280,6 +280,50 @@ check "record: no job, named" "- note: no job state for c2a368ee under $cfg/jobs
 check "record: no job, shared actions still listed" "  - branch origin/56-topic ungranted: holds the worker's commits" \
     "$(printf '%s\n' "$out" | grep '^  - branch')"
 
+# A settled run in the Capture step's order: the worker ends waiting on a
+# push, the capture is sent with resume.sh's prompt and commits, push.sh
+# pushes the work and the capture's commit in one round, and the record is
+# taken after both.
+settled="$work/settled"
+git init -q -b main "$settled"
+repo_git "$settled" commit -q --allow-empty -m start
+git init -q --bare "$work/settled-remote.git"
+repo_git "$settled" remote add origin "$work/settled-remote.git"
+repo_git "$settled" push -q -u origin main 2>/dev/null
+settled_start=$(git -C "$settled" rev-parse HEAD)
+repo_git "$settled" commit -q --allow-empty -m "worker's commit"
+repo_git "$settled" commit -q --allow-empty -m "capture's commit"
+command rm -rf "$cfg/projects"
+job
+worker
+jq -c 'select(.type != "assistant" or ((.message.content // []) | map(.name) | index("Skill") | not))
+       | select(.subtype != "compact_boundary")
+       | select((.message.content | type) != "string" or (.message.content | test("/clear") | not))' \
+    "$cfg/projects/-work-project/$sid.jsonl" >"$work/t"
+{
+    command cat "$work/t"
+    call 2026-09-29T06:14:20.000Z r4 claude-sonnet-5 1 100000 1000 50 \
+        '[{"type":"text","text":"Waiting on: git push origin main"}]'
+    said 2026-09-29T06:20:00.000Z "$(printf '<command-message>mp-ported-skills:capturing</command-message>\n<command-name>/mp-ported-skills:capturing</command-name>')"
+    call 2026-09-29T06:21:00.000Z r5 claude-sonnet-5 1 100000 1000 50 \
+        '[{"type":"text","text":"Waiting on: git push origin main"}]'
+    jq -cn '{type: "system", subtype: "turn_duration", timestamp: "2026-09-29T06:21:01.000Z", pendingBackgroundAgentCount: 0}'
+} >"$cfg/projects/-work-project/$sid.jsonl"
+pushed=$(sh "$scripts/push.sh" --dir "$settled" --id c2a368ee --start "$settled_start" --no-sweep </dev/null 2>&1)
+check "settled: one push of the work and the capture" \
+    "pushed origin/main $(git -C "$settled" rev-parse --short "$settled_start")..$(git -C "$settled" rev-parse --short HEAD)" \
+    "$(printf '%s\n' "$pushed" | grep '^pushed ')"
+check "settled: one push round recorded" "1" \
+    "$(grep -c . "$(git -C "$settled" rev-parse --path-format=absolute --git-path mp-supervise-pushed)")"
+out=$(PATH="$work/bin:$PATH" sh "$scripts/record.sh" --id c2a368ee --dir "$settled" --start "$settled_start" \
+    --ticket 56 --supervisor "$sup" --now 2026-09-29T06:25:00Z </dev/null)
+check "settled: the record counts the capture" "1 capture" "$(field 'captures and clears' "$out")"
+check "settled: the record shows the one push" \
+    "  - branch origin/main pushed by the supervisor on the maintainer's approval: holds the worker's commits" \
+    "$(printf '%s\n' "$out" | grep '^  - ')"
+check "settled: the outcome holds both commits" "2 commits after $(git -C "$settled" rev-parse --short "$settled_start"), ticket #56 CLOSED" \
+    "$(field outcome "$out")"
+
 # --- recorded fixtures -----------------------------------------------------
 # A live background job, cut down: tests/fixtures/jobs/1420c08b and its
 # transcript, live-check-worker.jsonl.
