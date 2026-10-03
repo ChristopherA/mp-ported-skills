@@ -1,7 +1,8 @@
 #!/bin/sh
 # view.sh -- open a tmux window that shows a supervised worker, for
 # `/supervise --watch tmux` (#68), or remove the tmux session that holds
-# those windows.
+# those windows. With --iterm, open an iTerm2 split pane beside this session
+# instead, for `/supervise --watch iterm` (#102), or close one.
 #
 # The window's own command is `claude attach <id>`, run with the profile's
 # CLAUDE_CONFIG_DIR and claude's full path (a tmux server started earlier
@@ -21,25 +22,43 @@
 # The viewer is live: what the maintainer types there reaches the worker as
 # a prompt, and a permission prompt can be answered there.
 #
+# The iTerm2 pane opens through iterm-pane's pane-open.sh, which splits the
+# pane on this session's TTY, with a first command that changes into DIR and
+# execs the same `claude attach`, so the pane's shell ends with the viewer.
+# The pane's login shell does not inherit CLAUDE_CONFIG_DIR, so it is set on
+# the command. No pane opens when this session runs inside tmux, outside
+# iTerm2, or under the `claude remote-control` server (CLAUDE_CODE_ENTRYPOINT
+# sdk-cli), whose TTY is the server's own pane. --close --pane closes the
+# pane whatever runs there, so call it only once the worker is stopped.
+#
 # Usage:
 #   view.sh --id ID --dir DIR [--session NAME]
 #   view.sh --close [--session NAME]
+#   view.sh --iterm --id ID --dir DIR
+#   view.sh --close --pane 'SESSION WINDOW TAB'
 #
 # NAME defaults to mp-supervise. MP_VIEW_WAIT: seconds to wait before
 # checking the viewer is still running (default 2); one that exits at once,
 # as `claude attach` does for an id it cannot open, is reported and its
 # window closed.
 #
+# MP_PANE_DIR: where the iterm-pane scripts are (default: the iterm-pane
+# skill beside this one).
+#
 # Prints `viewer NAME:ID runs claude attach ID` and the command to watch it,
-# or for --close `closed NAME` or `no tmux session NAME`. Exits 0 opened or
-# closed; 1 not.
+# or for --close `closed NAME` or `no tmux session NAME`. With --iterm:
+# `viewer iterm pane SESSION WINDOW TAB runs claude attach ID` and the
+# command to close it, or for --close `closed pane SESSION` or `pane SESSION
+# already closed`. Exits 0 opened or closed; 1 not.
 
 set -u
 
 ID=""
 DIR=""
-SESSION="mp-supervise"
+SESSION=""
 CLOSE=""
+ITERM=""
+PANE=""
 
 need_value() { [ $# -ge 2 ] || { printf 'Error: %s needs a value\n' "$1" >&2; exit 1; }; }
 while [ $# -gt 0 ]; do
@@ -48,18 +67,51 @@ while [ $# -gt 0 ]; do
         --dir)     need_value "$@"; DIR="$2"; shift 2 ;;
         --session) need_value "$@"; SESSION="$2"; shift 2 ;;
         --close)   CLOSE=1; shift ;;
+        --iterm)   ITERM=1; shift ;;
+        --pane)    need_value "$@"; PANE="$2"; shift 2 ;;
         --help)
             printf 'Usage: view.sh --id ID --dir DIR [--session NAME]\n'
             printf '       view.sh --close [--session NAME]\n'
-            printf 'Opens a tmux window running claude attach ID, or removes the tmux session. Outputs: the window and the watch command\n'
+            printf '       view.sh --iterm --id ID --dir DIR\n'
+            printf "       view.sh --close --pane 'SESSION WINDOW TAB'\n"
+            printf 'Opens a tmux window (or with --iterm an iTerm2 pane) running claude attach ID, or closes it. Outputs: the viewer and the command to watch or close it\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
 done
 fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
+[ -z "$SESSION" ] || [ -z "$ITERM$PANE" ] || fail "--session names a tmux session, not an iTerm2 pane"
+[ -n "$SESSION" ] || SESSION="mp-supervise"
 case $SESSION in
     '' | *[!A-Za-z0-9_-]*) fail "--session takes letters, digits, - and _, not '$SESSION'" ;;
 esac
+
+panes=${MP_PANE_DIR:-$(CDPATH= cd -- "$(dirname -- "$0")/../../iterm-pane/scripts" && pwd)}
+
+# Sets PS, PW and PT from a pane's coordinates, `SESSION WINDOW TAB`.
+pane_coords() {
+    set -f
+    set -- $1
+    set +f
+    [ $# = 3 ] || return 1
+    case "$1" in '' | *[!A-Za-z0-9:-]*) return 1 ;; esac
+    case "$2" in '' | *[!0-9]*) return 1 ;; esac
+    case "$3" in '' | *[!0-9]*) return 1 ;; esac
+    PS=$1 PW=$2 PT=$3
+}
+pane_state() { sh "$panes/pane-classify.sh" --session "$PS" --window "$PW" --tab "$PT" </dev/null 2>/dev/null; }
+pane_close() { sh "$panes/pane-close.sh" --session "$PS" --window "$PW" --tab "$PT" --force </dev/null >/dev/null; }
+
+if [ -n "$CLOSE" ] && [ -n "$PANE" ]; then
+    pane_coords "$PANE" || fail "--pane needs 'SESSION WINDOW TAB', not '$PANE'"
+    if [ "$(pane_state)" = gone ]; then
+        echo "pane $PS already closed"
+    else
+        pane_close || fail "iTerm2 could not close pane $PS"
+        echo "closed pane $PS"
+    fi
+    exit 0
+fi
 
 if [ -n "$CLOSE" ]; then
     command -v tmux >/dev/null 2>&1 || { echo "no tmux session $SESSION"; exit 0; }
@@ -78,10 +130,46 @@ esac
 [ -n "$DIR" ] || fail "--dir is required"
 [ -d "$DIR" ] || fail "not a directory: $DIR"
 DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
+wait=${MP_VIEW_WAIT:-2}
+
+if [ -n "$ITERM" ]; then
+    [ -z "${TMUX:-}" ] || fail "this session runs inside tmux, so no iTerm2 pane can open; watch with claude attach $ID"
+    [ "${CLAUDE_CODE_ENTRYPOINT:-}" != sdk-cli ] ||
+        fail "this session was started by claude remote-control, so it has no iTerm2 pane to split; watch with claude attach $ID"
+    [ "${TERM_PROGRAM:-}" = iTerm.app ] || [ "${LC_TERMINAL:-}" = iTerm2 ] ||
+        fail "this session is not in iTerm2, so no pane can open; watch with claude attach $ID"
+    claude=$(command -v claude) || fail "claude is not on PATH, so no viewer can open"
+    [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the viewer's profile cannot be pinned"
+    # A shell string literal: single quotes, each ' inside closed, escaped and
+    # reopened.
+    sh_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+    line="cd $(sh_quote "$DIR") && exec env CLAUDE_CONFIG_DIR=$(sh_quote "$CLAUDE_CONFIG_DIR") $(sh_quote "$claude") attach $ID"
+    err=$(mktemp)
+    if ! coords=$(sh "$panes/pane-open.sh" --direction vertical --command "$line" </dev/null 2>"$err"); then
+        why=$(head -n 1 "$err")
+        command rm -f "$err"
+        fail "no iTerm2 pane opened (${why:-pane-open.sh failed}); watch with claude attach $ID"
+    fi
+    command rm -f "$err"
+    pane_coords "$(printf '%s\n' "$coords" | head -n 1)" ||
+        fail "pane-open.sh printed no pane coordinates; watch with claude attach $ID"
+    # claude attach for an id it cannot open exits at once; iTerm2 then
+    # closes the pane, or leaves it at a shell or ended.
+    sleep "$wait"
+    case $(pane_state) in
+        gone) fail "claude attach $ID exited at once, so no viewer is open; watch with claude attach $ID" ;;
+        shell)
+            pane_close
+            fail "claude attach $ID exited at once, so no viewer is open; watch with claude attach $ID" ;;
+    esac
+    echo "viewer iterm pane $PS $PW $PT runs claude attach $ID"
+    echo "close: view.sh --close --pane '$PS $PW $PT'"
+    exit 0
+fi
+
 command -v tmux >/dev/null 2>&1 || fail "tmux is not on PATH, so no viewer can open; watch with claude attach $ID"
 claude=$(command -v claude) || fail "claude is not on PATH, so no viewer can open"
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the viewer's profile cannot be pinned"
-wait=${MP_VIEW_WAIT:-2}
 
 set -- env "CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR" "$claude" attach "$ID"
 if tmux has-session -t "=$SESSION" 2>/dev/null; then

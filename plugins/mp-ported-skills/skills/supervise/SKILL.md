@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 Run one ticket in a Project, from the Hub or from inside the Project, as the maintainer would by hand: read the next step, start `/implement #N` in a fresh session, watch it, and report. The worker is a Claude Code background session (`claude --bg`), whose first prompt enters through the human's door, so the ticket gets the full `/mattpocock-skills:implement`, its TDD and its own `/code-review` (ADR 0003). One ticket, then stop.
 
-The Project folder, relative to this session's folder or absolute, is the first word here (`.` when this session runs inside the Project); `--model <id>`, `--effort <level>` and `--watch tmux` may follow: $ARGUMENTS
+The Project folder, relative to this session's folder or absolute, is the first word here (`.` when this session runs inside the Project); `--model <id>`, `--effort <level>` and `--watch tmux` or `--watch iterm` may follow: $ARGUMENTS
 
 ## Policy
 
@@ -42,7 +42,7 @@ sh "${CLAUDE_SKILL_DIR}/scripts/launch.sh" --dir "<project folder>" --ticket N <
 
 Add `--model <id>` when the user gave one; the default is `claude-sonnet-5`, and a model without auto mode (Haiku) is refused. Add `--effort <level>` (`low`, `medium`, `high`, `xhigh` or `max`) when the user gave one; without it the worker runs at the model's default effort. It sets `CLAUDE_CONFIG_DIR` to this profile for the worker, launches in auto mode with `--disallowedTools EnterWorktree`, `--settings '{"worktree":{"bgIsolation":"none"}}'` and the grants text in `--append-system-prompt`, names the worker `worker <project> #N: <ticket title>` with `--name` (cut to 80 characters), so `claude agents` and the Claude app tell workers apart (#103), and reads the job's `state.json` to confirm the worker got this profile, the folder itself rather than a worktree, auto mode, the deny, the setting, the grants text, the name and the effort. The name survives the session-title hook at startup and a `resume.sh` wake; a `/clear` in the worker, which runs that hook again, is untested. When `gh issue view` cannot read the title, the name leaves it out and a `note:` line on stderr says so; report that line. A grant committed but not on origin is left out, and `grant.sh` names it on stderr as `note: ... ignored`; report that line. Without the setting, Claude Code 2.1.286 refuses a background worker's edits in the folder until it isolates, and a worker denied `EnterWorktree` makes its own worktree with `git worktree add` (#83). First it checks the Project is on its default branch, with a clean tree and no other live background session in it, and refuses otherwise: report the error, since a dirty tree or a branch is the maintainer's to settle. Once the worker passes its checks it writes the worker's id to the checkout's marker (`git rev-parse --git-path mp-supervise-worker`), which holds this session read-only there. It prints the worker's short id. Exit 1: nothing launched, report the error. Exit 2: the worker failed a check and was stopped, report the error with the id.
 
-With `--watch tmux`, open the worker's viewer now (Watching, below).
+With `--watch tmux` or `--watch iterm`, open the worker's viewer now (Watching, below).
 
 ## 3. Watch
 
@@ -100,7 +100,13 @@ With `--watch tmux`, once the worker is stopped or gone, remove the tmux session
 sh "${CLAUDE_SKILL_DIR}/scripts/view.sh" --close </dev/null
 ```
 
-It prints `closed mp-supervise`, or `no tmux session mp-supervise` when the window already closed with the worker. While the worker is left running (`blocked`, `hang`), leave its viewer open: it is where the maintainer answers.
+It prints `closed mp-supervise`, or `no tmux session mp-supervise` when the window already closed with the worker. With `--watch iterm`, close the pane instead, with the coordinates `view.sh` printed when it opened it:
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/view.sh" --close --pane '<session> <window> <tab>' </dev/null
+```
+
+It prints `closed pane <session>`, or `pane <session> already closed` when iTerm2 closed it with the viewer. It closes the pane whatever runs there, so never call it while the worker runs. While the worker is left running (`blocked`, `hang`), leave its viewer open, in either mode: it is where the maintainer answers.
 
 Then record the run, whatever the outcome, with the same `<cwd>` and `<start>` and the ticket's number:
 
@@ -120,7 +126,7 @@ gh issue comment N --body-file "<scratchpad>/run-record.md"
 
 A worker blocked on a `git push` no grant covers has finished its work and committed it. The supervisor checks the commits, asks the maintainer once, and on a yes pushes them itself, so the push needs no terminal and no `!` command and works from a remote client (docs/adr/0007).
 
-1. Stop the worker, `claude stop ID`, and release its marker (above). With `--watch tmux`, close the viewer.
+1. Stop the worker, `claude stop ID`, and release its marker (above). With `--watch tmux` or `--watch iterm`, close the viewer.
 2. Check, without pushing:
 
    ```sh
@@ -147,7 +153,7 @@ No command sends input to a running background session, so a follow-up to a work
 sh "${CLAUDE_SKILL_DIR}/scripts/resume.sh" --id ID --dir "<project folder>" --prompt "<prompt>" </dev/null
 ```
 
-It stops the worker, waits until `claude agents` shows it `stopped` or has shown no pid for 60 seconds (`--settle`), and resumes the job's original session id with the prompt and no flags. It refuses while another background session is live in the same checkout, naming each. A resume that starts a copy instead of waking the worker loses the launch's EnterWorktree deny, auto mode and model, so the copy is stopped and removed at once, the worker stopped again, and the resume retried, up to 3 times (`--tries`). It prints one line for each copy, then `resumed ID`; name every copy in the report. On a wake it writes the worker's marker again, since the worker is live again, and prints a `note` line first when it could not; report that line. Release the marker again once the follow-up's worker is stopped. The id stays the same, so watch it again with `watch.sh`, and with `--watch tmux` open its viewer again (Watching, below) once `resumed ID` is printed, never before. Exit 1: nothing resumed, report the error. Exit 2: every try started a copy; each was removed, the worker is left stopped, and the error names them all.
+It stops the worker, waits until `claude agents` shows it `stopped` or has shown no pid for 60 seconds (`--settle`), and resumes the job's original session id with the prompt and no flags. It refuses while another background session is live in the same checkout, naming each. A resume that starts a copy instead of waking the worker loses the launch's EnterWorktree deny, auto mode and model, so the copy is stopped and removed at once, the worker stopped again, and the resume retried, up to 3 times (`--tries`). It prints one line for each copy, then `resumed ID`; name every copy in the report. On a wake it writes the worker's marker again, since the worker is live again, and prints a `note` line first when it could not; report that line. Release the marker again once the follow-up's worker is stopped. The id stays the same, so watch it again with `watch.sh`, and with `--watch tmux` or `--watch iterm` open its viewer again (Watching, below) once `resumed ID` is printed, never before. Exit 1: nothing resumed, report the error. Exit 2: every try started a copy; each was removed, the worker is left stopped, and the error names them all.
 
 ## Watching
 
@@ -159,9 +165,17 @@ sh "${CLAUDE_SKILL_DIR}/scripts/view.sh" --id ID --dir "<project folder>" </dev/
 
 It opens a window in the tmux session `mp-supervise` whose own command is `claude attach ID`, so the window closes by itself when the worker is stopped, and the session ends with its last window. It prints the window and the watch command. Pass both lines on in the next message to the maintainer, with the rule below. Exit 1: no viewer opened, for the reason it names. Report it and go on: the run does not depend on the viewer.
 
+With `--watch iterm`, the viewer is an iTerm2 split pane beside this session, opened at the same times, with nothing to attach by hand:
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/view.sh" --iterm --id ID --dir "<project folder>" </dev/null
+```
+
+It splits this session's pane through `iterm-pane`'s `pane-open.sh`, and the pane's first command changes into the folder and runs `exec env CLAUDE_CONFIG_DIR=<this profile> <claude> attach ID`, since the pane's login shell does not inherit the profile. The pane's shell ends with the viewer, so under a profile that closes a session when it ends (iTerm2's default) the pane closes by itself when the worker is stopped; the Report step closes it in any case. It prints `viewer iterm pane <session> <window> <tab> runs claude attach ID` and the `close:` command; keep the coordinates for that command, and pass both lines on to the maintainer. Exit 1: no pane opened, with one line naming why: this session runs inside tmux, is not in iTerm2, or was started by the `claude remote-control` server from the app (its terminal is the server's own pane), or `pane-open.sh` failed. Report that line and go on without a viewer.
+
 Never open a viewer at any other time, and never in a loop. Attaching wakes a stopped session, so a viewer opened between `resume.sh`'s stop and its resume makes the resume start a copy and splits the worker (#55).
 
-Tell the maintainer, with the watch command (`tmux attach -t mp-supervise`, or `tmux -CC attach -t mp-supervise` in iTerm2):
+Tell the maintainer, with the watch command (`tmux attach -t mp-supervise`, or `tmux -CC attach -t mp-supervise` in iTerm2) or the pane:
 
 - the viewer is live: what they type there reaches the worker as a prompt, and answering a permission prompt there is fine;
 - attaching to the worker by hand (`claude attach ID`, or a viewer of their own) between a stop and a resume splits the worker. Leaving the tmux session (`Ctrl+B d`) is always safe.
