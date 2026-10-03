@@ -54,6 +54,8 @@ A pattern `pane-classify.sh` matches comes from a live capture in `tests/fixture
 
 A live test of a change to the plugin passes `--plugin-dir <checkout>/plugins/mp-ported-skills` to `claude`, as `tests/live/deny-shared-actions.sh` does: a plain session loads the installed release, which does not hold the change. To read a background session's result, it puts a unique token in the prompt and finds the transcript under `$CLAUDE_CONFIG_DIR/projects/` by that token. The session's `jobs/<id>/` folder may already be gone.
 
+A live test that reads the session id from `claude --bg`'s `backgrounded · <id>` line strips color codes first, as `launch.sh` does. With `FORCE_COLOR` set, as the maintainer's sessions set it, the id is colored even with no terminal, and a pattern on the plain line finds no id (Claude Code 2.1.288).
+
 A live test that resumes a background session reads the line `claude --bg --resume` prints: `woke session <id>` is the original, `started a copy as <id>` is a copy. Stop and `claude rm` a copy before going on, since it runs without the launch's saved flags. A resume issued as soon as `claude agents` showed the stopped session without a pid started one; the same resume 47 seconds later woke the original.
 
 A live test that checks a background worker's edits looks in every worktree (`git worktree list`, `git log --all`), not only the checkout. From Claude Code 2.1.286 a background session may not edit the shared checkout, so a worker denied `EnterWorktree` made its own with `git worktree add` and committed there, while its `cwd` stayed the checkout (#83).
