@@ -186,6 +186,12 @@ check "an issue comment --edit-last --create-if-none is not the comment grant" "
     "$(decision 0 auto 'gh issue comment 104 --body y --edit-last --create-if-none' "$granted")"
 check "an issue comment --delete-last is not the comment grant" "deny" \
     "$(decision 0 auto 'gh issue comment 104 --delete-last --yes' "$granted")"
+check "an --edit-last after a body holding parens is not the comment grant" "deny" \
+    "$(decision 0 auto 'gh issue comment 3 --body "fix (see log)" --edit-last' "$granted")"
+check "a --delete-last after a body holding a semicolon is not the comment grant" "deny" \
+    "$(decision 0 auto 'gh issue comment 3 --body "a; b" --delete-last --yes' "$granted")"
+check "a body holding parens still posts on the comment grant" "" \
+    "$(decision 0 auto 'gh issue comment 3 --body "fix (see log)"' "$granted")"
 check "a REST PATCH of an issue comment is not the comment grant" "deny" \
     "$(decision 0 auto 'gh api -X PATCH repos/o/r/issues/comments/99 -f body=y' "$granted")"
 check "a REST DELETE of an issue comment is not the comment grant" "deny" \

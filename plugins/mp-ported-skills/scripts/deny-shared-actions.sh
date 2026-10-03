@@ -210,6 +210,19 @@ fi
 
 [ -n "$matched" ] || exit 0
 
+# A comment's body can hold a separator (`--body "a; b" --edit-last`), and
+# the scan above then classified only the words before it. Editing or
+# deleting a comment is not the comment grant's (#113), so look for the
+# flag in the whole command.
+if [ "$matched" = "gh issue comment" ]; then
+    words=$(printf '%s' "$cmd" | tr -c 'A-Za-z0-9_-' '\n')
+    if printf '%s\n' "$words" | grep -qx -- --delete-last; then
+        matched="gh issue comment (delete)"
+    elif printf '%s\n' "$words" | grep -qx -- --edit-last; then
+        matched="gh issue comment (edit)"
+    fi
+fi
+
 # A standing grant lets this exact form through. Only a form grant.sh can
 # name maps to an action; the other gh api forms and the piped-into-a-shell
 # fallback stay refused, since a grant names an action, not an arbitrary

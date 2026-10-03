@@ -70,12 +70,13 @@ classify_gh() {
     issue/comment)
         # The comment grant posts a new comment only (#113). Editing or
         # deleting the last one is named apart, so no grant covers it. Any
-        # word that is the flag counts, even one gh would read as a body.
+        # word that is the flag counts, even one gh would read as a body;
+        # the first one found names the form, and both are refused.
         matched="gh issue comment"
         shift 2
         for _carg in "$@"; do
             case "$_carg" in
-            --edit-last | --edit-last=*) matched="gh issue comment (edit)" ;;
+            --edit-last | --edit-last=*) matched="gh issue comment (edit)"; break ;;
             --delete-last | --delete-last=*) matched="gh issue comment (delete)"; break ;;
             esac
         done
@@ -92,10 +93,8 @@ classify_gh() {
         # a method or field flag. Any other word -- a second path, a
         # header's value -- leaves it a plain gh api write, never granted,
         # as is a PATCH or DELETE of a comment (#113). A GraphQL mutation is
-        # never granted either, addComment and createIssue included: one
-        # document can hold several mutations under aliases, its text can
-        # come from a file or variables this scan does not read, and
-        # addComment also comments on pull requests.
+        # never granted either, addComment and createIssue included; ADR
+        # 0005 says why.
         shift
         _cmethod="" _cfields="" _ctarget="" _cgraphql="" _cissue="" _cwords=0
         while [ $# -gt 0 ]; do
