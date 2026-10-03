@@ -53,8 +53,11 @@
 # pushed to it: a push Claude Code recorded on the result, or a push
 # command whose text names the branch, or names no branch at all
 # (`git push`, `HEAD`, `--all`), since that could be any. A refused or
-# failed push does not count (#98). When a transcript could not be read,
-# every branch is read as the worker's, since nothing clears it.
+# failed push does not count (#98). The remote a command names is not
+# compared, so a push of `main` to any remote marks every `<remote>/main`
+# as the worker's. When a transcript could not be read, every branch is
+# read as the worker's, since nothing clears it. Each doubt resolves
+# toward the worker's push, never away from it.
 #
 # A branch push.sh pushed for this worker, on the maintainer's approval in
 # the supervisor's session (#100), is labelled `pushed by the supervisor on
@@ -221,7 +224,8 @@ action_for() {
 # reached, one per line, or `*` when it may have reached any. The recorded
 # branch is what Claude Code saw; the command's own `git push` words name
 # the rest. Split as gh_write splits, with redirections dropped first so
-# `2>&1` is not read as a refspec.
+# `2>&1` is not read as a refspec. Call it only through $(...): it reuses
+# the globals gh_write and the transcript loop set.
 push_targets() {
     [ -z "$2" ] || printf '%s\n' "$2"
     segments=$(printf '%s\n' "$1" | sed -E 's/[0-9]*[<>]+(&[0-9-]+| *[^ &|;<>]+)//g' |
@@ -234,8 +238,8 @@ push_targets() {
     for seg in $segments; do
         IFS=$oldIFS
         # shellcheck disable=SC2086
-        t=$(push_words $seg)
-        [ -z "$t" ] || named="$named$t
+        reached=$(push_words $seg)
+        [ -z "$reached" ] || named="$named$reached
 "
     done
     set +f
@@ -261,7 +265,7 @@ push_words() {
     shift
     while [ $# -gt 0 ]; do
         case "$1" in
-            -C | -c) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
+            -C | -c | --git-dir | --work-tree | --namespace) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
             -*) shift ;;
             *) break ;;
         esac

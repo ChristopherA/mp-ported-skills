@@ -1127,6 +1127,8 @@ check "actions: a succeeded push naming main is the worker's" "branch origin/mai
     "$(mine 'cd /work/project && git push origin main 2>&1 | tail -3')"
 check "actions: a refspec's destination names the branch" "branch origin/main ungranted: holds the worker's commits" \
     "$(mine 'git -C /work/project push -u origin +HEAD:refs/heads/main')"
+check "actions: git's own options before the subcommand are skipped" "branch origin/main pushed by someone else: holds the worker's commits" \
+    "$(mine 'git --git-dir /work/project/.git push origin feature')"
 check "actions: a push naming no branch could be any" "branch origin/main ungranted: holds the worker's commits" \
     "$(mine 'git push')"
 check "actions: a push to another branch is not this one" "branch origin/main pushed by someone else: holds the worker's commits" \
