@@ -50,6 +50,8 @@ A live test that runs `supervise`'s `resume.sh` (or `launch.sh`) in a scratch fo
 
 The profile's sessions start in auto mode, so a test that needs a permission prompt launches with `--permission-mode default`.
 
+A test that needs a transcript's text builds on the shape-only fixtures in `tests/fixtures/transcripts/` and fills their text blocks in the test, as `tests/supervise-last-message.test.sh` does. Do not cut a new fixture with a real session's text kept: the auto-mode classifier refused copying a worker's transcript text into the repo (#71).
+
 A pattern `pane-classify.sh` matches comes from a live capture in `tests/fixtures/pane-states/`, recorded in a wide pane and in a narrow one. Claude Code cuts text to fit a narrow pane: the interrupt marker `⎿  Interrupted` rendered as `⎿  Interrup·` at 27 columns, and a pattern built from the full word read that idle session as `working`.
 
 A live test of a change to the plugin passes `--plugin-dir <checkout>/plugins/mp-ported-skills` to `claude`, as `tests/live/deny-shared-actions.sh` does: a plain session loads the installed release, which does not hold the change. To read a background session's result, it puts a unique token in the prompt and finds the transcript under `$CLAUDE_CONFIG_DIR/projects/` by that token. The session's `jobs/<id>/` folder may already be gone.
