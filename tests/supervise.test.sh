@@ -1332,5 +1332,32 @@ command succeeded ungranted: gh pr new --fill
 command succeeded ungranted: gh pr -R o/r new --fill" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo6" --start "$gstart" </dev/null | grep '^command')"
 
+# A command the hook matches no form in reaches action_for's word guess. A
+# PR op Claude Code recorded lists it; sudo hides the gh form from the hook.
+recorded_call() { # <id> <command>: a Bash call whose result recorded pr 5 created
+    jq -cn --arg id "$1" --arg c "$2" \
+        '{type: "assistant", message: {role: "assistant", content: [{type: "tool_use", id: $id, name: "Bash", input: {command: $c}}]}}'
+    jq -cn --arg id "$1" \
+        '{type: "user", toolUseResult: {gitOperation: {pr: {number: 5, action: "created"}}}, message: {role: "user", content: [{type: "tool_result", tool_use_id: $id, is_error: false, content: "ok"}]}}'
+}
+{
+    recorded_call f1 'sudo gh pr new --fill'
+    recorded_call f2 'sudo gh issue create --title x'
+    recorded_call f3 'sudo gh issue new --title x'
+    recorded_call f4 'sudo gh issue comment 5 --body x'
+} >"$cfg/projects/-work-project/$sid.jsonl"
+new_grant_repo grepo7 '## Grants
+
+- pr-create
+- issue-create
+- issue-comment
+'
+check "actions: the word guess cites gh pr new and issue create, new and comment" \
+    "command succeeded granted (pr-create): sudo gh pr new --fill -- pr 5 created
+command succeeded granted (issue-create): sudo gh issue create --title x -- pr 5 created
+command succeeded granted (issue-create): sudo gh issue new --title x -- pr 5 created
+command succeeded granted (issue-comment): sudo gh issue comment 5 --body x -- pr 5 created" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo7" --start "$gstart" </dev/null | grep '^command')"
+
 echo "supervise: $pass passed, $fail failed"
 [ "$fail" = 0 ]

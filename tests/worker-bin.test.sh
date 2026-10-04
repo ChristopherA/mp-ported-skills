@@ -141,7 +141,7 @@ check "gh issue -R o/r view goes to the real gh" "real gh: issue -R o/r view 3" 
 # action through; gh api stays refused alongside it (#58).
 repo granted
 mkdir -p granted/docs/agents
-printf '## Grants\n\n- push\n- issue-close\n- issue-comment\n- issue-create\n' >granted/docs/agents/supervision.md
+printf '## Grants\n\n- push\n- issue-close\n- issue-comment\n- issue-create\n- pr-create\n' >granted/docs/agents/supervision.md
 git -C granted add docs/agents/supervision.md
 git -C granted -c commit.gpgsign=false commit -q -m grants
 git -C granted push -q origin main 2>/dev/null
@@ -152,6 +152,9 @@ check "a granted push from a script goes through" "exit=0" "$(last "$(worker 0 g
 check "the remote moved" "$(git -C granted rev-parse main)" "$(git -C granted.git rev-parse main)"
 check "a granted issue close reaches the real gh" "real gh: issue close 4" \
     "$(worker 0 granted 'gh issue close 4' | head -n 1)"
+# gh pr new is gh's alias for gh pr create, so the pr-create grant covers it.
+check "a granted gh pr new from a script reaches the real gh" "real gh: pr new --fill" \
+    "$(worker 0 granted 'sh -c "gh pr new --fill"' | head -n 1)"
 # The grant is read from the repo the push acts on, not the one the
 # command runs in.
 git -C plain -c commit.gpgsign=false commit -q --allow-empty -m elsewhere

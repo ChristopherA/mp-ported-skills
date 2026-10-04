@@ -132,14 +132,14 @@ hook_reason() {
         jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null
 }
 
-# hook_action <command>: the action a grant names for the form the hook
-# matched in it (grant_action, in the classifier the hook and the wrappers
-# share), or empty when it matched none or a form no grant covers.
+# hook_action_of <reason>: the action a grant names for the form the hook
+# matched, from the reason hook_reason gave (grant_action, in the classifier
+# the hook and the wrappers share), or empty when it matched none or a form
+# no grant covers.
 . "$SCRIPT_DIR/../../../scripts/shared-action-classify.sh"
-hook_action() {
-    reason=$(hook_reason "$1")
-    [ -n "$reason" ] || return 0
-    form=${reason#*cannot run \'}
+hook_action_of() {
+    [ -n "$1" ] || return 0
+    form=${1#*cannot run \'}
     form=${form%%\' on its own*}
     grant_action "$form"
 }
@@ -221,18 +221,26 @@ calls() {
 # action_for <cmd> <ops>: push, pr-create, pr-merge, issue-close,
 # issue-comment, issue-create, or empty. The action of the form the hook
 # itself matched, so the line cites the grant the hook would have let the
-# command through on (#110). When the hook matched no form a grant names --
-# a script whose push Claude Code recorded on the result, say -- a light
-# word-token guess, good enough to cite, not an enforcement check.
+# command through on (#110), or empty for a form no grant covers (a
+# comment's --edit-last). When the hook matched no form at all -- a script
+# whose push Claude Code recorded on the result, say -- a light word-token
+# guess, good enough to cite, not an enforcement check. The gh forms are
+# read from the command alone: a recorded op says `pr`, which would make an
+# issue create read as a PR (#121).
 action_for() {
-    hooked=$(hook_action "$1")
-    if [ -n "$hooked" ]; then echo "$hooked"; return; fi
+    reason=$(hook_reason "$1")
+    if [ -n "$reason" ]; then hook_action_of "$reason"; return; fi
     words=$(printf '%s %s' "$1" "$2" | tr -c 'A-Za-z0-9_-' '\n')
+    cmd_words=$(printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '\n')
     has() { printf '%s\n' "$words" | grep -qx -- "$1"; }
+    gh_has() { printf '%s\n' "$cmd_words" | grep -qx -- "$1"; }
     if has push || has send-pack; then echo push
-    elif has gh && has pr && has create; then echo pr-create
-    elif has gh && has pr && has merge; then echo pr-merge
-    elif has gh && has issue && has close; then echo issue-close
+    elif ! gh_has gh; then echo ""
+    elif gh_has pr && { gh_has create || gh_has new; }; then echo pr-create
+    elif gh_has pr && gh_has merge; then echo pr-merge
+    elif gh_has issue && gh_has close; then echo issue-close
+    elif gh_has issue && { gh_has create || gh_has new; }; then echo issue-create
+    elif gh_has issue && gh_has comment; then echo issue-comment
     else echo ""
     fi
 }
