@@ -9,9 +9,9 @@ Context size is a call's `input_tokens + cache_creation_input_tokens + cache_rea
 - Worker aea3e16b (`/implement #90`, Opus 5.5 at medium, plugin 0.8.40): **65,310** at its first call, 105,848 about 90 seconds later after reading two tickets, `supervise`'s `SKILL.md`, ADRs, `watch.sh` and `tests/supervise.test.sh`.
 - The worker that built #130 (Opus 5.5 at medium, plugin 0.8.41): **65,309**.
 
-Each source was then measured by removing it. Every probe was a `claude --bg` session started the way `launch.sh` starts a worker (`--model claude-opus-5-5`, `--disallowedTools EnterWorktree`, the `bgIsolation: none` setting, `--permission-mode auto`, run in this checkout under this profile), with the prompt "Reply with the single word OK." in place of `/mattpocock-skills:implement #N`. Each probe was stopped and removed once its first call was recorded. Claude Code 2.1.289, 2026-10-04.
+Each source was then measured by removing it. Every probe was a `claude --bg` session started the way `launch.sh` starts a worker (`--model claude-opus-5-5`, `--disallowedTools EnterWorktree`, the `bgIsolation: none` setting, `--permission-mode auto`, run in this checkout under this profile), with the prompt "Reply with the single word OK." in place of `/mattpocock-skills:implement #N`. Each probe was stopped and removed once its first call was recorded. Claude Code 2.1.289.
 
-The probe with nothing removed read **64,829**, and again 64,831, so a reading is stable to a few tokens. A real worker's extra 481 is `/implement`'s skill text, the grants text and the ticket number. A `claude -p` session is not a stand-in: it read 45,369 with nothing removed, because print mode loads neither the Artifact tool nor Claude in Chrome.
+The probe with nothing removed read **64,829**, and again 64,831, so a reading is stable to a few tokens. A real worker's extra 481, found by difference rather than by removal, is `/implement`'s skill text, the grants text and the ticket number. A `claude -p` session is not a stand-in: it read 45,369 with nothing removed, because print mode loads neither the Artifact tool nor Claude in Chrome.
 
 ## Breakdown at the first call
 
@@ -54,7 +54,7 @@ A probe with all five removed read **45,328**, down 19,501 (30%) from 64,829. Th
 
 **Rejected: cut the environment rule.** At 6,656 tokens it is the largest single rule, but a worker runs shell commands all through a ticket, and the rule's traps (zsh word-splitting, BSD tools, pathless `rg` hangs, `-i` aliases) are written for exactly that. Shortening it is a change to the maintainer's shared rules, which this profile copies.
 
-**Rejected: a shorter grants text.** The grants text, `/implement`'s skill and the prompt come to 481 tokens together.
+**Rejected: a shorter grants text.** The grants text, `/implement`'s skill and the prompt come to 481 tokens together, by difference.
 
 **Rejected: large reads in subagents.** aea3e16b grew by 40,538 in its first 90 seconds of reading. Most of those reads are files the ticket changes, and Claude Code's `Edit` needs a `Read` of the file in the same session, so a subagent's summary cannot replace them. Only the read-only context (other tickets, ADRs) could move, and telling a worker how to explore changes how Matt's `/implement` runs, which #130 rules out. Ending a worker that is deep in its zone is #60's job.
 
