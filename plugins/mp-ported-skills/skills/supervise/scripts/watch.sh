@@ -52,10 +52,10 @@
 # the job's needs (#97).
 #
 # Usage:
-#   watch.sh --id ID [--dir DIR [--since FILE]] [--interval SECONDS] [--timeout SECONDS] [--stall SECONDS]
+#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--interval SECONDS] [--timeout SECONDS] [--stall SECONDS]
 #       poll until a state other than working; on timeout print the last
 #       one and exit 124
-#   watch.sh --id ID [--dir DIR [--since FILE]] --file PATH
+#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] --file PATH
 #       classify one saved `claude agents --json --all` output
 #   watch.sh --dir DIR --snapshot
 #       print DIR's repo state for --since: take it before the launch
@@ -63,7 +63,9 @@
 # DIR is the Project folder the worker was launched in. Without it, a working
 # session is working wherever it runs. --stall is how long the transcript
 # may hold steady before a poll reports hang (default 1800); --file never
-# reports it, since it has only one snapshot to look at.
+# reports it, since it has only one snapshot to look at. --after is the
+# `after` line resume.sh prints: a watch that follows a resume passes it, so
+# the turn that ended before the resume is not read as the resumed one's end.
 #
 # Exits 1 when the list cannot be read, which is never reported as gone.
 
@@ -74,6 +76,7 @@ FILE=""
 DIR=""
 SINCE=""
 SNAPSHOT=""
+AFTER=""
 INTERVAL=30
 TIMEOUT=14400
 STALL=1800
@@ -86,11 +89,12 @@ while [ $# -gt 0 ]; do
         --dir)      need_value "$@"; DIR="$2"; shift 2 ;;
         --since)    need_value "$@"; SINCE="$2"; shift 2 ;;
         --snapshot) SNAPSHOT=1; shift ;;
+        --after)    need_value "$@"; AFTER="$2"; shift 2 ;;
         --interval) need_value "$@"; INTERVAL="$2"; shift 2 ;;
         --timeout)  need_value "$@"; TIMEOUT="$2"; shift 2 ;;
         --stall)    need_value "$@"; STALL="$2"; shift 2 ;;
         --help)
-            printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--interval S] [--timeout S] [--stall S] | watch.sh --id ID [--dir DIR [--since FILE]] --file PATH | watch.sh --dir DIR --snapshot\n'
+            printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--interval S] [--timeout S] [--stall S] | watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] --file PATH | watch.sh --dir DIR --snapshot\n'
             printf 'Prints: working, moved, done, hang, blocked <what>, stopped, gone or unknown <state>; then cwd, needs, worktree, branch and commit lines.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
@@ -121,6 +125,7 @@ fi
 case $INTERVAL in '' | *[!0-9]*) fail "--interval needs whole seconds, not '$INTERVAL'" ;; esac
 case $TIMEOUT in '' | *[!0-9]*) fail "--timeout needs whole seconds, not '$TIMEOUT'" ;; esac
 case $STALL in '' | *[!0-9]*) fail "--stall needs whole seconds, not '$STALL'" ;; esac
+case $AFTER in *[!0-9]*) fail "--after needs epoch seconds, not '$AFTER'" ;; esac
 # claude agents and the job's state.json both follow the config dir, so an
 # unset one would read another profile's sessions.
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the profile being watched is unknown"
@@ -145,16 +150,21 @@ classify() {
 
 # turn_ended <session id>: whether the session's transcript shows its turn
 # ended: its last conversation row is a turn_duration row with no background
-# agents pending, since their reports start another turn. The transcript is
-# looked for in every project folder, since a worker that entered a worktree
-# has its transcript moved to the worktree's folder.
+# agents pending, since their reports start another turn. With --after, that
+# row counts only when its timestamp is at or after AFTER (a row with no
+# timestamp jq can read never does): right after a resume, the last row is
+# still the turn_duration that ended the previous turn (#122). The transcript
+# is looked for in every project folder, since a worker that entered a
+# worktree has its transcript moved to the worktree's folder.
 turn_ended() {
     [ -n "$1" ] || return 1
     for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
         [ -f "$t" ] || continue
         jq -e -s '[.[] | select(.type == "user" or .type == "assistant" or .type == "system")] | last
             | .type == "system" and .subtype == "turn_duration"
-              and (.pendingBackgroundAgentCount // 0) == 0' "$t" >/dev/null 2>&1 && return 0
+              and (.pendingBackgroundAgentCount // 0) == 0
+              and ($after == "" or ((.timestamp // "" | sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch 0)
+                                    >= ($after | tonumber)))' --arg after "$AFTER" "$t" >/dev/null 2>&1 && return 0
     done
     return 1
 }

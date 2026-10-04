@@ -219,6 +219,34 @@ note claude agents still said working" "$(watch_file working-idle 9121ff49)"
 transcript turn-ended -work-project c2a368ee-c513-484c-83d3-581830e209a5
 check "watch: busy is working whatever the transcript says" "working
 cwd /work/project" "$(watch_file working-busy c2a368ee)"
+# Right after resume.sh, the transcript's last row is still the turn_duration
+# that ended the previous turn. With --after (the epoch resume.sh printed),
+# only a turn end stamped at or after it counts (#122).
+stamped() { # <turn_duration timestamp> -- turn-ended, that row stamped with it
+    dir="$cfg/projects/-work-project"
+    command rm -rf "$cfg/projects"; mkdir -p "$dir"
+    jq -c --arg t "$1" 'if .subtype == "turn_duration" then .timestamp = $t else . end' \
+        "$transcripts/turn-ended.jsonl" >"$dir/9121ff49-5e25-43f0-bf48-307db0776c36.jsonl"
+}
+watch_after() { # <--after value> -- watch.sh --after on the working-idle fixture
+    sh "$scripts/watch.sh" --id 9121ff49 --after "$1" --file "$fixtures/working-idle.json" </dev/null 2>&1
+}
+after=1790000000 # 2026-09-21T14:13:20Z
+stamped 2026-09-21T14:13:19.950Z
+check "watch: a turn end before --after is the previous turn's, still working" "working
+cwd /work/project" "$(watch_after "$after")"
+stamped 2026-09-21T14:13:20.004Z
+check "watch: a turn end at or after --after is done" "done
+cwd /work/project
+note claude agents still said working" "$(watch_after "$after")"
+stamped 2026-09-21T14:15:02Z
+check "watch: a turn end stamped without fractions after --after is done" "done
+cwd /work/project
+note claude agents still said working" "$(watch_after "$after")"
+out=$(watch_after soon)
+check "watch: --after needs epoch seconds" "1
+Error: --after needs epoch seconds, not 'soon'" "$?
+$out"
 command rm -rf "$cfg/projects"
 
 # With --dir, a working worker whose cwd has left the Project folder (it
@@ -386,7 +414,7 @@ case "$1" in
         if [ "${2:-}" = --resume ]; then
             m=$(command cat "$fake/resumes" 2>/dev/null || echo 0); m=$((m + 1)); echo "$m" >"$fake/resumes"
             echo "resume after $(command cat "$fake/count" 2>/dev/null || echo 0) reads" >>"$fake/calls"
-            printf '%s\n' "$@" >"$fake/resume-args"; pwd -P >"$fake/cwd"
+            printf '%s\n' "$@" >"$fake/resume-args"; pwd -P >"$fake/cwd"; date +%s >"$fake/resume-at"
             echo "${CLAUDE_CONFIG_DIR-unset}" >"$fake/env"
             r=$(sed -n "${m}p" "$fake/resume-out")
             echo "Starting background service…"
@@ -481,6 +509,15 @@ check "poll: stops when the transcript says the turn ended" "done
 cwd /work/project
 note claude agents still said working" "$(poll 9121ff49 working-idle working-idle)"
 check "poll: stopped at the first such round" "1" "$(command cat "$fake/count")"
+# After a resume, the previous turn's end keeps the watch polling until the
+# list itself says done (#122).
+stamped 2026-09-21T14:13:19.950Z
+reset_fake
+for f in working-idle working-idle done; do echo "$fixtures/$f.json"; done >"$fake/seq"
+check "poll --after: an earlier turn end keeps polling" "done
+cwd /work/project" \
+    "$(PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id 9121ff49 --after "$after" --interval 0 --timeout 30 </dev/null)"
+check "poll --after: read the list each round" "3" "$(command cat "$fake/count")"
 command rm -rf "$cfg/projects"
 
 reset_fake
@@ -867,11 +904,19 @@ resume() { # <resume outputs, comma-separated> <agents lists...> -- then resume.
         --prompt /mp-ported-skills:capturing --interval 0 --settle 0 "$@" </dev/null
 }
 calls() { command cat "$fake/calls" 2>/dev/null; }
+mask_after() { sed 's/^after [0-9][0-9]*$/after <epoch>/'; } # resume.sh's after line, its time masked
 
+began=$(date +%s)
 out=$(resume woke pid "$fixtures/stopped.json" 2>&1)
 rc=$?
 check "resume: exit 0" "0" "$rc"
-check "resume: prints the id it resumed" "resumed c2a368ee" "$out"
+check "resume: prints the time before the resume, then the id it resumed" "after <epoch>
+resumed c2a368ee" "$(printf '%s\n' "$out" | mask_after)"
+# The following watch passes it as --after, so it must not be later than the
+# resume, or the resumed turn's own end could be stamped before it (#122).
+at=$(printf '%s\n' "$out" | sed -n 's/^after //p')
+check "resume: the after time is taken before the resume" "yes" \
+    "$([ "${at:-0}" -ge "$began" ] && [ "${at:-0}" -le "$(command cat "$fake/resume-at")" ] && echo yes || echo no)"
 check "resume: stop, wait for stopped, resume" "stop c2a368ee
 resume after 2 reads" "$(calls)"
 check "resume: the original session id and the prompt, no flags" "--bg
@@ -925,9 +970,12 @@ rc=$?
 check "resume: another live session in the checkout exits 1" "1" "$rc"
 check "resume: another live session, never resumed" "stop c2a368ee" "$(calls)"
 check "resume: another live session is named" "Error: another live background session in /work/project: 7a6a0741 (working); not resumed" "$out"
-check "resume: a stopped one in the checkout is fine" "resumed c2a368ee" "$(resume woke other-stopped 2>&1)"
-check "resume: a live one elsewhere is fine" "resumed c2a368ee" "$(resume woke other-elsewhere 2>&1)"
-check "resume: a done one with no pid in the checkout is fine" "resumed c2a368ee" "$(resume woke other-done-nopid 2>&1)"
+check "resume: a stopped one in the checkout is fine" "after <epoch>
+resumed c2a368ee" "$(resume woke other-stopped 2>&1 | mask_after)"
+check "resume: a live one elsewhere is fine" "after <epoch>
+resumed c2a368ee" "$(resume woke other-elsewhere 2>&1 | mask_after)"
+check "resume: a done one with no pid in the checkout is fine" "after <epoch>
+resumed c2a368ee" "$(resume woke other-done-nopid 2>&1 | mask_after)"
 out=$(resume woke other-done-pid 2>&1); rc=$?
 check "resume: a done one with a pid stops the resume" "1 Error: another live background session in /work/project: 7a6a0741 (done); not resumed" "$rc $out"
 out=$(resume woke other-blocked-nopid 2>&1); rc=$?
@@ -945,7 +993,8 @@ out=$(resume "copy 17d1a711,woke" "$fixtures/stopped.json" 2>&1)
 rc=$?
 check "resume: a copy, then the original, exits 0" "0" "$rc"
 check "resume: the copy is reported" "copy 17d1a711 stopped and removed
-resumed c2a368ee" "$out"
+after <epoch>
+resumed c2a368ee" "$(printf '%s\n' "$out" | mask_after)"
 check "resume: the copy is stopped and removed, and the original stopped again, before the retry" "stop c2a368ee
 resume after 1 reads
 stop 17d1a711
@@ -972,7 +1021,8 @@ out=$( (export FAKE_RM_FAIL=1; resume "copy 17d1a711,woke" "$fixtures/stopped.js
 rc=$?
 check "resume: a copy left listed does not block the retry" "0" "$rc"
 check "resume: a copy not removed is named" "copy 17d1a711 stopped, not removed
-resumed c2a368ee" "$out"
+after <epoch>
+resumed c2a368ee" "$(printf '%s\n' "$out" | mask_after)"
 out=$( (export FAKE_RM_FAIL=1; resume "copy 17d1a711,copy fc9de9b3" "$fixtures/stopped.json" -- --tries 2 2>&1) )
 check "resume: exit 2 names the copies not removed" "copy 17d1a711 stopped, not removed
 copy fc9de9b3 stopped, not removed

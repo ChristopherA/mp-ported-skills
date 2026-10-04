@@ -92,13 +92,17 @@ resumed=$(sh "$scripts/resume.sh" --id "$id" --dir "$scratch" \
 rc=$?
 echo "$resumed"
 check "resume.sh exits 0" 0 "$rc"
-check "resume.sh woke the original, with no copy, with the viewer attached at the stop" "resumed $id" "$resumed"
+check "resume.sh woke the original, with no copy, with the viewer attached at the stop" "after <epoch>
+resumed $id" "$(printf '%s\n' "$resumed" | sed 's/^after [0-9][0-9]*$/after <epoch>/')"
+# The follow-up's watch passes the after time, so the turn that ended
+# before the stop is not read as the follow-up's end (#122).
+after=$(printf '%s\n' "$resumed" | sed -n 's/^after //p')
 check "the stop closed the viewer, and nothing re-attached" "" "$(windows)"
 
 reopened=$(sh "$scripts/view.sh" --id "$id" --dir "$scratch" </dev/null 2>&1)
 check "resume: view.sh opens the viewer again" "viewer mp-supervise:$id runs claude attach $id" \
     "$(printf '%s\n' "$reopened" | head -n 1)"
-second=$(sh "$scripts/watch.sh" --id "$id" --dir "$scratch" --interval 5 --timeout 300 </dev/null)
+second=$(sh "$scripts/watch.sh" --id "$id" --dir "$scratch" --after "$after" --interval 5 --timeout 300 </dev/null)
 check "the follow-up turn ends" done "$(printf '%s\n' "$second" | head -n 1)"
 check "one worker in the folder, not a copy" "$id" "$(live_here)"
 

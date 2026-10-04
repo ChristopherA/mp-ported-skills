@@ -25,9 +25,12 @@
 # original, up to TRIES resumes in all.
 #
 # Prints `copy <id> stopped and removed` for each copy (or `stopped, not
-# removed` when `claude rm` failed), then `resumed <id>`. On a wake it writes
-# the worker's marker in DIR, as launch.sh does (#76), with a `note` line
-# before `resumed` when it could not.
+# removed` when `claude rm` failed), then `after <epoch>` and `resumed <id>`.
+# `after` is the time, in epoch seconds, taken just before the resume that
+# woke the worker: pass it to the next watch.sh as --after, or that watch
+# reads the turn that ended before the stop as the resumed turn's end (#122).
+# On a wake it writes the worker's marker in DIR, as launch.sh does (#76),
+# with a `note` line before `after` when it could not.
 #
 # Usage:
 #   resume.sh --id ID --dir DIR --prompt TEXT [--settle S] [--interval S]
@@ -63,7 +66,7 @@ while [ $# -gt 0 ]; do
         --tries)    need_value "$@"; TRIES="$2"; shift 2 ;;
         --help)
             printf 'Usage: resume.sh --id ID --dir DIR --prompt TEXT [--settle S] [--interval S] [--timeout S] [--tries N]\n'
-            printf 'Stops the session, waits until it is safe, and resumes it with the prompt. Prints copy lines, then: resumed ID\n'
+            printf 'Stops the session, waits until it is safe, and resumes it with the prompt. Prints copy lines, then: after EPOCH, resumed ID\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
@@ -144,6 +147,7 @@ while [ "$try" -lt "$TRIES" ]; do
     try=$((try + 1))
     claude stop "$ID" </dev/null >/dev/null 2>&1
     wait_safe
+    resumed_at=$(date +%s)
     out=$(cd "$DIR" && claude --bg --resume "$sid" "$PROMPT" </dev/null 2>&1)
     copy=$(printf '%s\n' "$out" | sed -n 's/.*started a copy as \([0-9a-f][0-9a-f]*\).*/\1/p' | head -n 1)
     if [ -n "$copy" ]; then
@@ -163,6 +167,7 @@ while [ "$try" -lt "$TRIES" ]; do
         marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker 2>/dev/null) &&
             echo "$ID" >"$marker" ||
             echo "note the marker for $ID was not written in $DIR, so the checkout is not held read-only"
+        echo "after $resumed_at"
         echo "resumed $ID"
         exit 0
     fi

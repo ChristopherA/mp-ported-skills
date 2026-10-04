@@ -72,9 +72,13 @@ resumed=$(sh "$scripts/resume.sh" --id "$id" --dir "$scratch" \
 rc=$?
 echo "$resumed"
 check "resume.sh exits 0" 0 "$rc"
-check "resume.sh woke the original, with no copy" "resumed $id" "$resumed"
+check "resume.sh woke the original, with no copy" "after <epoch>
+resumed $id" "$(printf '%s\n' "$resumed" | sed 's/^after [0-9][0-9]*$/after <epoch>/')"
+# The follow-up's watch passes the after time, so the turn that ended
+# before the stop is not read as the follow-up's end (#122).
+after=$(printf '%s\n' "$resumed" | sed -n 's/^after //p')
 
-second=$(sh "$scripts/watch.sh" --id "$id" --dir "$scratch" --interval 5 --timeout 300 </dev/null)
+second=$(sh "$scripts/watch.sh" --id "$id" --dir "$scratch" --after "$after" --interval 5 --timeout 300 </dev/null)
 check "the follow-up turn ends" done "$(printf '%s\n' "$second" | head -n 1)"
 
 sid=$(jq -r '.sessionId // empty' "$CLAUDE_CONFIG_DIR/jobs/$id/state.json" 2>/dev/null)
