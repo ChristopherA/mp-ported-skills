@@ -516,8 +516,9 @@ if [ "$(PATH="$work/bin:$PATH" command -v gh)" != "$work/bin/gh" ]; then
     exit 1
 fi
 # The job a launch writes carries launch.sh's --settings, as the job of a
-# live launch with that flag did on Claude Code 2.1.286.
-jq '.respawnFlags = ["--disallowedTools", "EnterWorktree", "--settings", "{\"worktree\":{\"bgIsolation\":\"none\"}}"] + .respawnFlags[2:]' \
+# live launch with that flag did on Claude Code 2.1.286, and its tool deny
+# list and --no-chrome, as a live `claude --bg` job recorded them on 2.1.289.
+jq '.respawnFlags = ["--disallowedTools", "EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback", "--no-chrome", "--settings", "{\"worktree\":{\"bgIsolation\":\"none\"}}"] + .respawnFlags[2:]' \
     "$fixtures/job-state.json" >"$work/job-launched.json"
 export FAKE_DIR="$fake" FAKE_JOB="$work/job-launched.json"
 reset_fake() { command rm -rf "$fake" "$cfg/jobs"; mkdir -p "$fake"; }
@@ -633,7 +634,8 @@ check "launch: flags and the command" "--bg
 --model
 claude-sonnet-5
 --disallowedTools
-EnterWorktree
+EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback
+--no-chrome
 --settings
 {\"worktree\":{\"bgIsolation\":\"none\"}}
 --append-system-prompt
@@ -691,7 +693,7 @@ out=$( (export FAKE_STATE_FILTER='| .respawnFlags[-3] = "high"'; launch --ticket
 rc=$?
 check "launch: effort not recorded exits 2" "2" "$rc"
 check "launch: effort not recorded stops the session" "stop c2a368ee" "$(command cat "$fake/calls" 2>/dev/null)"
-check "launch: effort not recorded says why" "Error: session c2a368ee does not run at effort medium (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --effort high --name worker project #56: Add the thing); stopped it" "$out"
+check "launch: effort not recorded says why" "Error: session c2a368ee does not run at effort medium (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --effort high --name worker project #56: Add the thing); stopped it" "$out"
 
 out=$(launch --ticket 56 --model claude-haiku-4-5-20251001 2>&1)
 rc=$?
@@ -736,9 +738,17 @@ mismatch "isolation guard on" '| .respawnFlags = ["--disallowedTools", "EnterWor
 mismatch "isolation guard set to another value" '| .respawnFlags = ["--disallowedTools", "EnterWorktree", "--settings", "{\"worktree\":{\"bgIsolation\":\"worktree\"}}", "--permission-mode", "auto"]' \
     "Error: session c2a368ee has the background worktree guard on, so its edits in $project would be refused: bgIsolation none is not in its settings (its flags: --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"worktree\"}} --permission-mode auto); stopped it"
 mismatch "grants not recorded" '| .respawnFlags |= .[2:]' \
-    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
+    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
 mismatch "other grants recorded" '| .respawnFlags[1] = "something else"' \
-    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --append-system-prompt something else --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
+    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --append-system-prompt something else --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
+# A worker is launched without the tools it never uses and without Claude in
+# Chrome (#130); flags from the launch with one of them missing are refused.
+mismatch "tools a worker does not use allowed" '| .respawnFlags[3] = "EnterWorktree"' \
+    "Error: session c2a368ee keeps tools a worker does not use: Artifact Workflow ScheduleWakeup SendFeedback not in its disallowed tools (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
+mismatch "one such tool allowed" '| .respawnFlags[3] = "EnterWorktree Artifact Workflow ScheduleWakeup"' \
+    "Error: session c2a368ee keeps tools a worker does not use: SendFeedback not in its disallowed tools (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree Artifact Workflow ScheduleWakeup --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
+mismatch "chrome on" '| .respawnFlags |= map(select(. != "--no-chrome"))' \
+    "Error: session c2a368ee has Claude in Chrome on: --no-chrome is not in its flags (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
 mismatch "wrong profile" '| .providerEnv.CLAUDE_CONFIG_DIR = "/elsewhere"' \
     "Error: session c2a368ee runs under config /elsewhere, not $cfg; stopped it"
 mismatch "no profile recorded" '| del(.providerEnv)' \

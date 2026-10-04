@@ -2,15 +2,16 @@
 # launch.sh -- start /implement #N as a background session in a Project, and
 # confirm the session got what it was launched with.
 #
-# Runs `claude --bg --model MODEL [--effort LEVEL] --disallowedTools EnterWorktree
-# --settings '{"worktree":{"bgIsolation":"none"}}' --append-system-prompt
+# Runs `claude --bg --model MODEL [--effort LEVEL] --disallowedTools DENY
+# --no-chrome --settings '{"worktree":{"bgIsolation":"none"}}' --append-system-prompt
 # GRANTS --name NAME --permission-mode auto '/mattpocock-skills:implement #N'` in DIR with
 # CLAUDE_CONFIG_DIR set explicitly, so the session runs under this profile
 # whatever the shell would pick for DIR. Then reads the job's state.json,
 # which the background service writes under that config dir, and checks that
 # the session runs under the same config dir, in DIR itself (not a worktree),
 # in auto mode, without EnterWorktree, with the background worktree guard
-# off, with its grants text, under NAME, and at LEVEL when one was given. A session that fails a check is stopped.
+# off, with its grants text, under NAME, at LEVEL when one was given, and
+# without the tools in DENY or Claude in Chrome. A session that fails a check is stopped.
 # Prints the session's short id.
 #
 # EnterWorktree is denied because /implement workers called it on their own,
@@ -23,6 +24,19 @@
 # respawnFlags began ["--disallowedTools","EnterWorktree", ...]. The flag
 # takes a list, so it comes before another option, never right before the
 # prompt, which it would swallow as a tool name.
+#
+# DENY is EnterWorktree and the tools a worker never uses: Artifact
+# (publishing a page is a shared action, and its description cost a worker
+# 11.4k tokens of context before its first step), Workflow (it needs the
+# user's opt-in, and a worker has no user), ScheduleWakeup (only /loop uses
+# it) and SendFeedback (its drafts wait for a user who never sees a
+# worker's session). --no-chrome drops Claude in Chrome, which drives the
+# user's own browser and has nobody to watch it. Together they cut a
+# worker's context at its first call from 64.8k to 45.3k tokens, measured
+# live with Claude Code 2.1.289 (docs/research/worker-fixed-load.md, #130).
+# Checked live: the job's respawnFlags recorded the comma-joined list as
+# one value and --no-chrome, and ToolSearch for "select:EnterWorktree"
+# still returned "No matching deferred tools found".
 #
 # The guard is off because, from Claude Code 2.1.286, the background service
 # refuses a session's edits in the shared checkout until it isolates in a
@@ -127,6 +141,8 @@ case $EFFORT in
     *) fail "--effort is low, medium, high, xhigh or max, not '$EFFORT'" ;;
 esac
 GUARD_OFF='{"worktree":{"bgIsolation":"none"}}'
+UNUSED="Artifact Workflow ScheduleWakeup SendFeedback"
+DENY="EnterWorktree,$(printf '%s' "$UNUSED" | tr ' ' ',')"
 CONFIG="${CLAUDE_CONFIG_DIR:-}"
 [ -n "$CONFIG" ] || fail "CLAUDE_CONFIG_DIR is not set, so the session's profile cannot be pinned"
 [ -d "$CONFIG" ] || fail "CLAUDE_CONFIG_DIR is not a directory: $CONFIG"
@@ -217,7 +233,7 @@ fi
 set -- --model "$MODEL"
 [ -z "$EFFORT" ] || set -- "$@" --effort "$EFFORT"
 out=$(cd "$DIR" && CLAUDE_CONFIG_DIR="$CONFIG" claude --bg "$@" \
-    --disallowedTools EnterWorktree --settings "$GUARD_OFF" \
+    --disallowedTools "$DENY" --no-chrome --settings "$GUARD_OFF" \
     --append-system-prompt "$GRANTS" --name "$NAME" --permission-mode auto \
     "/mattpocock-skills:implement #$TICKET" </dev/null 2>&1)
 esc=$(printf '\033')
@@ -274,6 +290,15 @@ if [ -n "$EFFORT" ]; then
             | any(. as $i | $f[$i] == "--effort" and $f[$i + 1] == $e)' "$job" >/dev/null ||
         reject "does not run at effort $EFFORT (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
 fi
+
+kept=$(jq -r --arg u "$UNUSED" '.respawnFlags as $f
+        | ([range(0; ($f | length) - 1) | select($f[.] == "--disallowedTools")
+            | $f[. + 1] | split("[, ]+"; null)[]]) as $denied
+        | [$u | split(" ")[] | select(. as $t | $denied | index($t) == null)] | join(" ")' "$job")
+[ -z "$kept" ] ||
+    reject "keeps tools a worker does not use: $kept not in its disallowed tools (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
+jq -e '.respawnFlags | index("--no-chrome") != null' "$job" >/dev/null ||
+    reject "has Claude in Chrome on: --no-chrome is not in its flags (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
 
 echo "$id" >"$marker" || reject "could not write the marker $marker, so this checkout is not held read-only"
 echo "$id"
