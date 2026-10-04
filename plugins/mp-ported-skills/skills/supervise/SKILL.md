@@ -12,8 +12,8 @@ The Project folder, relative to this session's folder or absolute, is the first 
 
 The supervisor drives build-loop defaults and nothing else:
 
-- **It may**: take the step `state.sh` names, launch `/implement #N` for a `ready-for-agent` ticket, watch the worker, send it a build-loop follow-up (Follow-ups, below), and stop a worker that finished or failed a launch check.
-- **It stops for anything that changes the spec**: any other step, a question the worker asks, a permission prompt, a ticket that needs a decision. It reports these and answers none of them. The human answers in the worker with `claude attach <id>`, or in the approval request the Claude app shows for the worker's permission prompt.
+- **It may**: take the step `state.sh` names, launch `/implement #N` for a `ready-for-agent` ticket, watch the worker, send it a build-loop follow-up (Follow-ups, below), answer a routine question its policy already decides (Routine answers, below), and stop a worker that finished or failed a launch check.
+- **It stops for anything that changes the spec**: any other step, any other question the worker asks, a permission prompt, a ticket that needs a decision. It reports these and answers none of them. The human answers in the worker with `claude attach <id>`, or in the approval request the Claude app shows for the worker's permission prompt.
 - **Shared actions are gated on standing grants, never on the worker's own say.** A push, PR, issue close, issue comment or new issue that `/implement` or a capture reaches is refused by a PreToolUse hook (#66) unless a grant in the Project's `docs/agents/supervision.md` covers it, read only from the default branch as committed on origin -- never the worker's working tree or local commits, which a worker can reach without the maintainer seeing it, and never the worker's to add (#58, docs/adr/0005). With no such file, or no matching grant, the push stops for approval exactly as before; in a background session the `git` and `gh` wrappers below refuse it outright, in any permission mode. `launch.sh` tells the worker, in an `--append-system-prompt`, which shared actions its Project grants, from the same source through `grant.sh`, that a granted one goes ahead without asking, and that any other ends its turn on one line, `Waiting on: <action>`, without trying it (#88): without that, a worker asks before every push and the run stalls at `blocked` with a grant in place. With one, the worker's own attempt goes through, and `actions.sh`'s report (step 4) cites the grant on that line instead of marking it `ungranted`; the report still lists every shared action the worker took, granted or not, in case a form got past the hook or an older worker predates it. A second hook (`deny-worker-grant-edits.sh`) refuses a worker's own Edit, Write or NotebookEdit to that grant file, and to anything under this session's own profile directory, so a worker cannot grant itself one or change what gates it. A push from inside a script, which the hook cannot see, meets the same check in the `git` and `gh` wrappers a SessionStart hook puts first on a background session's PATH (docs/adr/0006). A push no grant covers, which the worker ends its turn waiting on, is the supervisor's to make, and only on the maintainer's go-ahead given in this session, after checking it (Push on approval, below; docs/adr/0007). A message typed into the worker is not a grant, and the hook refuses the worker's push after one.
 - **The supervisor stays read-only in the Project while a worker runs**, whether it runs from a parent folder or inside the Project, where the two share one working tree. No file edits, and no git `commit`, `merge`, `rebase`, `checkout`, `switch`, `reset` or `stash` there; reads, `gh` and these scripts still run. `launch.sh` marks the checkout with the worker's id, a PreToolUse hook (#76) refuses those calls in any attended session while the mark is there, the maintainer's own included, and `release.sh` clears it in the Report step. A refusal names the worker and `claude attach <id>`.
 - **A worker stays in the Project folder, on its branch, for the whole run**: its commits would otherwise land on a branch nobody pushes. It is launched without the `EnterWorktree` tool and with the background service's worktree guard off (`bgIsolation: none`), so its edits in the folder are not refused. It is stopped at launch if the background service placed it elsewhere, and the moment `watch.sh` sees it leave the folder, or sees a worktree or branch made in the Project's repo since the launch.
@@ -54,7 +54,7 @@ Run it with the Bash tool's `run_in_background`, since a ticket outlasts a foreg
 
 ## 4. Report
 
-One report, by the first line `watch.sh` printed. Whatever the outcome, it lists the shared actions the worker took, with `<cwd>` from `watch.sh` and `<start>` from step 1. For a settled run, take them after the capture and any push (Capture, below), since the capture can take shared actions of its own:
+One report, by the first line `watch.sh` printed. A `blocked question` or `blocked input needed` first goes through Routine answers, below; only one it does not answer is reported by the items here. Whatever the outcome, it lists the shared actions the worker took, with `<cwd>` from `watch.sh` and `<start>` from step 1. For a settled run, take them after the capture and any push (Capture, below), since the capture can take shared actions of its own:
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/actions.sh" --id ID --dir "<cwd>" --start <start> </dev/null
@@ -115,7 +115,7 @@ Then record the run, whatever the outcome, with the same `<cwd>` and `<start>` a
 sh "${CLAUDE_SKILL_DIR}/scripts/record.sh" --id ID --dir "<cwd>" --start <start> --ticket N > "<scratchpad>/run-record.md" </dev/null
 ```
 
-It prints the record as a Markdown list: the worker's model, launch and turn-end times, how long after the turn end this report came, API calls, tokens and cost by model, this session's own calls, tokens and cost since the launch, the peak zone reading and the call that first reached 100% of the zone, captures and clears, waits on a human and messages typed into the worker, the shared actions from `actions.sh`, and the outcome. A field whose source was not read says `unknown`, with a `note` line naming the source. The supervisor's own cost reads `unknown` while this session runs, because a running interactive session's transcript holds no cost row yet; its calls and tokens are still counted. Post it on the ticket, run in the Project folder, and include it in the report:
+It prints the record as a Markdown list: the worker's model, launch and turn-end times, how long after the turn end this report came, API calls, tokens and cost by model, this session's own calls, tokens and cost since the launch, the peak zone reading and the call that first reached 100% of the zone, captures and clears, the questions the supervisor answered (Routine answers, below), waits on a human (a wait the supervisor answered is not one) and messages typed into the worker, the shared actions from `actions.sh`, and the outcome. A field whose source was not read says `unknown`, with a `note` line naming the source. The supervisor's own cost reads `unknown` while this session runs, because a running interactive session's transcript holds no cost row yet; its calls and tokens are still counted. Post it on the ticket, run in the Project folder, and include it in the report:
 
 ```sh
 gh issue comment N --body-file "<scratchpad>/run-record.md"
@@ -177,6 +177,26 @@ A worker blocked on a `git push` no grant covers has finished its work and commi
 5. When a `version` line showed a bump of a plugin this profile has installed, update it through Bash: `claude plugin marketplace update <marketplace> && claude plugin update <plugin>@<marketplace>`, and report the version it installed.
 6. Go on with the Report step for `done`, with no second capture: the shared actions, the ticket's state, the capture's report and the run record, taken now, after the capture, the stop and the push, so the record carries the worker's cost, the capture and the push.
 
+## Routine answers
+
+Some questions a worker asks are ones the policy already decides: confirming the ticket it was launched on ("Proceed with #N?"), and asking for a shared action a standing grant covers (#58), which `launch.sh` told it to take without asking. For a `blocked question` or `blocked input needed`, before anything in the Report step, ask:
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/answer.sh" --id ID --dir "<project folder>" --ticket N --state "<watch.sh's first line>" > "<scratchpad>/answer.txt" </dev/null
+```
+
+It reads the question from the worker's transcript: a pending AskUserQuestion with one question, a last line `Waiting on: <command>`, or the last sentence of its last message when that ends on the only `?` in it. Only two kinds are routine. A confirmation of ticket N is the whole sentence, naming no other ticket. A shared action (push, PR create or merge, issue close, comment or create) is the question's opening verb, the only action it names, and one `grant.sh` finds granted on origin's default branch. A question that offers a choice (" or "), names another ticket, or is anything else goes to the maintainer, as does a permission prompt and an action no grant covers. A question the supervisor answered once and the worker asks again is not answered twice.
+
+- **Exit 0**: it printed `question <q>`, `rule ticket` or `rule grant <citation>`, and `answer <prompt>`. Send the prompt as a follow-up (Follow-ups, below), watch again with `--after`, and go on by the new watch's first line:
+
+  ```sh
+  sh "${CLAUDE_SKILL_DIR}/scripts/resume.sh" --id ID --dir "<project folder>" --prompt "$(sed -n 's/^answer //p' "<scratchpad>/answer.txt")" </dev/null
+  ```
+
+  The prompt starts `[supervisor answer to "<q>"]`, which `record.sh` lists under `supervisor answers`, apart from human interventions. List each question answered and its answer in the report.
+- **Exit 2**: `not routine: <why>`, after `question <q>` when one was read. Report the block by the Report step's items, as before, with `claude attach ID`, adding the `why` line.
+- **Exit 1**: report the error, and the block as before.
+
 ## Follow-ups
 
 No command sends input to a running background session, so a follow-up to a worker, such as the capture (Capture, above), goes by stop and resume:
@@ -212,4 +232,4 @@ Tell the maintainer, with the watch command (`tmux attach -t mp-supervise`, or `
 - the viewer is live: what they type there reaches the worker as a prompt, and answering a permission prompt there is fine;
 - attaching to the worker by hand (`claude attach ID`, or a viewer of their own) between a stop and a resume splits the worker. Leaving the tmux session (`Ctrl+B d`) is always safe; with `--watch iterm`, leave the pane for the supervisor to close.
 
-Done when the report names the ticket, the outcome, the shared actions (or `none`), either its commits or the id with `claude attach`, the capture's report for a settled run, and the run record's comment.
+Done when the report names the ticket, the outcome, each question the supervisor answered with its answer, the shared actions (or `none`), either its commits or the id with `claude attach`, the capture's report for a settled run, and the run record's comment.
