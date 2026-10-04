@@ -65,7 +65,11 @@
 # may hold steady before a poll reports hang (default 1800); --file never
 # reports it, since it has only one snapshot to look at. --after is the
 # `after` line resume.sh prints: a watch that follows a resume passes it, so
-# the turn that ended before the resume is not read as the resumed one's end.
+# the turn that ended before the resume is not read as the resumed one's end
+# (#122). With it, a done needs a turn end in the transcript stamped at or
+# after it, whether the transcript or claude agents says done (a done from
+# the list with no transcript found stands), and a `Waiting on:` line counts
+# only in text stamped at or after it (#126).
 #
 # Exits 1 when the list cannot be read, which is never reported as gone.
 
@@ -148,23 +152,43 @@ classify() {
           end'
 }
 
+# AFTER_JQ: defines the jq filter `not_before`, true for a row stamped at or
+# after --after (never for a row with no timestamp jq can read), and for
+# every row without --after. turn_ended, stale_done and waiting_on pass it
+# with --arg after "$AFTER".
+AFTER_JQ='def not_before: $after == "" or ((.timestamp // "" | sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch 0) >= ($after | tonumber));'
+
 # turn_ended <session id>: whether the session's transcript shows its turn
 # ended: its last conversation row is a turn_duration row with no background
 # agents pending, since their reports start another turn. With --after, that
-# row counts only when its timestamp is at or after AFTER (a row with no
-# timestamp jq can read never does): right after a resume, the last row is
-# still the turn_duration that ended the previous turn (#122). The transcript
-# is looked for in every project folder, since a worker that entered a
-# worktree has its transcript moved to the worktree's folder.
+# row counts only when it is stamped at or after AFTER: right after a
+# resume, the last row is still the turn_duration that ended the previous
+# turn (#122). The transcript is looked for in every project folder, since
+# a worker that entered a worktree has its transcript moved to the
+# worktree's folder.
 turn_ended() {
     [ -n "$1" ] || return 1
     for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
         [ -f "$t" ] || continue
-        jq -e -s '[.[] | select(.type == "user" or .type == "assistant" or .type == "system")] | last
+        jq -e -s "$AFTER_JQ"'[.[] | select(.type == "user" or .type == "assistant" or .type == "system")] | last
             | .type == "system" and .subtype == "turn_duration"
-              and (.pendingBackgroundAgentCount // 0) == 0
-              and ($after == "" or ((.timestamp // "" | sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch 0)
-                                    >= ($after | tonumber)))' --arg after "$AFTER" "$t" >/dev/null 2>&1 && return 0
+              and (.pendingBackgroundAgentCount // 0) == 0 and not_before' --arg after "$AFTER" "$t" >/dev/null 2>&1 && return 0
+    done
+    return 1
+}
+
+# stale_done <session id>: whether a done from claude agents is the previous
+# turn's: with --after, the session's transcript is found and has no
+# turn_duration row stamped at or after AFTER. Time is all it checks, so a
+# turn that ended with background agents pending still counts (#126). With
+# no transcript found, the list's done stands.
+stale_done() {
+    [ -n "$1" ] || return 1
+    for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
+        [ -f "$t" ] || continue
+        jq -e -s "$AFTER_JQ"'any(.[]; .type == "system" and .subtype == "turn_duration" and not_before) | not' \
+            --arg after "$AFTER" "$t" >/dev/null 2>&1
+        return
     done
     return 1
 }
@@ -173,14 +197,16 @@ turn_ended() {
 # from a line starting `Waiting on:` in its last text, which launch.sh tells
 # it to end on when a shared action has no grant (#88); empty when none. The
 # line may be wrapped in backticks or bold. Read from the main transcript
-# only, in every project folder, as turn_ended reads it.
+# only, in every project folder, as turn_ended reads it. With --after, only
+# text stamped at or after AFTER is read: the previous turn's line is not
+# what a resumed worker waits on (#126).
 waiting_on() {
     [ -n "$1" ] || return 0
     for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
         [ -f "$t" ] || continue
-        jq -r -s '[.[] | select(.type == "assistant" and (.isSidechain | not))
+        jq -r -s "$AFTER_JQ"'[.[] | select(.type == "assistant" and (.isSidechain | not) and not_before)
                    | .message.content[]? | select(.type == "text") | .text // empty]
-                  | last // empty' "$t" 2>/dev/null |
+                  | last // empty' --arg after "$AFTER" "$t" 2>/dev/null |
             sed -n 's/^[`* ]*Waiting on: *//p' | sed 's/[`* ]*$//' | tail -n 1
         return 0
     done
@@ -283,10 +309,19 @@ commits() {
 # is `blocked input needed`, with that action as its needs line in place of
 # the job's: the service can mark that worker blocked before it is seen
 # done, and the job's needs can name a side question from its report (#97).
+# With --after, a done from the list whose transcript shows no turn end at
+# or after it is still working: the list can show the previous turn's done
+# for a moment after a resume (#126).
 # With --since, a worktree or branch made in the repo since the snapshot is
 # listed, and makes a working or done session moved.
 report() {
     out=$(classify "$1") || return 1
+    case $out in
+        done*)
+            if [ -n "$AFTER" ] && stale_done "$(session_id_of "$1")"; then
+                out=$(printf 'working%s' "${out#done}")
+            fi ;;
+    esac
     case $out in
         working*)
             cwd=$(printf '%s\n' "$out" | sed -n 's/^cwd //p')

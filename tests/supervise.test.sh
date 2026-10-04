@@ -222,11 +222,11 @@ cwd /work/project" "$(watch_file working-busy c2a368ee)"
 # Right after resume.sh, the transcript's last row is still the turn_duration
 # that ended the previous turn. With --after (the epoch resume.sh printed),
 # only a turn end stamped at or after it counts (#122).
-stamped() { # <turn_duration timestamp> -- turn-ended, that row stamped with it
+stamped() { # <turn_duration timestamp> [fixture] [jq filter] [$w for it] -- the fixture (turn-ended), its turn_duration rows stamped, then the filter
     dir="$cfg/projects/-work-project"
     command rm -rf "$cfg/projects"; mkdir -p "$dir"
-    jq -c --arg t "$1" 'if .subtype == "turn_duration" then .timestamp = $t else . end' \
-        "$transcripts/turn-ended.jsonl" >"$dir/9121ff49-5e25-43f0-bf48-307db0776c36.jsonl"
+    jq -c --arg t "$1" --arg w "${4:-}" "if .subtype == \"turn_duration\" then .timestamp = \$t else . end | ${3:-.}" \
+        "$transcripts/${2:-turn-ended}.jsonl" >"$dir/9121ff49-5e25-43f0-bf48-307db0776c36.jsonl"
 }
 watch_after() { # <--after value> -- watch.sh --after on the working-idle fixture
     sh "$scripts/watch.sh" --id 9121ff49 --after "$1" --file "$fixtures/working-idle.json" </dev/null 2>&1
@@ -247,6 +247,38 @@ out=$(watch_after soon)
 check "watch: --after needs epoch seconds" "1
 Error: --after needs epoch seconds, not 'soon'" "$?
 $out"
+# claude agents can still show the previous turn's done for a moment after
+# the wake; with --after, the list's done needs a turn end as late (#126).
+done_after() { # <--after value> -- watch.sh --after on the done fixture
+    sh "$scripts/watch.sh" --id 9121ff49 --after "$1" --file "$fixtures/done.json" </dev/null 2>&1
+}
+stamped 2026-09-21T14:13:19.950Z
+check "watch: a listed done whose turn ended before --after is working" "working
+cwd /work/project" "$(done_after "$after")"
+stamped 2026-09-21T14:13:20.004Z
+check "watch: a listed done whose turn ended at or after --after is done" "done
+cwd /work/project" "$(done_after "$after")"
+command rm -rf "$cfg/projects"
+check "watch: a listed done with no transcript found is done" "done
+cwd /work/project" "$(done_after "$after")"
+# The list's done is gated on time only: a turn that ended at or after
+# --after with agents pending still lets the list's done stand.
+stamped 2026-09-21T14:15:02.000Z waiting-on-agents
+check "watch: a listed done whose late turn end has agents pending is done" "done
+cwd /work/project" "$(done_after "$after")"
+# A `Waiting on:` line the previous turn wrote is not what the resumed turn
+# waits on: with --after, only text stamped at or after it is read (#126).
+stamped_waiting() { # <text time> -- turn-ended ending on a Waiting on: line stamped then, its turn end after --after
+    stamped 2026-09-21T14:15:02.000Z turn-ended 'if .type == "assistant" and .message.content == [{"type": "text"}]
+        then .message.content[0].text = "`Waiting on: git push origin main`" | .timestamp = $w else . end' "$1"
+}
+stamped_waiting 2026-09-21T14:13:19.950Z
+check "watch: a Waiting on: line stamped before --after is not read" "done
+cwd /work/project" "$(done_after "$after")"
+stamped_waiting 2026-09-21T14:15:01.500Z
+check "watch: a Waiting on: line stamped at or after --after is read" "blocked input needed
+cwd /work/project
+needs git push origin main" "$(done_after "$after")"
 command rm -rf "$cfg/projects"
 
 # With --dir, a working worker whose cwd has left the Project folder (it
@@ -509,13 +541,12 @@ check "poll: stops when the transcript says the turn ended" "done
 cwd /work/project
 note claude agents still said working" "$(poll 9121ff49 working-idle working-idle)"
 check "poll: stopped at the first such round" "1" "$(command cat "$fake/count")"
-# After a resume, the previous turn's end keeps the watch polling until the
-# list itself says done (#122).
+# After a resume, the previous turn's end keeps the watch polling, here
+# until the worker leaves the list (#122, #126).
 stamped 2026-09-21T14:13:19.950Z
 reset_fake
-for f in working-idle working-idle done; do echo "$fixtures/$f.json"; done >"$fake/seq"
-check "poll --after: an earlier turn end keeps polling" "done
-cwd /work/project" \
+for f in working-idle done working-busy; do echo "$fixtures/$f.json"; done >"$fake/seq"
+check "poll --after: an earlier turn end keeps polling" "gone" \
     "$(PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id 9121ff49 --after "$after" --interval 0 --timeout 30 </dev/null)"
 check "poll --after: read the list each round" "3" "$(command cat "$fake/count")"
 command rm -rf "$cfg/projects"
