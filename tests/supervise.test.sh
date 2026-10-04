@@ -1191,6 +1191,9 @@ check "actions: config dir required" "1" "$?"
 new_grant_repo() { # <folder var name> <grant file content>: a repo with the
     # grant committed and pushed to origin/main before any worker commit,
     # then one worker commit pushed only to a topic branch, never main.
+    # It resets gstart to this repo's commit, so a check runs actions.sh on
+    # the repo made last: an earlier one fails on the later gstart ("not a
+    # commit") and its check reads empty.
     eval "$1=\"\$work/grant-repo-$grant_n\""
     eval "grepo=\$$1"
     grant_n=$((grant_n + 1))
