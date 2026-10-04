@@ -25,9 +25,15 @@
 #                            first worker call at or past 100%
 #   captures and clears      capturing skill calls and prompts, /clear
 #                            prompts and compactions in the worker
+# * supervisor answers       prompts answer.sh wrote for the supervisor to
+#                            send, `[supervisor answer to "<q>"] <answer>`,
+#                            each as its question and the answer's first
+#                            sentence
 #   human interventions      the job timeline's blocked entries, each with
 #                            its detail (*), and plain prompts typed into the
-#                            worker after its first (by `claude attach`)
+#                            worker after its first (by `claude attach`); a
+#                            blocked entry whose next prompt is a supervisor
+#                            answer is the supervisor's, not a human's
 # * shared actions           actions.sh's lines, or none
 #   outcome                  commits in START..HEAD, the job's PRs and
 #                            issues (*), and the ticket's state from gh
@@ -182,6 +188,15 @@ if [ -n "$sid" ]; then
            # The first prompt is the launch prompt, a slash command or plain text.
            typed: ([$rows[] | select(.type == "user" and (.isMeta // false | not)) | text // empty] | .[1:]
                    | map(select(test("^\\s*[<\\[]") | not)) | length),
+           # Prompts that answer a wait, typed or the supervisor'"'"'s, by time.
+           prompts: ([$rows[] | select(.type == "user" and (.isMeta // false | not))
+                      | {at: (.timestamp // null), text: (text // null)} | select(.text != null)] | .[1:]
+                     | map(select(.at != null)
+                           | .sup = (.text | test("^\\[supervisor answer to "))
+                           | select(.sup or (.text | test("^\\s*[<\\[]") | not))
+                           | {at, sup})),
+           answers: [$rows[] | select(.type == "user" and (.isMeta // false | not)) | text // empty
+                     | capture("^\\[supervisor answer to \"(?<q>.*)\"\\] (?<a>[^.!?]*[.!?]?)")],
            usage: ([$rows[] | select(.type == "cost-state")] | last
                    | if . == null then null
                      else {total: (.totalCostUSD // 0),
@@ -251,7 +266,12 @@ if [ -n "$SESSION" ]; then
 elif [ ! -f "$timeline" ]; then
     [ ! -f "$job" ] || note "no timeline for $ID under $CLAUDE_CONFIG_DIR/jobs, so its waits on a human were not read"
     waits="unknown"
-elif ! waits=$(jq -rs '[.[] | objects | select(.state == "blocked") | .detail // ""] as $w
+elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // []')" "$defs"'
+        # A wait is the supervisor'"'"'s when the first prompt after it is its answer.
+        [.[] | objects | select(.state == "blocked")
+         | (.at // "") as $b
+         | select($b == "" or ([$p[] | select((.at | epoch) > ($b | epoch))] | min_by(.at | epoch) | .sup // false | not))
+         | .detail // ""] as $w
         | if ($w | length) == 0 then ""
           else "\($w | length) wait\(if ($w | length) > 1 then "s" else "" end) on a human"
                + (($w | map(select(. != "")) | join("; ")) as $d | if $d == "" then "" else " (\($d))" end) end' \
@@ -326,6 +346,11 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
                                      (select($w.clears > 0) | plural($w.clears; "clear")),
                                      (select($w.compacts > 0) | plural($w.compacts; "compact"))]
                                     | if length == 0 then "none" else join(", ") end end)",
+      (select($hand | not)
+       | "- supervisor answers: \(if $w.calls == null then "unknown"
+                                 elif ($w.answers | length) == 0 then "none"
+                                 else plural($w.answers | length; "answer") + ": "
+                                      + ([$w.answers[] | "\(.q) -> \(.a)"] | join("; ")) end)"),
       "- human interventions: \([(select($waits != "") | if $waits == "unknown" then "unknown waits" else $waits end),
                                  (if $w.calls == null then "unknown typed messages"
                                   elif $w.typed > 0 then "\(plural($w.typed; "message")) typed into the \($who)"

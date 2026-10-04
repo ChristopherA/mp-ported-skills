@@ -172,6 +172,7 @@ check "record: the whole record" "## Supervised run of #56
 - supervisor since launch: 2 API calls, 183k tokens, \$0.54
 - peak zone: 174%, past 100% from worker call 2
 - captures and clears: 1 capture, 1 clear, 1 compact
+- supervisor answers: none
 - human interventions: 1 wait on a human (approve Bash: git push), 1 message typed into the worker
 - shared actions:
   - pr 72 ungranted: https://github.com/ChristopherA/mp-ported-skills/pull/72
@@ -346,9 +347,48 @@ check "record: a recorded job" "## Supervised run of #56
 - supervisor since launch: 0 API calls, 0 tokens, \$0.00
 - peak zone: 49%
 - captures and clears: none
+- supervisor answers: none
 - human interventions: none
 - shared actions: none
 - outcome: no commits after $(git -C "$repo" rev-parse --short HEAD), ticket #56 CLOSED" "$out"
+
+# A question the supervisor answered (answer.sh, #90) is listed with its
+# answer, and its wait is not a human's. The block at 06:03 is followed
+# first by the supervisor's answer; a second block at 06:09 by a typed one.
+setup
+jq -c 'if .timestamp == "2026-09-29T06:08:00.000Z" then .timestamp = "2026-09-29T06:10:30.000Z" else . end' \
+    "$cfg/projects/-work-project/$sid.jsonl" >"$work/t"
+{
+    command cat "$work/t"
+    said 2026-09-29T06:03:30.000Z '[supervisor answer to "Proceed with #56?"] Yes, proceed with #56 as the ticket and its latest Agent Brief describe. This is the routine answer.'
+} >"$cfg/projects/-work-project/$sid.jsonl"
+printf '%s\n' '{"at":"2026-09-29T06:09:30.000Z","state":"blocked","detail":"which flag name?","text":""}' \
+    >>"$cfg/jobs/c2a368ee/timeline.jsonl"
+out=$(record)
+check "record: a supervisor answer" \
+    "1 answer: Proceed with #56? -> Yes, proceed with #56 as the ticket and its latest Agent Brief describe." \
+    "$(field 'supervisor answers' "$out")"
+check "record: its wait is not a human's" "1 wait on a human (which flag name?), 1 message typed into the worker" \
+    "$(field 'human interventions' "$out")"
+check "record: a supervisor answer is not typed" "1 message typed into the worker" \
+    "$(field 'human interventions' "$out" | sed 's/.*), //')"
+
+# A wait with no prompt after it is still open, and a human's.
+jq -c 'select((.message.content | type) != "string" or (.message.content | startswith("[supervisor") | not))' \
+    "$cfg/projects/-work-project/$sid.jsonl" >"$work/t"
+command mv "$work/t" "$cfg/projects/-work-project/$sid.jsonl"
+out=$(record)
+check "record: no supervisor answer" "none" "$(field 'supervisor answers' "$out")"
+check "record: both waits a human's" "2 waits on a human (approve Bash: git push; which flag name?), 1 message typed into the worker" \
+    "$(field 'human interventions' "$out")"
+
+# With the worker's transcript unread, its answers are unknown and every
+# wait is counted as a human's.
+command rm -rf "$cfg/projects/-work-project"
+out=$(record)
+check "record: no transcript, answers unknown" "unknown" "$(field 'supervisor answers' "$out")"
+check "record: no transcript, waits a human's" "2 waits on a human (approve Bash: git push; which flag name?), unknown typed messages" \
+    "$(field 'human interventions' "$out")"
 
 # A hand-run /implement, cut down from a live interactive session with two
 # subagents: hand-run.jsonl and hand-run/subagents/.
