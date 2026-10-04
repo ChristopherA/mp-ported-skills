@@ -220,6 +220,23 @@ last_says 'Shall I close #90?'
 run
 not_routine "an action granted for push only" "no standing grant covers issue-close"
 
+last_says 'Waiting on: git push origin main && gh pr merge 1'
+run_as 'blocked input needed'
+not_routine "a Waiting on: line with two commands" "it waits on more than one command"
+
+# A period inside the question does not cut it short.
+last_says 'Tests pass. Shall I push v0.9 to main?'
+run
+check "a period inside the question" "0 question Shall I push v0.9 to main?" "$(rc) $(sed -n 1p "$work/out")"
+
+# A grant that cannot be read is named, not taken as no grant.
+last_says 'Shall I push to main?'
+(
+    repo=$work/bin
+    run
+)
+not_routine "grant.sh failed" "grant.sh failed: Error: not a git checkout: $work/bin"
+
 last_says 'Waiting on: rm -rf build'
 run_as 'blocked input needed'
 not_routine "a Waiting on: line no grant can cover" "it waits on an action no grant can cover"

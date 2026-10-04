@@ -37,7 +37,8 @@
 # Exits 0 with three lines: `question <q>`, `rule ticket` or
 # `rule grant <citation>`, `answer <the prompt to send>`. Exits 2 when the
 # question is not routine: `question <q>` when one was read, then
-# `not routine: <why>`. Exits 1 on an error, with nothing on stdout.
+# `not routine: <why>`, which names grant.sh's error when it could not
+# read the grants. Exits 1 on an error, with nothing on stdout.
 
 set -u
 
@@ -71,6 +72,8 @@ case $TICKET in *[!0-9]*) fail "--ticket needs an issue number, not '$TICKET'" ;
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 not_routine() { printf 'not routine: %s\n' "$1"; exit 2; }
+errors=$(mktemp)
+trap 'command rm -f "$errors"' EXIT
 
 case $STATE in
     'blocked question' | 'blocked input needed') ;;
@@ -138,17 +141,24 @@ read_out=$(jq -s --arg n "$TICKET" '
         else {q: ($ask[0].question // "" | norm)} end
       elif ($lastline | test("^\\s*Waiting on:")) then
         ($lastline | sub("^\\s*Waiting on:\\s*"; "") | norm) as $cmd
-        | {q: "Waiting on: \($cmd)", waiting: true, action: ($cmd | gsub("`"; "") | action_of_command)}
+        | {q: "Waiting on: \($cmd)", waiting: true,
+           action: (if ($cmd | test("&&|\\|\\||;|\\|")) then "several" else ($cmd | gsub("`"; "") | action_of_command) end)}
       elif $text == "" then {why: "its last message holds no text and no question"}
       elif ($text | test("\\?$") | not) then {why: "its last message does not end on a question"}
       elif ([$text | match("\\?"; "g")] | length) > 1 then {why: "its last message asks more than one question"}
-      else {q: ($text | capture("(?<s>[^.!?\\n]*\\?)$").s | norm)} end
+      # The last sentence: after the last ". ", "! " or ": " on the last line.
+      else {q: ($lastline | [splits("(?<=[.!:])\\s+")] | last | norm)} end
     | if .q == "" then {why: "the question could not be read"} else . end
+    # The question as an answer quotes it: no double quotes, at most 200
+    # characters, so record.sh can read it back.
+    | if .q != null then .quoted = (.q | gsub("\""; "'"'"'") | .[0:200]) else . end
     | . as $r
     | if $r.q == null then $r
-      elif ($answered | index($r.q | gsub("\""; "'"'"'") | .[0:200])) != null then $r + {why: "it was answered once already and the worker asked again"}
+      elif ($answered | index($r.quoted)) != null then $r + {why: "it was answered once already and the worker asked again"}
       elif $r.waiting then
-        if $r.action == null then $r + {why: "it waits on an action no grant can cover"} else $r + {kind: "grant"} end
+        if $r.action == null then $r + {why: "it waits on an action no grant can cover"}
+        elif $r.action == "several" then $r + {why: "it waits on more than one command"}
+        else $r + {kind: "grant"} end
       else ($r.q | ascii_downcase) as $q
         | ([$q | match("#([0-9]+)"; "g") | .captures[0].string] | unique) as $nums
         | if ($q | test("\\bor\\b")) then $r + {why: "it offers a choice"}
@@ -164,23 +174,30 @@ question=$(printf '%s' "$read_out" | jq -r '.q // empty')
 why=$(printf '%s' "$read_out" | jq -r '.why // empty')
 kind=$(printf '%s' "$read_out" | jq -r '.kind // empty')
 action=$(printf '%s' "$read_out" | jq -r '.action // empty')
+quoted=$(printf '%s' "$read_out" | jq -r '.quoted // empty')
+if [ -z "$why" ]; then
+    case $kind in
+        ticket | grant) ;;
+        *) fail "the question's kind could not be read" ;;
+    esac
+fi
 
 [ -z "$question" ] || printf 'question %s\n' "$question"
 [ -z "$why" ] || not_routine "$why"
 
-# The question as the answer quotes it: one line, no double quotes, so
-# record.sh can read it back.
-quoted=$(printf '%s' "$question" | tr '"' "'" | cut -c1-200)
 case $kind in
     ticket)
         printf 'rule ticket\n'
         printf 'answer [supervisor answer to "%s"] Yes, proceed with #%s as the ticket and its latest Agent Brief describe. This is /supervise'\''s routine answer: it confirms the launched ticket and approves nothing beyond it, so if your plan departs from the ticket, stop and say so.\n' \
             "$quoted" "$TICKET" ;;
     grant)
-        citation=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$action" </dev/null) ||
+        # grant.sh exits 1 both for no grant and for an error; only an
+        # error writes an Error: line.
+        if ! citation=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$action" </dev/null 2>"$errors"); then
+            grep -q '^Error:' "$errors" && { printf 'not routine: grant.sh failed: %s\n' "$(grep '^Error:' "$errors" | head -n 1)"; exit 2; }
             not_routine "no standing grant covers $action"
+        fi
         printf 'rule grant %s\n' "$citation"
         printf 'answer [supervisor answer to "%s"] Yes, go ahead with the %s. The Project'\''s standing grant covers it ("%s"), so take it as the grant allows, without asking again.\n' \
             "$quoted" "$action" "$citation" ;;
-    *) fail "the question's kind could not be read" ;;
 esac
