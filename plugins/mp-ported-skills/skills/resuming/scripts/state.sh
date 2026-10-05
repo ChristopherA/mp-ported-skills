@@ -80,14 +80,20 @@ next_child() {
         by=$(printf '%s' "$kids" | jq -r --argjson k "$k" '.[] | select(.n == $k) | .line[]')
         if [ "$(printf '%s' "$kids" | jq --argjson k "$k" '.[] | select(.n == $k) | .dep')" -gt 0 ]; then
             by="$by
-$(gh api "repos/{owner}/{repo}/issues/$k/dependencies/blocked_by" 2>/dev/null |
-                jq -r '.[] | select(.state == "open") | .number' 2>/dev/null)"
+$(open_link_blockers "$k" | jq -r '.[]')"
         fi
         by=$(printf '%s\n' "$by" | grep . | sort -un | sed 's/^/#/' | tr '\n' ' ')
         blocked="$blocked, #$k by ${by:-an unread blocker}"
     done
     blocked=$(printf '%s' "$blocked" | sed 's/ ,/,/g; s/ $//')
     printf '; every open child blocked: %s' "${blocked#, }"
+}
+
+# open_link_blockers <n>: a JSON array of the open tickets GitHub links as
+# blocking #n; nothing when the list cannot be read.
+open_link_blockers() {
+    gh api "repos/{owner}/{repo}/issues/$1/dependencies/blocked_by" 2>/dev/null |
+        jq -c '[.[] | select(.state == "open") | .number]' 2>/dev/null
 }
 
 gather() {
@@ -226,17 +232,22 @@ gather() {
                             and (.n as $n | $fx | index($n) | not))]')
         ready=$(printf '%s' "$ready_rows" | jq -r 'map("#\(.n) \(.t)") | join("; ")')
 
-        # What closing each ticket unblocks: the open tickets it is the last
-        # open blocker of, by GitHub link or body. A ticket whose links were
-        # not read has unknown blockers and is left out.
+        # What closing each ticket unblocks: the open tickets, not parked,
+        # wontfix or already fixed, it is the last open blocker of, by GitHub
+        # link or body. Only a ticket with one open link (dep, GitHub's open
+        # count) has its links read: with two it cannot be unblocked by one
+        # close, and each read spends the time budget. A ticket whose links
+        # were not read has unknown blockers and is left out.
+        targets=$(printf '%s' "$rows" | jq -c --argjson fx "$fixed_nums" '
+            [.[] | select(.dep <= 1 and .role != "wontfix" and (.l | index("parked") | not)
+                          and (.n as $n | $fx | index($n) | not))]')
         links='{}'
-        for n in $(printf '%s' "$rows" | jq -r '.[] | select(.dep > 0) | .n'); do
-            b=$(gh api "repos/{owner}/{repo}/issues/$n/dependencies/blocked_by" 2>/dev/null |
-                jq -c '[.[] | select(.state == "open") | .number]' 2>/dev/null) || b=
+        for n in $(printf '%s' "$targets" | jq -r '.[] | select(.dep == 1) | .n'); do
+            b=$(open_link_blockers "$n")
             links=$(printf '%s' "$links" | jq -c --arg n "$n" --argjson b "${b:-null}" '.[$n] = $b')
         done
         # {"<blocker>": "#91 (High), #93", ...}, in ticket order.
-        unblocks_map=$(printf '%s' "$rows" | jq -c --argjson open "$open_nums" --argjson links "$links" '
+        unblocks_map=$(printf '%s' "$targets" | jq -c --argjson open "$open_nums" --argjson links "$links" '
             [.[] | (if .dep > 0 then $links["\(.n)"] else [] end) as $l
              | select($l != null)
              | {n, p, by: ($l + [.line[] | select(. as $b | $open | index($b))] | unique)}
@@ -334,13 +345,15 @@ gather() {
     fi
     printf '%s' "$cases" | sed -n '1s/^/next: /p; 2s/^/runner-up: /p'
     # What the ticket each of those steps names unblocks: case 2's ticket,
-    # case 1's first next child, or case 6's hand ticket.
+    # case 1's first next child or else its first in-motion ticket, or case
+    # 6's hand ticket.
     if [ $reached = 1 ]; then
         for i in 1 2; do
             c=$(printf '%s' "$cases" | sed -n "${i}p")
             case $c in
                 '2 /implement #'*) t=${c#2 /implement #} ;;
                 '1 '*'; next child #'*) t=${c#*; next child #} ;;
+                '1 '*'in motion #'*) t=${c#*in motion #} ;;
                 '6 by hand'*': #'*) t=${c#*: #} ;;
                 *) t= ;;
             esac

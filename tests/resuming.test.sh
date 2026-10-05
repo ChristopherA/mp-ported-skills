@@ -7,8 +7,8 @@
 # of the seven weighing cases, a ticket labelled in-motion or parked, the next
 # child of an in-motion parent, the /supervise offer beside /implement (with a
 # fake `claude` serving `claude agents`), what each ready ticket unblocks,
-# and label strings read from triage-labels.md. Also checks that no plugin hook runs state.sh. Touches
-# nothing outside its own mktemp directory.
+# and label strings read from triage-labels.md. Also checks that no plugin
+# hook runs state.sh. Touches nothing outside its own mktemp directory.
 #
 # Usage: sh tests/resuming.test.sh
 
@@ -289,8 +289,12 @@ issues "$saved_issues"
 # --- what each ready ticket unblocks (#123) ---------------------------------
 # A ticket is unblocked by #90 when #90 is its last open blocker, whether the
 # blocker is a GitHub link, a Blocked by: line or a bullet under a heading.
-unb() { printf '%s\n' "$1" | sed -n "s/^$2: //p"; }
-issues "$(list "$(issue 90 ready-for-agent)" \
+# Parked, wontfix and already-fixed tickets are never listed, and a ticket
+# with two open links has them left unread (#99's fixture would list it).
+line_of() { printf '%s\n' "$1" | sed -n "s/^$2: //p"; }
+issues "$(list "$(issue 30 needs-info 0 'Blocked by: #90')" "$(issue 88 wontfix 0 'Blocked by: #90')" \
+    "$(issue 89 needs-info,parked 0 'Blocked by: #90')" "$(issue 99 ready-for-agent 2)" \
+    "$(issue 90 ready-for-agent)" \
     "$(issue 91 ready-for-human 1 '**Priority: High.** Linked.')" \
     "$(issue 92 needs-triage 0 '**Priority: Medium.** On a line.
 
@@ -317,14 +321,15 @@ printf '[{"number":90,"state":"open"}]' >"$FAKE_GH/deps-91.json"
 printf '[{"number":90,"state":"open"}]' >"$FAKE_GH/deps-95.json"
 printf '[{"number":90,"state":"open"},{"number":9,"state":"closed"}]' >"$FAKE_GH/deps-96.json"
 printf 'not json' >"$FAKE_GH/deps-97.json"
+printf '[{"number":90,"state":"open"}]' >"$FAKE_GH/deps-99.json"
 out=$(run)
 check "unblocks: last open blocker, every form, other open blockers and fences left out" \
-    "#90 unblocks #91 (High), #92 (Medium), #93, #96 (Low)" "$(unb "$out" unblocks)"
+    "#90 unblocks #91 (High), #92 (Medium), #93, #96 (Low)" "$(line_of "$out" unblocks)"
 check "unblocks: next line unchanged" "2 /implement #90 (you type it; user-invoked): #90 t90" "$(next "$out")"
 check "unblocks: runner-up line unchanged" "3 /triage (you type it; user-invoked): 0 unlabelled, 1 needs-triage, replied needs-info: none" "$(runner "$out")"
-check "unblocks: for the next ticket" "#91 (High), #92 (Medium), #93, #96 (Low)" "$(unb "$out" 'next unblocks')"
-check "unblocks: none for a runner-up that names no ticket" "" "$(unb "$out" 'runner-up unblocks')"
-command rm -f "$FAKE_GH"/deps-9[1-7].json
+check "unblocks: for the next ticket" "#91 (High), #92 (Medium), #93, #96 (Low)" "$(line_of "$out" 'next unblocks')"
+check "unblocks: none for a runner-up that names no ticket" "" "$(line_of "$out" 'runner-up unblocks')"
+command rm -f "$FAKE_GH"/deps-9[1-9].json
 
 # The next child and the runner-up each carry what they unblock.
 issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)" \
@@ -333,14 +338,16 @@ issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-age
 Blocked by: #53')" "$(issue 55 needs-info 0 'Blocked by: #52')")"
 list "$(issue 52 ready-for-agent)" >"$FAKE_GH/sub-24.json"
 out=$(run)
-check "unblocks: next child" "#55" "$(unb "$out" 'next unblocks')"
-check "unblocks: runner-up" "#54 (High)" "$(unb "$out" 'runner-up unblocks')"
-check "unblocks: the ready list" "#52 unblocks #55; #53 unblocks #54 (High)" "$(unb "$out" unblocks)"
+check "unblocks: next child" "#55" "$(line_of "$out" 'next unblocks')"
+check "unblocks: runner-up" "#54 (High)" "$(line_of "$out" 'runner-up unblocks')"
+check "unblocks: the ready list" "#52 unblocks #55; #53 unblocks #54 (High)" "$(line_of "$out" unblocks)"
 command rm -f "$FAKE_GH/sub-24.json"
 issues "$(list "$(issue 80 ready-for-human 0 '**Priority: Medium.**')" "$(issue 81 needs-info 0 'Blocked by: #80')")"
 out=$(run)
-check "unblocks: a by-hand next step" "#81" "$(unb "$out" 'next unblocks')"
-check "unblocks: none in the ready list" "none" "$(unb "$out" unblocks)"
+check "unblocks: a by-hand next step" "#81" "$(line_of "$out" 'next unblocks')"
+check "unblocks: none in the ready list" "none" "$(line_of "$out" unblocks)"
+issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 56 needs-info 0 'Blocked by: #24')")"
+check "unblocks: an in-motion ticket with no sub-issues" "#56" "$(line_of "$(run)" 'next unblocks')"
 issues "$saved_issues"
 
 prs '[{"number":60,"title":"fork pr","headRefName":"x","isCrossRepository":true}]'

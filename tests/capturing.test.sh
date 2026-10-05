@@ -7,8 +7,9 @@
 # resolves to the script from capturing's own folder, and that both skills
 # carry the rule, and the use of what the step unblocks, in the same words.
 # It also checks that move 1 reads a ticket's parent before moving the
-# in-motion label, so an in-motion parent keeps it. What state.sh prints in that state is checked in
-# tests/resuming.test.sh. Reads only files in this checkout.
+# in-motion label, so an in-motion parent keeps it. What state.sh prints in
+# that state is checked in tests/resuming.test.sh. Reads only files in this
+# checkout.
 #
 # Usage: sh tests/capturing.test.sh
 
