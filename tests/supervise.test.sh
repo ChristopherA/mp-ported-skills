@@ -204,6 +204,31 @@ waiting_on "Should pid always win?" "$blocked_session"
 check "watch: blocked with no waitingFor and no Waiting on: is a question" "blocked question
 cwd /work/project
 needs clarify: should pid always win?" "$(sh "$scripts/watch.sh" --id 91a06a74 --file "$work/no-waiting-for.json" </dev/null)"
+waiting_on "Committed on main.
+
+**Should pid always win, or only for a live session?**" "$blocked_session"
+check "watch: blocked, last text ends on a bold question" "blocked question
+cwd /work/project
+needs clarify: should pid always win?" "$(sh "$scripts/watch.sh" --id 91a06a74 --file "$work/no-waiting-for.json" </dev/null)"
+# claude agents can mark a finished worker blocked on a decision its report
+# only quotes, such as the last line of a draft ticket. Its last text ends on
+# a statement, not a question to the maintainer, so it is done (#114).
+jq '.needs = "decide whether edit and delete need their own action"' "$fixtures/job-state.json" >"$cfg/jobs/91a06a74/state.json"
+waiting_on "Captured. One finding is unposted; its draft body:
+
+> Decide whether edit and delete need their own action or a refusal, and whether to name those two mutations.
+
+The next phase does not need this session, so \`/clear\` is the right boundary." "$blocked_session"
+check "watch: a report quoting a decision is done" "done
+cwd /work/project
+note claude agents said blocked" "$(sh "$scripts/watch.sh" --id 91a06a74 --file "$work/no-waiting-for.json" </dev/null)"
+waiting_on "Captured. Draft body for the unposted finding:
+
+Decide whether edit and delete need their own action or a refusal, and whether to name those two mutations." "$blocked_session"
+check "watch: a report ending on a decision statement is done" "done
+cwd /work/project
+note claude agents said blocked" "$(sh "$scripts/watch.sh" --id 91a06a74 --file "$work/no-waiting-for.json" </dev/null)"
+jq '.needs = "clarify: should pid always win?"' "$fixtures/job-state.json" >"$cfg/jobs/91a06a74/state.json"
 # A row that names what it waits for is read as before.
 waiting_on "\`Waiting on: git push origin main\`" "$blocked_session"
 check "watch: blocked with a waitingFor ignores Waiting on:" "blocked permission prompt

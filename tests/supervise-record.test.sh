@@ -390,6 +390,22 @@ check "record: no transcript, answers unknown" "unknown" "$(field 'supervisor an
 check "record: no transcript, waits a human's" "2 waits on a human (approve Bash: git push; which flag name?), unknown typed messages" \
     "$(field 'human interventions' "$out")"
 
+# A block whose text ends on a statement is a finished report that quotes a
+# decision, not a wait on a human (#114); one ending on a question, or on a
+# Waiting on: line, is.
+{
+    jq -cn '{at: "2026-09-29T06:11:00.000Z", state: "blocked", detail: "waiting on decision: edit and delete",
+        text: "Captured. Draft body:\n\n> Decide whether edit and delete need their own action.\n\n`/clear` is the right boundary."}'
+    jq -cn '{at: "2026-09-29T06:12:00.000Z", state: "blocked", detail: "push now?",
+        text: "Committed on main.\n\nWant me to push to `origin/main` now?"}'
+    jq -cn '{at: "2026-09-29T06:13:00.000Z", state: "blocked", detail: "commits ready",
+        text: "Committed on main.\n\n`Waiting on: git push origin main`"}'
+} >>"$cfg/jobs/c2a368ee/timeline.jsonl"
+out=$(record)
+check "record: a block on a quoted decision is not a wait" \
+    "4 waits on a human (approve Bash: git push; which flag name?; push now?; commits ready), unknown typed messages" \
+    "$(field 'human interventions' "$out")"
+
 # A hand-run /implement, cut down from a live interactive session with two
 # subagents: hand-run.jsonl and hand-run/subagents/.
 hand=0f3c2b1a-0000-4000-8000-000000000002

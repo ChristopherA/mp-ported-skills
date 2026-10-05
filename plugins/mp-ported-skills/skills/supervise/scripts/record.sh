@@ -33,7 +33,10 @@
 #                            its detail (*), and plain prompts typed into the
 #                            worker after its first (by `claude attach`); a
 #                            blocked entry whose next prompt is a supervisor
-#                            answer is the supervisor's, not a human's
+#                            answer is the supervisor's, not a human's, and
+#                            one whose text ends on a statement, with no
+#                            `Waiting on:` line, is a finished report
+#                            watch.sh reads as done, not a wait (#114)
 # * shared actions           actions.sh's lines, or none
 #   outcome                  commits in START..HEAD, the job's PRs and
 #                            issues (*), and the ticket's state from gh
@@ -260,15 +263,21 @@ elif ! supervisor=$(jq -rs --arg l "$launched" "$defs"'
 fi
 
 # --- waits on a human ------------------------------------------------------
+# QUESTION_JQ: watch.sh's definition of `asks`, true for a text whose last
+# non-blank line, less trailing markdown, ends on a question mark.
+QUESTION_JQ='def asks: [splits("\n") | sub("[\\s`*_\")]+$"; "") | select(. != "")] | last // "" | endswith("?");'
 waits=""
 if [ -n "$SESSION" ]; then
     :
 elif [ ! -f "$timeline" ]; then
     [ ! -f "$job" ] || note "no timeline for $ID under $CLAUDE_CONFIG_DIR/jobs, so its waits on a human were not read"
     waits="unknown"
-elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // []')" "$defs"'
+elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // []')" "$defs$QUESTION_JQ"'
         # A wait is the supervisor'"'"'s when the first prompt after it is its answer.
+        # Its text, when it has any, must end on a question or carry a
+        # Waiting on: line, as watch.sh confirms a block.
         [.[] | objects | select(.state == "blocked")
+         | select((.text // "") as $t | $t == "" or ($t | asks) or ($t | test("(?m)^[`* ]*Waiting on:")))
          | (.at // "") as $b
          | select($b == "" or ([$p[] | select((.at | epoch) > ($b | epoch))] | min_by(.at | epoch) | .sup // false | not))
          | .detail // ""] as $w

@@ -49,7 +49,10 @@
 # whose last text has a line starting `Waiting on:` is reported as `blocked
 # input needed`, with a `needs` line naming the action (#88). So is a blocked
 # session with no waitingFor whose last text has one; that line wins over
-# the job's needs (#97).
+# the job's needs (#97). A blocked session with no waitingFor whose last
+# text ends on a statement, not a question, is reported as done, with a last
+# line `note claude agents said blocked` (#114): a finished report that
+# quotes a decision reads as a question to claude agents.
 #
 # Usage:
 #   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--interval SECONDS] [--timeout SECONDS] [--stall SECONDS]
@@ -193,23 +196,42 @@ stale_done() {
     return 1
 }
 
-# waiting_on <session id>: the action a worker whose turn ended waits on,
-# from a line starting `Waiting on:` in its last text, which launch.sh tells
-# it to end on when a shared action has no grant (#88); empty when none. The
-# line may be wrapped in backticks or bold. Read from the main transcript
-# only, in every project folder, as turn_ended reads it. With --after, only
-# text stamped at or after AFTER is read: the previous turn's line is not
-# what a resumed worker waits on (#126).
-waiting_on() {
+# last_text <session id>: the session's last text, read from the main
+# transcript only, in every project folder, as turn_ended reads it; empty
+# when it has none. With --after, only text stamped at or after AFTER is
+# read: the previous turn's text is not what a resumed worker ended on
+# (#126).
+last_text() {
     [ -n "$1" ] || return 0
     for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
         [ -f "$t" ] || continue
         jq -r -s "$AFTER_JQ"'[.[] | select(.type == "assistant" and (.isSidechain | not) and not_before)
                    | .message.content[]? | select(.type == "text") | .text // empty]
-                  | last // empty' --arg after "$AFTER" "$t" 2>/dev/null |
-            sed -n 's/^[`* ]*Waiting on: *//p' | sed 's/[`* ]*$//' | tail -n 1
+                  | last // empty' --arg after "$AFTER" "$t" 2>/dev/null
         return 0
     done
+}
+
+# waiting_on <session id>: the action a worker whose turn ended waits on,
+# from a line starting `Waiting on:` in its last text, which launch.sh tells
+# it to end on when a shared action has no grant (#88); empty when none. The
+# line may be wrapped in backticks or bold.
+waiting_on() {
+    last_text "$1" | sed -n 's/^[`* ]*Waiting on: *//p' | sed 's/[`* ]*$//' | tail -n 1
+}
+
+# QUESTION_JQ: defines the jq filter `asks`, true for a text whose last
+# non-blank line, less trailing markdown, ends on a question mark. record.sh
+# carries the same definition, to count only the waits this confirms.
+QUESTION_JQ='def asks: [splits("\n") | sub("[\\s`*_\")]+$"; "") | select(. != "")] | last // "" | endswith("?");'
+
+# ends_unasked <session id>: whether its last text is found and ends on a
+# statement rather than a question to the maintainer: a finished report that
+# quotes a decision, which claude agents can read as a question (#114).
+ends_unasked() {
+    text=$(last_text "$1")
+    [ -n "$text" ] || return 1
+    jq -en --arg t "$text" "$QUESTION_JQ"'$t | asks | not' >/dev/null 2>&1
 }
 
 # session_id_of <agents json>: the job's sessionId, or empty when the list
@@ -309,6 +331,8 @@ commits() {
 # is `blocked input needed`, with that action as its needs line in place of
 # the job's: the service can mark that worker blocked before it is seen
 # done, and the job's needs can name a side question from its report (#97).
+# A blocked one with no waitingFor and no such line, whose last text ends on
+# a statement rather than a question, is done, with a note (#114).
 # With --after, a done from the list whose transcript shows no turn end at
 # or after it is still working: the list can show the previous turn's done
 # for a moment after a resume (#126).
@@ -343,6 +367,12 @@ report() {
     if [ -n "$waits" ]; then
         out=$(printf '%s\nneeds %s' "$(printf '%s\n' "$out" | sed '1s/.*/blocked input needed/')" "$waits")
     else
+        case $out in
+            "blocked question"*)
+                if ends_unasked "$(session_id_of "$1")"; then
+                    out=$(printf '%s\nnote claude agents said blocked' "$(printf '%s\n' "$out" | sed '1s/.*/done/')")
+                fi ;;
+        esac
         case $out in
             blocked*)
                 job="$CLAUDE_CONFIG_DIR/jobs/$ID/state.json"
