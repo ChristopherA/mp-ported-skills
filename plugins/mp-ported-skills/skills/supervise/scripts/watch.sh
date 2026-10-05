@@ -71,8 +71,11 @@
 # the turn that ended before the resume is not read as the resumed one's end
 # (#122). With it, a done needs a turn end in the transcript stamped at or
 # after it, whether the transcript or claude agents says done (a done from
-# the list with no transcript found stands), and a `Waiting on:` line counts
-# only in text stamped at or after it (#126).
+# the list with no transcript found stands), a `Waiting on:` line counts
+# only in text stamped at or after it (#126), and a blocked question from
+# the list needs assistant text stamped at or after it, or reads as working
+# (one with no transcript found stands; a block that names its waitingFor is
+# not gated) (#127).
 #
 # Exits 1 when the list cannot be read, which is never reported as gone.
 
@@ -190,6 +193,22 @@ stale_done() {
     for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
         [ -f "$t" ] || continue
         jq -e -s "$AFTER_JQ"'any(.[]; .type == "system" and .subtype == "turn_duration" and not_before) | not' \
+            --arg after "$AFTER" "$t" >/dev/null 2>&1
+        return
+    done
+    return 1
+}
+
+# stale_question <session id>: whether a blocked question from claude
+# agents is the previous turn's: with --after, the session's transcript is
+# found and has no assistant text stamped at or after AFTER (#127). With no
+# transcript found, the list's blocked question stands.
+stale_question() {
+    [ -n "$1" ] || return 1
+    for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
+        [ -f "$t" ] || continue
+        jq -e -s "$AFTER_JQ"'any(.[]; .type == "assistant" and (.isSidechain | not) and not_before
+                and any(.message.content[]?; .type == "text")) | not' \
             --arg after "$AFTER" "$t" >/dev/null 2>&1
         return
     done
@@ -336,7 +355,8 @@ commits() {
 # a statement rather than a question, is done, with a note (#114).
 # With --after, a done from the list whose transcript shows no turn end at
 # or after it is still working: the list can show the previous turn's done
-# for a moment after a resume (#126).
+# for a moment after a resume (#126). So is a blocked question from the list
+# whose transcript holds no assistant text at or after it (#127).
 # With --since, a worktree or branch made in the repo since the snapshot is
 # listed, and makes a working or done session moved.
 report() {
@@ -345,6 +365,10 @@ report() {
         done*)
             if [ -n "$AFTER" ] && stale_done "$(session_id_of "$1")"; then
                 out=$(printf 'working%s' "${out#done}")
+            fi ;;
+        "blocked question"*)
+            if [ -n "$AFTER" ] && stale_question "$(session_id_of "$1")"; then
+                out=$(printf 'working%s' "${out#blocked question}")
             fi ;;
     esac
     case $out in

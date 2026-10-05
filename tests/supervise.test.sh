@@ -304,7 +304,39 @@ stamped_waiting 2026-09-21T14:15:01.500Z
 check "watch: a Waiting on: line stamped at or after --after is read" "blocked input needed
 cwd /work/project
 needs git push origin main" "$(done_after "$after")"
+# The list can still show the previous turn's blocked question for a moment
+# after the wake; with --after, it needs assistant text as late (#127).
+mkdir -p "$cfg/jobs/91a06a74"
+jq '.needs = "clarify: should pid always win?"' "$fixtures/job-state.json" >"$cfg/jobs/91a06a74/state.json"
+asked_at() { # <text time, or empty for none stamped> -- turn-ended for the blocked session, ending on a question stamped then
+    dir="$cfg/projects/-work-project"
+    command rm -rf "$cfg/projects"; mkdir -p "$dir"
+    jq -c --arg w "$1" 'if .type == "assistant" and .message.content == [{"type": "text"}]
+        then .message.content[0].text = "Should pid always win?" | (if $w == "" then . else .timestamp = $w end) else . end' \
+        "$transcripts/turn-ended.jsonl" >"$dir/$blocked_session.jsonl"
+}
+question_after() { # <agents json> -- watch.sh --after on it for the blocked session
+    sh "$scripts/watch.sh" --id 91a06a74 --after "$after" --file "$1" </dev/null 2>&1
+}
+asked_at ""
+check "watch: a listed question with no stamped text after --after is working" "working
+cwd /work/project" "$(question_after "$work/no-waiting-for.json")"
+asked_at 2026-09-21T14:13:19.950Z
+check "watch: a listed question whose text is before --after is working" "working
+cwd /work/project" "$(question_after "$work/no-waiting-for.json")"
+asked_at 2026-09-21T14:13:20.004Z
+check "watch: a listed question whose text is at or after --after stands" "blocked question
+cwd /work/project
+needs clarify: should pid always win?" "$(question_after "$work/no-waiting-for.json")"
+asked_at 2026-09-21T14:13:19.950Z
+check "watch: a blocked state naming its waitingFor is kept with --after" "blocked permission prompt
+cwd /work/project
+needs clarify: should pid always win?" "$(question_after "$fixtures/blocked-permission-prompt.json")"
 command rm -rf "$cfg/projects"
+check "watch: a listed question with no transcript found stands with --after" "blocked question
+cwd /work/project
+needs clarify: should pid always win?" "$(question_after "$work/no-waiting-for.json")"
+command rm -rf "$cfg/jobs/91a06a74"
 
 # With --dir, a working worker whose cwd has left the Project folder (it
 # entered a worktree) is reported at once. --dir must name a real folder, so
