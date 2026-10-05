@@ -13,6 +13,9 @@
 #                 pushed, so the loop waits rather than stacking work
 #   behind        the upstream has commits the branch lacks, so the next
 #                 worker would start from an old commit
+#   count-reached --max N was given and N tickets of --ran ran: the count
+#                 --loop N asked for (#149). Checked after the landing
+#                 checks above, so a ticket that did not land still says so
 #   nothing-left  state.sh's next step is case 7, nothing in motion
 #   other-step    any other step than /implement of a ready-for-agent
 #                 ticket, as step.sh reads it
@@ -23,7 +26,10 @@
 # is launch.sh's, which the loop runs next. Writes nothing but the fetch.
 #
 # Usage:
-#   next.sh --dir DIR [--ran "N M ..."] [--from FILE]
+#   next.sh --dir DIR [--ran "N M ..."] [--max N] [--from FILE]
+#   next.sh --max N     only check the count, before the loop's first launch:
+#                       prints `count N`, or refuses one that is not a
+#                       positive integer
 #
 # --from reads a saved state.sh report instead of running state.sh (tests).
 # Exits 0 for next, 2 for stop, 1 on an error.
@@ -32,6 +38,8 @@ set -u
 
 DIR=""
 RAN=""
+MAX=""
+HAS_MAX=""
 FROM=""
 
 need_value() { [ $# -ge 2 ] || { printf 'Error: %s needs a value\n' "$1" >&2; exit 1; }; }
@@ -39,9 +47,11 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --dir)  need_value "$@"; DIR="$2"; shift 2 ;;
         --ran)  need_value "$@"; RAN="$2"; shift 2 ;;
+        --max)  need_value "$@"; MAX="$2"; HAS_MAX=1; shift 2 ;;
         --from) need_value "$@"; FROM="$2"; shift 2 ;;
         --help)
-            printf 'Usage: next.sh --dir DIR [--ran "N M ..."] [--from FILE]\n'
+            printf 'Usage: next.sh --dir DIR [--ran "N M ..."] [--max N] [--from FILE]\n'
+            printf '       next.sh --max N   (only checks the count)\n'
             printf 'Prints "next implement #N", or "stop <kind>: <detail>".\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
@@ -50,6 +60,12 @@ done
 fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 halt() { printf 'stop %s\n' "$1"; exit 2; }
 plural() { [ "$1" = 1 ] && printf '%s %s' "$1" "$2" || printf '%s %ss' "$1" "$2"; }
+if [ -n "$HAS_MAX" ]; then
+    case $MAX in
+        '' | *[!0-9]* | 0*) fail "--max needs a positive integer, not '$MAX'" ;;
+    esac
+    [ -n "$DIR" ] || { echo "count $MAX"; exit 0; }
+fi
 [ -n "$DIR" ] || fail "--dir is required"
 [ -d "$DIR" ] || fail "not a directory: $DIR"
 DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
@@ -80,6 +96,11 @@ ahead=${counts##*[!0-9]}
 [ "$ahead" -eq 0 ] || halt "not-landed: $(plural "$ahead" commit) on $branch not on $up"
 [ "$behind" -eq 0 ] ||
     halt "behind: $branch is $(plural "$behind" commit) behind $up; the next ticket would start from an old commit"
+
+if [ -n "$HAS_MAX" ]; then
+    ran=$(printf '%s\n' "$RAN" | tr -c '0-9' '\n' | grep -v '^$' | sort -u | grep -c '^')
+    [ "$ran" -lt "$MAX" ] || halt "count-reached: $(plural "$ran" ticket) ran, the $MAX --loop asked for"
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -n "$FROM" ]; then

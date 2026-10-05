@@ -4,9 +4,9 @@ description: Run a Project's next ready-for-agent ticket, or with --loop each ne
 disable-model-invocation: true
 ---
 
-Run one ticket in a Project, from the Hub or from inside the Project, as the maintainer would by hand: read the next step, start `/implement #N` in a fresh session, watch it, and report. The worker is a Claude Code background session (`claude --bg`), whose first prompt enters through the human's door, so the ticket gets the full `/mattpocock-skills:implement`, its TDD and its own `/code-review` (ADR 0003). One ticket, then stop; with `--loop`, the next ticket after each one that lands, until a rule stops it (Loop, below).
+Run one ticket in a Project, from the Hub or from inside the Project, as the maintainer would by hand: read the next step, start `/implement #N` in a fresh session, watch it, and report. The worker is a Claude Code background session (`claude --bg`), whose first prompt enters through the human's door, so the ticket gets the full `/mattpocock-skills:implement`, its TDD and its own `/code-review` (ADR 0003). One ticket, then stop; with `--loop`, the next ticket after each one that lands, until a rule stops it, and with `--loop N`, at most N tickets (Loop, below).
 
-The Project folder, relative to this session's folder or absolute, is the first word here (`.` when this session runs inside the Project); `--model <id>`, `--effort <level>`, `--watch tmux` or `--watch iterm`, and `--loop` may follow: $ARGUMENTS
+The Project folder, relative to this session's folder or absolute, is the first word here (`.` when this session runs inside the Project); `--model <id>`, `--effort <level>`, `--watch tmux` or `--watch iterm`, and `--loop`, optionally with a ticket count (`--loop 2`), may follow: $ARGUMENTS
 
 ## Policy
 
@@ -196,6 +196,14 @@ A worker blocked on a `git push` no grant covers has finished its work and commi
 
 With `--loop`, the supervisor runs the maintainer's manual loop: tickets one after another, never in parallel, each in a fresh background session (#77, ADR 0003). Without it, one ticket, then stop.
 
+`--loop N` caps the loop at N tickets (#149); without a count it runs until another rule stops it. Check the count before step 1, so a bad one launches nothing:
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/next.sh" --max N </dev/null
+```
+
+It prints `count N` (exit 0). Exit 1: the count is not a positive integer; report the error and end there, before any launch.
+
 A ticket's run goes on to the next only when its work is settled and has landed: its watch, after any routine answers, came to `done` with its work committed, or to `blocked input needed` on a `git push` no grant covers; its capture ran (Capture, above); its work is on the default branch's upstream, by the worker's own push under a standing grant, or by Push on approval on the maintainer's yes; `stop.sh` exited 0, so the worker is stopped and its marker released; and its run record is posted on its ticket. Any other outcome ends the loop at that ticket, reported by the Report step for it, with the condition it stopped on, the worker's id and the ticket: a permission prompt, a question, a block on an action no grant covers other than that push, a declined or failed push, a `moved`, `hang`, `stopped` or `gone`, a failed launch or launch check, a stop that was refused or exited 1 (ask, as Stopping says, and on a yes go on from there), or a ticket the worker did not finish.
 
 A finished worker is stopped, not removed: `record.sh` reads its job after the stop, and `launch.sh` counts a stopped session as not live, so it stays listed in `claude agents` until the maintainer removes it.
@@ -206,11 +214,14 @@ Between tickets, read what comes next, passing every ticket this loop ran:
 sh "${CLAUDE_SKILL_DIR}/scripts/next.sh" --dir "<project folder>" --ran "<N M ...>" </dev/null
 ```
 
+With `--loop N`, add `--max N`.
+
 It fetches, then prints `next implement #M` (exit 0): go back to step 1 for #M, reading its body and comments, recording its start and taking a fresh snapshot, then Launch, which runs the one-session-per-checkout check again, so a session from the previous ticket still live refuses the launch (#57). Or it prints `stop <kind>: <detail>` (exit 2), and the loop ends there:
 
 - `held`: the checkout's marker still names a worker, so a stop did not finish.
 - `not-landed`: uncommitted paths, no upstream, or commits the upstream lacks. The next ticket starts from the default branch as pushed, so the loop waits for the maintainer rather than stacking work.
 - `behind`: the upstream moved on, so the next worker would start from an old commit.
+- `count-reached`: the loop ran the N tickets `--loop N` asked for. It is read after the three above, so a last ticket whose work did not land is still reported as `held`, `not-landed` or `behind`.
 - `nothing-left`: `state.sh`'s next step is nothing in motion.
 - `other-step`: any other step than `/implement` of a `ready-for-agent` ticket.
 - `repeat`: `state.sh` still recommends a ticket this loop already ran, which happens when its work went in without `Closes #N`; running it again would rebuild it.

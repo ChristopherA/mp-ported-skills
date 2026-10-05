@@ -120,6 +120,31 @@ out=$(next "$repo")
 check "next: a failed fetch is an error, with git's reason" "Error: git fetch origin failed in $repo, so whether main landed is unknown:
 exit 1" "$(printf '%s\n' "$out" | sed 's/unknown: .*/unknown:/')"
 
+# A count (--max) stops the loop once that many tickets ran (#149).
+repo=$(new_repo count)
+state "2 /implement #61 ($you): #61 t61"
+check "next: count reached" "stop count-reached: 2 tickets ran, the 2 --loop asked for
+exit 2" "$(next "$repo" --ran "59 60" --max 2)"
+check "next: count not yet reached" "next implement #61
+exit 0" "$(next "$repo" --ran "59" --max 2)"
+check "next: count of one" "stop count-reached: 1 ticket ran, the 1 --loop asked for
+exit 2" "$(next "$repo" --ran "#59" --max 1)"
+echo x >"$repo/x.txt"
+check "next: an earlier stop comes before the count" "stop not-landed: 1 uncommitted path in $repo
+exit 2" "$(next "$repo" --ran "59 60" --max 2)"
+command rm -f "$repo/x.txt"
+
+# With --max and no --dir, next.sh only checks the count, before any launch.
+count() { out=$(sh "$scripts/next.sh" --max "$1" </dev/null 2>&1); printf '%s\nexit %s' "$out" "$?"; }
+check "next: a valid count alone" "count 2
+exit 0" "$(count 2)"
+for bad in 0 -1 two 1.5 '' 02x; do
+    check "next: count '$bad' refused" "Error: --max needs a positive integer, not '$bad'
+exit 1" "$(count "$bad")"
+done
+check "next: a bad count refused with --dir too" "Error: --max needs a positive integer, not '0'
+exit 1" "$(next "$repo" --max 0)"
+
 mkdir -p "$work/plain"
 check "next: not a checkout" "Error: $work/plain is not a git checkout
 exit 1" "$(next "$work/plain")"
