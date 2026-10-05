@@ -160,7 +160,7 @@ classify() {
 
 # AFTER_JQ: defines the jq filter `not_before`, true for a row stamped at or
 # after --after (never for a row with no timestamp jq can read), and for
-# every row without --after. turn_ended, stale_done and waiting_on pass it
+# every row without --after. turn_ended, stale_since and last_text pass it
 # with --arg after "$AFTER".
 AFTER_JQ='def not_before: $after == "" or ((.timestamp // "" | sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch 0) >= ($after | tonumber));'
 
@@ -183,36 +183,32 @@ turn_ended() {
     return 1
 }
 
-# stale_done <session id>: whether a done from claude agents is the previous
-# turn's: with --after, the session's transcript is found and has no
-# turn_duration row stamped at or after AFTER. Time is all it checks, so a
-# turn that ended with background agents pending still counts (#126). With
-# no transcript found, the list's done stands.
-stale_done() {
+# stale_since <session id> <jq row test>: whether what the list says is the
+# previous turn's: with --after, the session's transcript is found and has
+# no row passing the test stamped at or after AFTER. With no transcript
+# found, the list stands. stale_done and stale_question name the tests.
+stale_since() {
     [ -n "$1" ] || return 1
     for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
         [ -f "$t" ] || continue
-        jq -e -s "$AFTER_JQ"'any(.[]; .type == "system" and .subtype == "turn_duration" and not_before) | not' \
+        jq -e -s "$AFTER_JQ"'any(.[]; ('"$2"') and not_before) | not' \
             --arg after "$AFTER" "$t" >/dev/null 2>&1
         return
     done
     return 1
 }
 
+# stale_done <session id>: whether a done from claude agents is the previous
+# turn's: no turn_duration row at or after AFTER. Time is all it checks, so
+# a turn that ended with background agents pending still counts (#126).
+stale_done() {
+    stale_since "$1" '.type == "system" and .subtype == "turn_duration"'
+}
+
 # stale_question <session id>: whether a blocked question from claude
-# agents is the previous turn's: with --after, the session's transcript is
-# found and has no assistant text stamped at or after AFTER (#127). With no
-# transcript found, the list's blocked question stands.
+# agents is the previous turn's: no assistant text at or after AFTER (#127).
 stale_question() {
-    [ -n "$1" ] || return 1
-    for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
-        [ -f "$t" ] || continue
-        jq -e -s "$AFTER_JQ"'any(.[]; .type == "assistant" and (.isSidechain | not) and not_before
-                and any(.message.content[]?; .type == "text")) | not' \
-            --arg after "$AFTER" "$t" >/dev/null 2>&1
-        return
-    done
-    return 1
+    stale_since "$1" '.type == "assistant" and (.isSidechain | not) and any(.message.content[]?; .type == "text")'
 }
 
 # last_text <session id>: the session's last text, read from the main
