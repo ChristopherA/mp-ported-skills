@@ -96,6 +96,30 @@ echo abc12345 >"$(git -C "$repo" rev-parse --path-format=absolute --git-path mp-
 check "next: a worker's marker still held" "stop held: the checkout's marker still names worker abc12345, so it is read-only; finish its stop first
 exit 2" "$(next "$repo")"
 
+repo=$(new_repo hashes)
+check "next: a ran list written with #" "stop repeat: #61 ran earlier in this loop and state.sh still recommends it; was its work committed with Closes #61?
+exit 2" "$(next "$repo" --ran "#59, #61")"
+state "1 work in flight: in motion #24 t24; next child #28 (ready-for-agent, /implement #28, $you): t28"
+check "next: an in-motion parent's ready child" "next implement #28
+exit 0" "$(next "$repo")"
+state "2 /implement #61 ($you): #61 t61"
+
+repo=$(new_repo detached)
+git -C "$repo" checkout -q --detach
+check "next: a detached HEAD" "stop not-landed: HEAD is detached in $repo
+exit 2" "$(next "$repo")"
+
+repo=$(new_repo gone)
+git -C "$repo" config branch.main.merge refs/heads/elsewhere
+check "next: an upstream branch the remote lacks" "stop not-landed: main's upstream origin/elsewhere does not exist
+exit 2" "$(next "$repo")"
+
+repo=$(new_repo nofetch)
+git -C "$repo" remote set-url origin "$work/missing.git"
+out=$(next "$repo")
+check "next: a failed fetch is an error, with git's reason" "Error: git fetch origin failed in $repo, so whether main landed is unknown:
+exit 1" "$(printf '%s\n' "$out" | sed 's/unknown: .*/unknown:/')"
+
 mkdir -p "$work/plain"
 check "next: not a checkout" "Error: $work/plain is not a git checkout
 exit 1" "$(next "$work/plain")"

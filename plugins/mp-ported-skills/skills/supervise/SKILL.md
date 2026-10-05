@@ -193,7 +193,9 @@ A worker blocked on a `git push` no grant covers has finished its work and commi
 
 With `--loop`, the supervisor runs the maintainer's manual loop: tickets one after another, never in parallel, each in a fresh background session (#77, ADR 0003). Without it, one ticket, then stop.
 
-A ticket's run goes on to the next only when all of these held: its watch, after any routine answers, came to `done` with its work committed; its capture ran (Capture, above) and came to `done`; its work landed on the default branch's upstream, by the worker's own push under a standing grant or by Push on approval on the maintainer's yes; `stop.sh` exited 0, so the worker is stopped and its marker released; and its run record is posted on its ticket. Any other outcome ends the loop at that ticket, reported by the Report step for it, with the condition it stopped on, the worker's id and the ticket: a permission prompt, a question, a block on an action no grant covers, a declined or failed push, a `moved`, `hang`, `stopped` or `gone`, a failed launch or launch check, a stop that was refused or exited 1 (ask, as Stopping says, and on a yes go on from there), or a ticket the worker did not finish.
+A ticket's run goes on to the next only when its work is settled and has landed: its watch, after any routine answers, came to `done` with its work committed, or to `blocked input needed` on a `git push` no grant covers; its capture ran (Capture, above); its work is on the default branch's upstream, by the worker's own push under a standing grant, or by Push on approval on the maintainer's yes; `stop.sh` exited 0, so the worker is stopped and its marker released; and its run record is posted on its ticket. Any other outcome ends the loop at that ticket, reported by the Report step for it, with the condition it stopped on, the worker's id and the ticket: a permission prompt, a question, a block on an action no grant covers other than that push, a declined or failed push, a `moved`, `hang`, `stopped` or `gone`, a failed launch or launch check, a stop that was refused or exited 1 (ask, as Stopping says, and on a yes go on from there), or a ticket the worker did not finish.
+
+A finished worker is stopped, not removed: `record.sh` reads its job after the stop, and `launch.sh` counts a stopped session as not live, so it stays listed in `claude agents` until the maintainer removes it.
 
 Between tickets, read what comes next, passing every ticket this loop ran:
 
@@ -214,7 +216,7 @@ Exit 1: report the error, and end the loop.
 
 Leaving the supervisor's zone is not yet a stop condition (#78), so expect a two-ticket loop to end past it; say so in the report when the session's peak zone reading passed 100%.
 
-The final report lists every ticket the loop ran, in order: its number, the worker's id, its outcome, its commits, the shared actions, the capture's report and the run record's comment; then the condition that ended the loop, with the worker's id and the ticket it stopped on, or `next.sh`'s `stop` line.
+The final report lists every ticket the loop ran, in order: its number, the worker's id, its outcome, its commits, the shared actions, the capture's report and the run record's comment; then the condition that ended the loop, with the worker's id and the ticket it stopped on. A stop from `next.sh` comes after the last ticket, so name that ticket and its worker's id with its `stop` line.
 
 ## Routine answers
 
