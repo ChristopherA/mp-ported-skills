@@ -1,6 +1,6 @@
 #!/bin/sh
 # supervise.test.sh -- tests for the supervise skill's step.sh, launch.sh,
-# watch.sh, resume.sh and actions.sh.
+# watch.sh, resume.sh, stop.sh and actions.sh.
 #
 # step.sh reads canned state.sh output. watch.sh reads the recorded
 # `claude agents --json --all` fixtures in tests/fixtures/agents-json/, once
@@ -1099,6 +1099,89 @@ for bad in "--dir $project --prompt x" "--id c2a368ee --prompt x" "--id c2a368ee
     PATH="$work/bin:$PATH" sh "$scripts/resume.sh" $bad </dev/null >/dev/null 2>&1
     check "resume: refuses $bad" "1" "$?"
 done
+
+# --- stop.sh ---------------------------------------------------------------
+stop_worker() { # <agents lists...> -- then stop.sh's options after --
+    reset_fake
+    mkdir -p "$cfg/jobs/c2a368ee"
+    command cp "$fixtures/job-state.json" "$cfg/jobs/c2a368ee/state.json"
+    while [ $# -gt 0 ] && [ "$1" != -- ]; do
+        case $1 in /*) echo "$1" ;; *) echo "$work/$1.json" ;; esac
+        shift
+    done >"$fake/seq"
+    [ $# -gt 0 ] && shift
+    PATH="$work/bin:$PATH" sh "$scripts/stop.sh" --id c2a368ee --dir "$project" --interval 0 "$@" </dev/null
+}
+finish="sh \"$scripts/stop.sh\" --dir \"$project\" --id c2a368ee"
+
+echo c2a368ee >"$marker"
+out=$(stop_worker pid "$fixtures/stopped.json" 2>&1); rc=$?
+check "stop: exit 0" "0" "$rc"
+check "stop: stops, then releases the marker" "stopped c2a368ee
+released c2a368ee" "$out"
+check "stop: stop, then wait for stopped" "stop c2a368ee" "$(calls)"
+check "stop: reads the list until stopped" "2" "$(command cat "$fake/count")"
+check "stop: the marker is gone" "no" "$([ -f "$marker" ] && echo yes || echo no)"
+
+# stopped may never show (#77); no pid is enough, as the process is gone.
+echo c2a368ee >"$marker"
+out=$(stop_worker pid nopid 2>&1); rc=$?
+check "stop: no pid is stopped" "0 stopped c2a368ee
+released c2a368ee" "$rc $out"
+
+# A worker already removed is stopped too.
+echo c2a368ee >"$marker"
+out=$(stop_worker "$fixtures/done.json" 2>&1); rc=$?
+check "stop: a worker not in the list is gone" "0 gone c2a368ee
+released c2a368ee" "$rc $out"
+
+out=$(stop_worker "$fixtures/stopped.json" 2>&1); rc=$?
+check "stop: no marker is not an error" "0 stopped c2a368ee
+no marker in $project" "$rc $out"
+
+# Never stopped: the marker stays, and the error names it and the command
+# that finishes the run.
+echo c2a368ee >"$marker"
+out=$(stop_worker pid -- --timeout 1 2>&1); rc=$?
+check "stop: never stopped exits 1" "1" "$rc"
+check "stop: never stopped keeps the marker" "c2a368ee" "$(command cat "$marker")"
+check "stop: never stopped says so, with the command to finish" "Error: session c2a368ee was not stopped 1s after claude stop
+marker kept: $project is still read-only for commits, held by c2a368ee
+finish with: $finish" "$out"
+
+out=$( (export FAKE_AGENTS_FAIL=1; stop_worker "$fixtures/stopped.json" 2>&1) ); rc=$?
+check "stop: unreadable list exits 1" "1" "$rc"
+check "stop: unreadable list keeps the marker" "c2a368ee" "$(command cat "$marker")"
+check "stop: unreadable list says so, with the command to finish" "daemon unreachable
+Error: claude agents --json --all failed, so session c2a368ee's state is unknown
+marker kept: $project is still read-only for commits, held by c2a368ee
+finish with: $finish" "$out"
+
+out=$(stop_worker garbage 2>&1); rc=$?
+check "stop: a list jq cannot read exits 1" "1 c2a368ee" "$rc $(command cat "$marker")"
+
+# Only a worker this profile launched, into this checkout, is stopped.
+echo 7a6a0741 >"$marker"
+out=$(stop_worker "$fixtures/stopped.json" 2>&1); rc=$?
+check "stop: another worker's marker exits 1" "1" "$rc"
+check "stop: another worker's marker, nothing stopped" "" "$(calls)"
+check "stop: another worker's marker is kept" "7a6a0741" "$(command cat "$marker")"
+check "stop: another worker's marker says so" "Error: the marker in $project names worker 7a6a0741, not c2a368ee; not stopped" "$out"
+command rm -f "$marker"
+
+reset_fake
+out=$(PATH="$work/bin:$PATH" sh "$scripts/stop.sh" --id c2a368ee --dir "$project" </dev/null 2>&1); rc=$?
+check "stop: no job in this profile exits 1" "1" "$rc"
+check "stop: no job, nothing stopped" "" "$(calls)"
+check "stop: no job says why" "Error: no job c2a368ee in $cfg/jobs, so it is not a worker this profile launched; not stopped" "$out"
+
+for bad in "--dir $project" "--id c2a368ee" "--id c2a368ee --dir $project --timeout 1m"; do
+    # shellcheck disable=SC2086
+    PATH="$work/bin:$PATH" sh "$scripts/stop.sh" $bad </dev/null >/dev/null 2>&1
+    check "stop: refuses $bad" "1" "$?"
+done
+( unset CLAUDE_CONFIG_DIR; stop_worker "$fixtures/stopped.json" >/dev/null 2>&1 )
+check "stop: config dir required" "1" "$?"
 
 # --- actions.sh ------------------------------------------------------------
 # A Project with a remote: the worker's start commit is on origin/main, and
