@@ -440,6 +440,9 @@ check "record: a block on a finished report is not a wait" \
     "3 waits on a human (push now?; approve Bash: git push; commits ready), 1 message typed into the worker" \
     "$(field 'human interventions' "$out")"
 command rm -rf "$cfg/projects/-work-project"
+# watch.sh confirms a block with the same `asks`; the two copies match.
+asks_in() { sed -n 's/^.*\(def asks: .*;\).*$/\1/p' "$scripts/$1"; }
+check "record: asks is watch.sh's" "$(asks_in watch.sh)" "$(asks_in record.sh)"
 
 # A hand-run /implement, cut down from a live interactive session with two
 # subagents: hand-run.jsonl and hand-run/subagents/.
