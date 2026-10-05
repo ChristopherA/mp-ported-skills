@@ -1,12 +1,12 @@
 ---
 name: supervise
-description: Run a Project's next ready-for-agent ticket through the full /implement in a Claude Code background session, and report done or blocked.
+description: Run a Project's next ready-for-agent ticket, or with --loop each next one in turn, through the full /implement in a Claude Code background session, and report done or blocked.
 disable-model-invocation: true
 ---
 
-Run one ticket in a Project, from the Hub or from inside the Project, as the maintainer would by hand: read the next step, start `/implement #N` in a fresh session, watch it, and report. The worker is a Claude Code background session (`claude --bg`), whose first prompt enters through the human's door, so the ticket gets the full `/mattpocock-skills:implement`, its TDD and its own `/code-review` (ADR 0003). One ticket, then stop.
+Run one ticket in a Project, from the Hub or from inside the Project, as the maintainer would by hand: read the next step, start `/implement #N` in a fresh session, watch it, and report. The worker is a Claude Code background session (`claude --bg`), whose first prompt enters through the human's door, so the ticket gets the full `/mattpocock-skills:implement`, its TDD and its own `/code-review` (ADR 0003). One ticket, then stop; with `--loop`, the next ticket after each one that lands, until a rule stops it (Loop, below).
 
-The Project folder, relative to this session's folder or absolute, is the first word here (`.` when this session runs inside the Project); `--model <id>`, `--effort <level>` and `--watch tmux` or `--watch iterm` may follow: $ARGUMENTS
+The Project folder, relative to this session's folder or absolute, is the first word here (`.` when this session runs inside the Project); `--model <id>`, `--effort <level>`, `--watch tmux` or `--watch iterm`, and `--loop` may follow: $ARGUMENTS
 
 ## Policy
 
@@ -189,6 +189,33 @@ A worker blocked on a `git push` no grant covers has finished its work and commi
 5. When a `version` line showed a bump of a plugin this profile has installed, update it through Bash: `claude plugin marketplace update <marketplace> && claude plugin update <plugin>@<marketplace>`, and report the version it installed.
 6. Go on with the Report step for `done`, with no second capture: the shared actions, the ticket's state, the capture's report and the run record, taken now, after the capture, the stop and the push, so the record carries the worker's cost, the capture and the push.
 
+## Loop
+
+With `--loop`, the supervisor runs the maintainer's manual loop: tickets one after another, never in parallel, each in a fresh background session (#77, ADR 0003). Without it, one ticket, then stop.
+
+A ticket's run goes on to the next only when all of these held: its watch, after any routine answers, came to `done` with its work committed; its capture ran (Capture, above) and came to `done`; its work landed on the default branch's upstream, by the worker's own push under a standing grant or by Push on approval on the maintainer's yes; `stop.sh` exited 0, so the worker is stopped and its marker released; and its run record is posted on its ticket. Any other outcome ends the loop at that ticket, reported by the Report step for it, with the condition it stopped on, the worker's id and the ticket: a permission prompt, a question, a block on an action no grant covers, a declined or failed push, a `moved`, `hang`, `stopped` or `gone`, a failed launch or launch check, a stop that was refused or exited 1 (ask, as Stopping says, and on a yes go on from there), or a ticket the worker did not finish.
+
+Between tickets, read what comes next, passing every ticket this loop ran:
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/next.sh" --dir "<project folder>" --ran "<N M ...>" </dev/null
+```
+
+It fetches, then prints `next implement #M` (exit 0): go back to step 1 for #M, reading its body and comments, recording its start and taking a fresh snapshot, then Launch, which runs the one-session-per-checkout check again, so a session from the previous ticket still live refuses the launch (#57). Or it prints `stop <kind>: <detail>` (exit 2), and the loop ends there:
+
+- `held`: the checkout's marker still names a worker, so a stop did not finish.
+- `not-landed`: uncommitted paths, no upstream, or commits the upstream lacks. The next ticket starts from the default branch as pushed, so the loop waits for the maintainer rather than stacking work.
+- `behind`: the upstream moved on, so the next worker would start from an old commit.
+- `nothing-left`: `state.sh`'s next step is nothing in motion.
+- `other-step`: any other step than `/implement` of a `ready-for-agent` ticket.
+- `repeat`: `state.sh` still recommends a ticket this loop already ran, which happens when its work went in without `Closes #N`; running it again would rebuild it.
+
+Exit 1: report the error, and end the loop.
+
+Leaving the supervisor's zone is not yet a stop condition (#78), so expect a two-ticket loop to end past it; say so in the report when the session's peak zone reading passed 100%.
+
+The final report lists every ticket the loop ran, in order: its number, the worker's id, its outcome, its commits, the shared actions, the capture's report and the run record's comment; then the condition that ended the loop, with the worker's id and the ticket it stopped on, or `next.sh`'s `stop` line.
+
 ## Routine answers
 
 Some questions a worker asks are ones the policy already decides: confirming the ticket it was launched on ("Proceed with #N?"), and asking for a shared action a standing grant covers (#58), which `launch.sh` told it to take without asking. For a `blocked question` or `blocked input needed`, before anything in the Report step, ask:
@@ -244,4 +271,4 @@ Tell the maintainer, with the watch command (`tmux attach -t mp-supervise`, or `
 - the viewer is live: what they type there reaches the worker as a prompt, and answering a permission prompt there is fine;
 - attaching to the worker by hand (`claude attach ID`, or a viewer of their own) between a stop and a resume splits the worker. Leaving the tmux session (`Ctrl+B d`) is always safe; with `--watch iterm`, leave the pane for the supervisor to close.
 
-Done when the report names the ticket, the outcome, each question the supervisor answered with its answer, the shared actions (or `none`), either its commits or the id with `claude attach`, the capture's report for a settled run, and the run record's comment.
+Done when the report names the ticket (with `--loop`, each ticket the loop ran, and the condition that ended it), the outcome, each question the supervisor answered with its answer, the shared actions (or `none`), either its commits or the id with `claude attach`, the capture's report for a settled run, and the run record's comment.
