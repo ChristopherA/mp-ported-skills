@@ -428,6 +428,13 @@ check "supervise: not offered on a dirty tree" "not offered: 1 uncommitted paths
 command rm -f "$proj/scratch"
 g checkout -q -b side
 check "supervise: not offered off the default branch" "not offered: on side, not the default branch main" "$(sup "$(run)")"
+# A linked worktree holding the default branch passes every other check, but
+# launch.sh refuses it (#79), so it is not offered.
+g worktree add -q "$real-wt" main
+check "supervise: not offered in a linked worktree on the default branch" \
+    "not offered: $real-wt is a linked git worktree on branch main, not the main checkout $real; a worker there would commit to a branch nobody pushes, so run /supervise from $real" \
+    "$(sup "$(sh "$state" "$real-wt" </dev/null 2>&1)")"
+g worktree remove --force "$real-wt"
 g checkout -q main
 g commit -q --allow-empty -m wip2
 check "supervise: not offered with unpushed commits" "not offered: 1 unpushed commits; push them first" "$(sup "$(run)")"

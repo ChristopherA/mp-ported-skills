@@ -24,6 +24,9 @@ case ${MP_RESUME_BUDGET:-} in
     *) budget=$MP_RESUME_BUDGET ;;
 esac
 
+# supervise's main-checkout.sh, found before the cd below.
+main_checkout="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/../../supervise/scripts/main-checkout.sh"
+
 cd "$dir" 2>/dev/null || exit 0
 
 # Label string for a triage role, from docs/agents/triage-labels.md; the role
@@ -368,8 +371,9 @@ gather() {
     # --- the /supervise offer (#111) ---------------------------------------
     # When the next step is /implement #N, whether /supervise would run it:
     # step.sh takes it only with nothing else in flight (its patterns are
-    # copied here), and launch.sh only on the default branch, with a clean
-    # tree and no other live background session in the folder.
+    # copied here), and launch.sh only in the main checkout, not a linked
+    # worktree (#79), on the default branch, with a clean tree and no other
+    # live background session in the folder.
     first=$(printf '%s' "$cases" | sed -n 1p)
     impl=$(printf '%s\n' "$first" | sed -n \
         -e 's/^2 \/implement #\([0-9][0-9]*\) .*/\1/p' \
@@ -379,7 +383,8 @@ gather() {
         -e 's/^2 \/implement #\([0-9][0-9]*\) .*/\1/p' \
         -e 's/^1 work in flight: in motion #[0-9][0-9]* [^;]*; next child #\([0-9][0-9]*\) ([^,)]*, \/implement #\1, .*/\1/p')
     refusal=
-    if [ "$dirty" -gt 0 ]; then refusal="$dirty uncommitted paths; commit or clear them first"
+    if ! linked=$(sh "$main_checkout" . </dev/null 2>&1); then refusal=$linked
+    elif [ "$dirty" -gt 0 ]; then refusal="$dirty uncommitted paths; commit or clear them first"
     elif [ "$branch" != "$default" ]; then refusal="on $branch, not the default branch $default"
     elif [ "$unpushed" -gt 0 ]; then refusal="$unpushed unpushed commits; push them first"
     elif [ -n "${own:-}" ]; then refusal="open PR $own; settle it first"
