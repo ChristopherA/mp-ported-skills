@@ -5,8 +5,9 @@
 # docs/agents/issue-tracker.md names GitHub, the tracker through `gh`. Prints
 # state lines, then `next: <case> ...` for the first of the seven weighing
 # cases that applies and `runner-up: ...` for the second (case 7's suggestions
-# when no other applies). A ticket labelled `parked` is never a step. Writes
-# nothing.
+# when no other applies). A ticket labelled `parked` is never a step. Prints
+# what each ready ticket unblocks (`unblocks:`), and what the next step's and
+# runner-up's tickets unblock, without changing the step. Writes nothing.
 #
 # Usage: sh state.sh [dir]
 #   dir defaults to the current folder. Reports everything; an unreached
@@ -225,6 +226,29 @@ gather() {
                             and (.n as $n | $fx | index($n) | not))]')
         ready=$(printf '%s' "$ready_rows" | jq -r 'map("#\(.n) \(.t)") | join("; ")')
 
+        # What closing each ticket unblocks: the open tickets it is the last
+        # open blocker of, by GitHub link or body. A ticket whose links were
+        # not read has unknown blockers and is left out.
+        links='{}'
+        for n in $(printf '%s' "$rows" | jq -r '.[] | select(.dep > 0) | .n'); do
+            b=$(gh api "repos/{owner}/{repo}/issues/$n/dependencies/blocked_by" 2>/dev/null |
+                jq -c '[.[] | select(.state == "open") | .number]' 2>/dev/null) || b=
+            links=$(printf '%s' "$links" | jq -c --arg n "$n" --argjson b "${b:-null}" '.[$n] = $b')
+        done
+        # {"<blocker>": "#91 (High), #93", ...}, in ticket order.
+        unblocks_map=$(printf '%s' "$rows" | jq -c --argjson open "$open_nums" --argjson links "$links" '
+            [.[] | (if .dep > 0 then $links["\(.n)"] else [] end) as $l
+             | select($l != null)
+             | {n, p, by: ($l + [.line[] | select(. as $b | $open | index($b))] | unique)}
+             | select(.by | length == 1)]
+            | group_by(.by[0])
+            | map({key: "\(.[0].by[0])",
+                   value: map("#\(.n)" + (if .p then " (\(.p[:1] | ascii_upcase)\(.p[1:]))" else "" end))
+                          | join(", ")})
+            | from_entries')
+        unblocks=$(printf '%s' "$ready_rows" | jq -r --argjson u "$unblocks_map" '
+            map($u["\(.n)"] as $t | select($t) | "#\(.n) unblocks \($t)") | join("; ")')
+
         # Hand work: ready-for-human tickets not in motion or parked, with every
         # blocker closed and not already fixed, ranked by priority line (high,
         # medium, none, low), then lowest number.
@@ -281,6 +305,7 @@ gather() {
         echo "issues: $n_unl unlabelled, $n_triage $t_triage, $n_info $t_info (replied: ${replied:-none}), $n_agent $t_agent, $n_human $t_human, $n_map wayfinder:map"
         echo "in motion: ${moving:-none}"
         echo "ready, blockers closed: ${ready:-none}"
+        echo "unblocks: ${unblocks:-none}"
         echo "by hand, blockers closed: ${hand:-none}"
         echo "open but closed by a commit on $default: ${stale:-none}"
         [ -n "$maps" ] && echo "wayfinder maps: $maps"
@@ -308,6 +333,24 @@ gather() {
         else add_case "7 nothing in motion"; add_case "$ideas"; fi
     fi
     printf '%s' "$cases" | sed -n '1s/^/next: /p; 2s/^/runner-up: /p'
+    # What the ticket each of those steps names unblocks: case 2's ticket,
+    # case 1's first next child, or case 6's hand ticket.
+    if [ $reached = 1 ]; then
+        for i in 1 2; do
+            c=$(printf '%s' "$cases" | sed -n "${i}p")
+            case $c in
+                '2 /implement #'*) t=${c#2 /implement #} ;;
+                '1 '*'; next child #'*) t=${c#*; next child #} ;;
+                '6 by hand'*': #'*) t=${c#*: #} ;;
+                *) t= ;;
+            esac
+            t=${t%%[!0-9]*}
+            [ -n "$t" ] || continue
+            u=$(printf '%s' "$unblocks_map" | jq -r --arg t "$t" '.[$t] // empty')
+            [ -n "$u" ] || continue
+            [ $i = 1 ] && echo "next unblocks: $u" || echo "runner-up unblocks: $u"
+        done
+    fi
 
     # --- the /supervise offer (#111) ---------------------------------------
     # When the next step is /implement #N, whether /supervise would run it:

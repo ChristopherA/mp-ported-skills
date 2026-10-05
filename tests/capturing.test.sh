@@ -5,9 +5,9 @@
 # Capturing's first next step is read from resuming's state.sh, not reasoned
 # out, so the two cannot disagree: this checks that the path capturing names
 # resolves to the script from capturing's own folder, and that both skills
-# carry the rule in the same words. It also checks that move 1 reads a
-# ticket's parent before moving the in-motion label, so an in-motion parent
-# keeps it. What state.sh prints in that state is checked in
+# carry the rule, and the use of what the step unblocks, in the same words.
+# It also checks that move 1 reads a ticket's parent before moving the
+# in-motion label, so an in-motion parent keeps it. What state.sh prints in that state is checked in
 # tests/resuming.test.sh. Reads only files in this checkout.
 #
 # Usage: sh tests/capturing.test.sh
@@ -44,6 +44,10 @@ check "the path resolves from capturing's folder" yes "$found"
 rule="capturing's one first next step is the in-motion ticket \`state.sh\`'s \`next:\` line names, or that ticket's next child when the line names one; otherwise the ticket on its \`2 /implement\` line, in \`next:\` or \`runner-up:\`. When the line names every open child of that ticket blocked, the step is the blockers it names."
 check "capturing states the shared rule" yes "$(contains "$capturing" "$rule")"
 check "resuming states the shared rule" yes "$(contains "$resuming" "$rule")"
+# What the step unblocks reaches the reason in both, in the same words (#123).
+unblocks="When the step's ticket is the last open blocker of a High ticket, \`state.sh\`'s \`next unblocks:\` or \`runner-up unblocks:\` line names it with \`(High)\`; say in the reason that the step unblocks it."
+check "capturing names what the step unblocks" yes "$(contains "$capturing" "$unblocks")"
+check "resuming names what the step unblocks" yes "$(contains "$resuming" "$unblocks")"
 
 # Move 1 reads the parent before moving the label.
 check "move 1 reads the ticket's parent" yes \

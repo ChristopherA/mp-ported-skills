@@ -25,6 +25,8 @@ It reads git (no fetch) and, when `docs/agents/issue-tracker.md` names GitHub, t
 
 When the next step is `/implement #N` (case 2, or an in-motion parent's next child), a `supervise:` line follows. It holds the `/mp-ported-skills:supervise` command that would hand the ticket to a background worker instead, when `/supervise` would take it: a clean tree, the default branch, no unpushed commits or open PR, no other work in flight its `step.sh` would refuse, and no other live background session in the folder. Otherwise it reads `not offered:` and the first of those that fails. Any other step prints no `supervise:` line.
 
+An `unblocks:` line follows the ready list: for each ready ticket, the open tickets it is the last open blocker of (by GitHub link, a `Blocked by:` line or a `Blocked by` heading), each with its priority, as `#90 unblocks #91 (High)`. A ticket with another open blocker, or whose links could not be read, is left out. After `next:` and `runner-up:`, a `next unblocks:` and a `runner-up unblocks:` line name what that step's ticket unblocks (case 2's ticket, case 1's next child, case 6's hand ticket), when it unblocks anything. The lines are evidence, not a reordering: the cases still pick the step, and a parent's sub-issue order stays the maintainer's to set.
+
 ## 2. Check what the script cannot
 
 - **Case 1**: name the work: `git status`, `git log --oneline <default>..HEAD`, the PR's title, or `gh issue view N` for an `in-motion` ticket. Finishing means commit, push or merge as the state shows, or picking the ticket up where its last comment left it. For a parent, `state.sh` names the next child, or every open child's blockers when none is free.
@@ -37,7 +39,7 @@ Done when the case stands confirmed or you have moved it.
 
 ## 3. Recommend
 
-- **Next step**: one command or action, and why this case won.
+- **Next step**: one command or action, and why this case won. When the step's ticket is the last open blocker of a High ticket, `state.sh`'s `next unblocks:` or `runner-up unblocks:` line names it with `(High)`; say in the reason that the step unblocks it.
 - **In-motion parent**: the parent is the work in flight and its next child is the step, with the child's command: `/implement #N` for `ready-for-agent`, done by hand for `ready-for-human`, with its title. When every open child is blocked, the step is the blockers `state.sh` names.
 - **Supervised form**: when the `supervise:` line holds a command, offer it, without the `(you type it; user-invoked)` note, beside `/implement #N`, as the way to run the same ticket in a background worker while this session stays free. When it reads `not offered:`, offer only `/implement #N` and give that reason in one line. Never start the worker yourself; only the user starts `/supervise`.
 - **Runner-up**: the `runner-up:` line: the next case that applies, the second hand ticket when case 6 wins, or the case 7 suggestions.
