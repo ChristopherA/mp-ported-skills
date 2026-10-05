@@ -62,6 +62,8 @@ A live test that resumes a background session reads the line `claude --bg --resu
 
 A live test that checks a background worker's edits looks in every worktree (`git worktree list`, `git log --all`), not only the checkout. From Claude Code 2.1.286 a background session may not edit the shared checkout, so a worker denied `EnterWorktree` made its own with `git worktree add` and committed there, while its `cwd` stayed the checkout (#83).
 
+A live measurement of what a session loads before its first step uses a `claude --bg` session started the way `launch.sh` starts a worker, with one source removed per run, and reads the first call's context from its transcript, as `docs/research/worker-fixed-load.md` does. Not `claude -p`: print mode loads neither the Artifact tool nor Claude in Chrome, and read 45k where the same worker-shaped background session read 65k.
+
 A live test that needs a particular model starts the session with `claude --model <id>`. Typing `/model` in a running session also saves the model to the profile's `settings.json` as the default, so it changes every later session on that profile.
 
 A live test that runs a session unattended, with `--permission-mode auto` (a `claude --bg` session, or a pane nobody answers), runs it on a model that supports auto mode. Haiku 4.5 does not: the session prints `auto mode unavailable for this model`, falls back to manual mode, and blocks at a permission prompt on its first Bash command.
