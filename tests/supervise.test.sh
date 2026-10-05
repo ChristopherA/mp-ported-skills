@@ -1110,7 +1110,7 @@ stop_worker() { # <agents lists...> -- then stop.sh's options after --
         shift
     done >"$fake/seq"
     [ $# -gt 0 ] && shift
-    PATH="$work/bin:$PATH" sh "$scripts/stop.sh" --id c2a368ee --dir "$project" --interval 0 "$@" </dev/null
+    PATH="$work/bin:$PATH" sh "$scripts/stop.sh" --id c2a368ee --dir "$project" --interval 0 --settle 0 "$@" </dev/null
 }
 finish="sh \"$scripts/stop.sh\" --dir \"$project\" --id c2a368ee"
 
@@ -1123,11 +1123,20 @@ check "stop: stop, then wait for stopped" "stop c2a368ee" "$(calls)"
 check "stop: reads the list until stopped" "2" "$(command cat "$fake/count")"
 check "stop: the marker is gone" "no" "$([ -f "$marker" ] && echo yes || echo no)"
 
-# stopped may never show (#77); no pid is enough, as the process is gone.
+# stopped may never show (#77): a row with no pid for the settle time is
+# enough, and a pid showing again starts the settle time over, as in
+# resume.sh.
 echo c2a368ee >"$marker"
-out=$(stop_worker pid nopid 2>&1); rc=$?
-check "stop: no pid is stopped" "0 stopped c2a368ee
+out=$(stop_worker pid nopid -- --settle 2 --interval 1 2>&1); rc=$?
+check "stop: no pid for the settle time is stopped" "0 stopped c2a368ee
 released c2a368ee" "$rc $out"
+# Two reads would mean no wait at all; a slow read can land a second late
+# and end the settle time a read early, so three or four are both right.
+n=$(command cat "$fake/count")
+check "stop: waits out the settle time" "yes" "$([ "$n" -ge 3 ] && [ "$n" -le 4 ] && echo yes || echo "no ($n reads)")"
+echo c2a368ee >"$marker"
+stop_worker nopid pid nopid -- --settle 1 --interval 1 >/dev/null 2>&1
+check "stop: a pid starts the settle time over" "4" "$(command cat "$fake/count")"
 
 # A worker already removed is stopped too.
 echo c2a368ee >"$marker"
@@ -1160,6 +1169,22 @@ finish with: $finish" "$out"
 out=$(stop_worker garbage 2>&1); rc=$?
 check "stop: a list jq cannot read exits 1" "1 c2a368ee" "$rc $(command cat "$marker")"
 
+# Stopped, but the marker could not be released: the error says the worker
+# is stopped and gives the command that releases it.
+mkdir -p "$work/release-fails"
+command cp -f "$scripts"/*.sh "$work/release-fails/"
+printf '#!/bin/sh\necho "Error: could not remove the marker" >&2\nexit 1\n' >"$work/release-fails/release.sh"
+reset_fake
+mkdir -p "$cfg/jobs/c2a368ee"
+command cp "$fixtures/job-state.json" "$cfg/jobs/c2a368ee/state.json"
+echo "$fixtures/stopped.json" >"$fake/seq"
+out=$(PATH="$work/bin:$PATH" sh "$work/release-fails/stop.sh" --id c2a368ee --dir "$project" --interval 0 --settle 0 </dev/null 2>&1); rc=$?
+check "stop: a failed release exits 1" "1" "$rc"
+check "stop: a failed release says the worker stopped, and how to finish" "stopped c2a368ee
+Error: could not remove the marker
+marker kept: $project is still read-only for commits, held by c2a368ee
+finish with: sh \"$work/release-fails/release.sh\" --dir \"$project\" --id c2a368ee" "$out"
+
 # Only a worker this profile launched, into this checkout, is stopped.
 echo 7a6a0741 >"$marker"
 out=$(stop_worker "$fixtures/stopped.json" 2>&1); rc=$?
@@ -1175,7 +1200,7 @@ check "stop: no job in this profile exits 1" "1" "$rc"
 check "stop: no job, nothing stopped" "" "$(calls)"
 check "stop: no job says why" "Error: no job c2a368ee in $cfg/jobs, so it is not a worker this profile launched; not stopped" "$out"
 
-for bad in "--dir $project" "--id c2a368ee" "--id c2a368ee --dir $project --timeout 1m"; do
+for bad in "--dir $project" "--id c2a368ee" "--id c2a368ee --dir $project --timeout 1m" "--id c2a368ee --dir $project --settle x"; do
     # shellcheck disable=SC2086
     PATH="$work/bin:$PATH" sh "$scripts/stop.sh" $bad </dev/null >/dev/null 2>&1
     check "stop: refuses $bad" "1" "$?"
