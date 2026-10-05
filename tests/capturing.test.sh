@@ -35,11 +35,13 @@ contains() { # <file> <fixed string> -- yes or no
 # The state.sh call, with CLAUDE_SKILL_DIR as capturing's folder.
 call='sh "${CLAUDE_SKILL_DIR}/../resuming/scripts/state.sh" </dev/null'
 check "capturing calls state.sh" yes "$(contains "$capturing" "$call")"
-if [ -f "$skills/capturing/../resuming/scripts/state.sh" ]; then found=yes; else found=no; fi
+# The path as the text quotes it, resolved from capturing's folder.
+quoted=$(printf '%s' "$call" | sed -n 's/^sh "${CLAUDE_SKILL_DIR}\/\([^"]*\)".*/\1/p')
+if [ -n "$quoted" ] && [ -f "$skills/capturing/$quoted" ]; then found=yes; else found=no; fi
 check "the path resolves from capturing's folder" yes "$found"
 
 # The rule both skills state, word for word.
-rule="capturing's one first next step is the in-motion ticket \`state.sh\`'s \`next:\` line names, or that ticket's next child when the line names one; otherwise the ticket on its \`2 /implement\` line, in \`next:\` or \`runner-up:\`."
+rule="capturing's one first next step is the in-motion ticket \`state.sh\`'s \`next:\` line names, or that ticket's next child when the line names one; otherwise the ticket on its \`2 /implement\` line, in \`next:\` or \`runner-up:\`. When the line names every open child of that ticket blocked, the step is the blockers it names."
 check "capturing states the shared rule" yes "$(contains "$capturing" "$rule")"
 check "resuming states the shared rule" yes "$(contains "$resuming" "$rule")"
 
