@@ -32,7 +32,7 @@
 #                       positive integer
 #
 # --from reads a saved state.sh report instead of running state.sh (tests).
-# Exits 0 for next, 2 for stop, 1 on an error.
+# Exits 0 for next (or a checked count), 2 for stop, 1 on an error.
 
 set -u
 
@@ -59,11 +59,15 @@ while [ $# -gt 0 ]; do
 done
 fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 halt() { printf 'stop %s\n' "$1"; exit 2; }
+ran_list() { printf '%s\n' "$RAN" | tr -c '0-9' '\n' | grep -v '^$'; } # one ticket number a line
 plural() { [ "$1" = 1 ] && printf '%s %s' "$1" "$2" || printf '%s %ss' "$1" "$2"; }
 if [ -n "$HAS_MAX" ]; then
     case $MAX in
-        '' | *[!0-9]* | 0*) fail "--max needs a positive integer, not '$MAX'" ;;
+        '' | *[!0-9]*) fail "--max needs a positive integer, not '$MAX'" ;;
     esac
+    n=$(printf '%s' "$MAX" | sed 's/^0*//')
+    [ -n "$n" ] || fail "--max needs a positive integer, not '$MAX'"
+    MAX=$n
     [ -n "$DIR" ] || { echo "count $MAX"; exit 0; }
 fi
 [ -n "$DIR" ] || fail "--dir is required"
@@ -98,8 +102,8 @@ ahead=${counts##*[!0-9]}
     halt "behind: $branch is $(plural "$behind" commit) behind $up; the next ticket would start from an old commit"
 
 if [ -n "$HAS_MAX" ]; then
-    ran=$(printf '%s\n' "$RAN" | tr -c '0-9' '\n' | grep -v '^$' | sort -u | grep -c '^')
-    [ "$ran" -lt "$MAX" ] || halt "count-reached: $(plural "$ran" ticket) ran, the $MAX --loop asked for"
+    ran=$(ran_list | sort -u | grep -c '^')
+    [ "$ran" -lt "$MAX" ] || halt "count-reached: $(plural "$ran" ticket) ran, the most --loop $MAX allows"
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -111,7 +115,7 @@ fi
 case $step in
     "implement #"*)
         n=${step#implement #}
-        for r in $(printf '%s\n' "$RAN" | tr -c '0-9\n' ' '); do
+        for r in $(ran_list); do
             [ "$r" = "$n" ] &&
                 halt "repeat: #$n ran earlier in this loop and state.sh still recommends it; was its work committed with Closes #$n?"
         done

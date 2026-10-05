@@ -1,6 +1,6 @@
 ---
 name: supervise
-description: Run a Project's next ready-for-agent ticket, or with --loop each next one in turn, through the full /implement in a Claude Code background session, and report done or blocked.
+description: Run a Project's next ready-for-agent ticket, or with --loop each next one in turn (--loop N for at most N), through the full /implement in a Claude Code background session, and report done or blocked.
 disable-model-invocation: true
 ---
 
@@ -21,6 +21,8 @@ The supervisor drives build-loop defaults and nothing else:
 - **A worker that stops making progress is reported, not stopped.** `watch.sh --stall` (step 3) reports `hang` when the worker's transcript has not grown in that long, distinct from a permission prompt or a question: the worker is left running, since a long tool call can hold the transcript steady in its own right, so this is a "no progress for a while" signal, not proof of a real hang.
 
 ## 1. Step
+
+With `--loop N`, check the count first (Loop, below), and launch nothing when it is refused.
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/step.sh" "<project folder>" </dev/null
