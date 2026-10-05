@@ -390,21 +390,56 @@ check "record: no transcript, answers unknown" "unknown" "$(field 'supervisor an
 check "record: no transcript, waits a human's" "2 waits on a human (approve Bash: git push; which flag name?), unknown typed messages" \
     "$(field 'human interventions' "$out")"
 
-# A block whose text ends on a statement is a finished report that quotes a
-# decision, not a wait on a human (#114); one ending on a question, or on a
-# Waiting on: line, is.
+# A block that follows a turn end whose last text ends on a statement is a
+# finished report that quotes a decision, read by watch.sh as done, not a
+# wait on a human (#114). One after a turn that ends on a question or on a
+# Waiting on: line is, and so is one mid-turn, whatever its last text says:
+# a permission prompt after "Now I'll push."
+text() { # <time> <text> [tool_use json] -- an assistant row with that text
+    jq -cn --arg t "$1" --arg x "$2" --argjson u "${3:-null}" \
+        '{type: "assistant", timestamp: $t, message: {role: "assistant", content: ([{type: "text", text: $x}] + if $u then [$u] else [] end)}}'
+}
+ended() { # <time> -- a turn_duration row
+    jq -cn --arg t "$1" '{type: "system", subtype: "turn_duration", timestamp: $t, pendingBackgroundAgentCount: 0}'
+}
+blocked() { # <time> <detail> -- a timeline row
+    jq -cn --arg t "$1" --arg d "$2" '{at: $t, state: "blocked", detail: $d, text: ""}'
+}
+job
+mkdir -p "$cfg/projects/-work-project"
 {
-    jq -cn '{at: "2026-09-29T06:11:00.000Z", state: "blocked", detail: "waiting on decision: edit and delete",
-        text: "Captured. Draft body:\n\n> Decide whether edit and delete need their own action.\n\n`/clear` is the right boundary."}'
-    jq -cn '{at: "2026-09-29T06:12:00.000Z", state: "blocked", detail: "push now?",
-        text: "Committed on main.\n\nWant me to push to `origin/main` now?"}'
-    jq -cn '{at: "2026-09-29T06:13:00.000Z", state: "blocked", detail: "commits ready",
-        text: "Committed on main.\n\n`Waiting on: git push origin main`"}'
-} >>"$cfg/jobs/c2a368ee/timeline.jsonl"
+    said 2026-09-29T06:01:25.000Z '<command-message>mattpocock-skills:implement</command-message>'
+    text 2026-09-29T06:02:00.000Z 'Committed on main.
+
+Want me to push to `origin/main` now?'
+    ended 2026-09-29T06:02:30.000Z
+    said 2026-09-29T06:04:00.000Z 'yes'
+    text 2026-09-29T06:05:00.000Z "Now I'll push." '{"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "git push"}}'
+    jq -cn '{type: "user", timestamp: "2026-09-29T06:06:00.000Z", message: {role: "user",
+        content: [{type: "tool_result", tool_use_id: "b1", content: "denied"}]}}'
+    text 2026-09-29T06:07:00.000Z 'Committed on main.
+
+`Waiting on: git push origin main`'
+    ended 2026-09-29T06:07:30.000Z
+    said 2026-09-29T06:09:00.000Z '<command-message>mp-ported-skills:capturing</command-message>'
+    text 2026-09-29T06:10:00.000Z 'Captured. Draft body for the unposted finding:
+
+> Decide whether edit and delete need their own action or a refusal.
+
+`/clear` is the right boundary.'
+    ended 2026-09-29T06:10:30.000Z
+} >"$cfg/projects/-work-project/$sid.jsonl"
+{
+    blocked 2026-09-29T06:03:00.000Z 'push now?'
+    blocked 2026-09-29T06:05:30.000Z 'approve Bash: git push'
+    blocked 2026-09-29T06:08:00.000Z 'commits ready'
+    blocked 2026-09-29T06:11:00.000Z 'waiting on decision: edit and delete'
+} >"$cfg/jobs/c2a368ee/timeline.jsonl"
 out=$(record)
-check "record: a block on a quoted decision is not a wait" \
-    "4 waits on a human (approve Bash: git push; which flag name?; push now?; commits ready), unknown typed messages" \
+check "record: a block on a finished report is not a wait" \
+    "3 waits on a human (push now?; approve Bash: git push; commits ready), 1 message typed into the worker" \
     "$(field 'human interventions' "$out")"
+command rm -rf "$cfg/projects/-work-project"
 
 # A hand-run /implement, cut down from a live interactive session with two
 # subagents: hand-run.jsonl and hand-run/subagents/.

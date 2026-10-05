@@ -34,9 +34,10 @@
 #                            worker after its first (by `claude attach`); a
 #                            blocked entry whose next prompt is a supervisor
 #                            answer is the supervisor's, not a human's, and
-#                            one whose text ends on a statement, with no
-#                            `Waiting on:` line, is a finished report
-#                            watch.sh reads as done, not a wait (#114)
+#                            one that follows a turn end whose last text
+#                            ends on a statement, with no `Waiting on:`
+#                            line, is a finished report watch.sh reads as
+#                            done, not a wait (#114)
 # * shared actions           actions.sh's lines, or none
 #   outcome                  commits in START..HEAD, the job's PRs and
 #                            issues (*), and the ticket's state from gh
@@ -119,9 +120,12 @@ transcript() {
     return 1
 }
 
-# Shared jq definitions: time, size and money as the record prints them, and
-# a transcript's API calls, one per request in the order first written.
+# Shared jq definitions: time, size and money as the record prints them, a
+# transcript's API calls, one per request in the order first written, and
+# watch.sh's `asks` (its QUESTION_JQ, kept the same): true for a text whose
+# last non-blank line, less trailing markdown, ends on a question mark.
 defs='
+def asks: [splits("\n") | sub("[\\s`*_\")]+$"; "") | select(. != "")] | last // "" | endswith("?");
 def epoch: sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601;
 def stamp: sub("\\.[0-9]+Z$"; "Z");
 def span: (. / 60 | round) as $m
@@ -198,6 +202,20 @@ if [ -n "$sid" ]; then
                            | .sup = (.text | test("^\\[supervisor answer to "))
                            | select(.sup or (.text | test("^\\s*[<\\[]") | not))
                            | {at, sup})),
+           # Prompts and turn ends by time; a turn end is unasked when its
+           # last text ends on a statement with no Waiting on: line, the
+           # line watch.sh reads (#114).
+           marks: (reduce $rows[] as $r ({text: "", list: []};
+               if $r.type == "assistant" and ($r.isSidechain // false | not) then
+                   ([$r.message.content[]? | objects | select(.type == "text") | .text // empty] | last) as $t
+                   | if $t == null then . else .text = $t end
+               elif ($r.timestamp // null) == null then .
+               elif $r.type == "user" and ($r.isMeta // false | not) then .list += [{at: $r.timestamp, unasked: false}]
+               elif $r.type == "system" and $r.subtype == "turn_duration" and ($r.pendingBackgroundAgentCount // 0) == 0 then
+                   .list += [{at: $r.timestamp,
+                              unasked: (.text != "" and (.text | asks | not)
+                                        and (.text | test("(?m)^[`* ]*Waiting on:") | not))}]
+               else . end) | .list),
            answers: [$rows[] | select(.type == "user" and (.isMeta // false | not)) | text // empty
                      | capture("^\\[supervisor answer to \"(?<q>.*)\"\\] (?<a>[^.!?]*[.!?]?)")],
            usage: ([$rows[] | select(.type == "cost-state")] | last
@@ -263,23 +281,21 @@ elif ! supervisor=$(jq -rs --arg l "$launched" "$defs"'
 fi
 
 # --- waits on a human ------------------------------------------------------
-# QUESTION_JQ: watch.sh's definition of `asks`, true for a text whose last
-# non-blank line, less trailing markdown, ends on a question mark.
-QUESTION_JQ='def asks: [splits("\n") | sub("[\\s`*_\")]+$"; "") | select(. != "")] | last // "" | endswith("?");'
 waits=""
 if [ -n "$SESSION" ]; then
     :
 elif [ ! -f "$timeline" ]; then
     [ ! -f "$job" ] || note "no timeline for $ID under $CLAUDE_CONFIG_DIR/jobs, so its waits on a human were not read"
     waits="unknown"
-elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // []')" "$defs$QUESTION_JQ"'
+elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // []')" \
+        --argjson m "$(printf '%s' "$worker" | jq -c '.marks // []')" "$defs"'
         # A wait is the supervisor'"'"'s when the first prompt after it is its answer.
-        # Its text, when it has any, must end on a question or carry a
-        # Waiting on: line, as watch.sh confirms a block.
+        # It is no wait when the worker'"'"'s last prompt or turn end before it is
+        # an unasked turn end: a finished report watch.sh reads as done.
         [.[] | objects | select(.state == "blocked")
-         | select((.text // "") as $t | $t == "" or ($t | asks) or ($t | test("(?m)^[`* ]*Waiting on:")))
          | (.at // "") as $b
          | select($b == "" or ([$p[] | select((.at | epoch) > ($b | epoch))] | min_by(.at | epoch) | .sup // false | not))
+         | select($b == "" or ([$m[] | select((.at | epoch) <= ($b | epoch))] | max_by(.at | epoch) | .unasked // false | not))
          | .detail // ""] as $w
         | if ($w | length) == 0 then ""
           else "\($w | length) wait\(if ($w | length) > 1 then "s" else "" end) on a human"

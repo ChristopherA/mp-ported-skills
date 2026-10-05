@@ -222,7 +222,8 @@ waiting_on() {
 
 # QUESTION_JQ: defines the jq filter `asks`, true for a text whose last
 # non-blank line, less trailing markdown, ends on a question mark. record.sh
-# carries the same definition, to count only the waits this confirms.
+# carries the same definition, and the same `Waiting on:` line test, to count
+# only the waits this confirms.
 QUESTION_JQ='def asks: [splits("\n") | sub("[\\s`*_\")]+$"; "") | select(. != "")] | last // "" | endswith("?");'
 
 # ends_unasked <session id>: whether its last text is found and ends on a
