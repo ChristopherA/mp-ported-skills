@@ -17,12 +17,12 @@
 #
 # Exits 0, printing nothing, when DIR is in the main checkout or in no git
 # repo (the callers check that themselves); 1, printing why, when it is in a
-# linked worktree.
+# linked worktree; 2 called without DIR.
 
 set -u
 
 DIR=${1:-}
-[ -n "$DIR" ] || { printf 'Usage: main-checkout.sh DIR\n' >&2; exit 2; }
+[ -n "$DIR" ] || { printf 'Error: usage: main-checkout.sh DIR\n' >&2; exit 2; }
 dirs=$(git -C "$DIR" rev-parse --path-format=absolute --git-dir --git-common-dir 2>/dev/null) || exit 0
 [ "$(printf '%s\n' "$dirs" | sed -n 1p)" != "$(printf '%s\n' "$dirs" | sed -n 2p)" ] || exit 0
 top=$(git -C "$DIR" rev-parse --show-toplevel)

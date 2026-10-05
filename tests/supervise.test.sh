@@ -642,17 +642,13 @@ done
 # --- launch.sh -------------------------------------------------------------
 # launch.sh reads `claude agents` for other live sessions in the checkout;
 # LAUNCH_AGENTS names the list the fake serves (by default, none there).
-launch() { # [args...] -- launch.sh --dir $project with the fake claude
-    reset_fake
-    echo "${LAUNCH_AGENTS:-$fixtures/working-busy.json}" >"$fake/seq"
-    PATH="$work/bin:$PATH" sh "$scripts/launch.sh" --dir "$project" "$@" </dev/null
-}
 launch_dir() { # <dir> [args...] -- launch.sh --dir <dir> with the fake claude
     d=$1; shift
     reset_fake
     echo "${LAUNCH_AGENTS:-$fixtures/working-busy.json}" >"$fake/seq"
     PATH="$work/bin:$PATH" sh "$scripts/launch.sh" --dir "$d" "$@" </dev/null
 }
+launch() { launch_dir "$project" "$@"; } # [args...] -- launch.sh --dir $project
 out=$(launch --ticket 56 2>&1)
 rc=$?
 check "launch: exit 0" "0" "$rc"
@@ -877,18 +873,21 @@ check "launch: not a git checkout exits 1" "1 Error: $work/not-a-repo is not a g
 # checkout, whose --git-dir and --git-common-dir print in different forms,
 # from reading as one.
 linked="$work/linked"
+linked_why() { # <branch> -- main-checkout.sh's reason for $linked on that branch
+    echo "$linked is a linked git worktree on branch $1, not the main checkout $project; a worker there would commit to a branch nobody pushes, so run /supervise from $project"
+}
 project_git worktree add -q "$linked" -b linked-branch
 out=$(launch_dir "$linked" --ticket 56 2>&1); rc=$?
-not_launched "a linked worktree" "Error: $linked is a linked git worktree on branch linked-branch, not the main checkout $project; a worker there would commit to a branch nobody pushes, so run /supervise from $project; not launched"
+not_launched "a linked worktree" "Error: $(linked_why linked-branch); not launched"
 check "step: a linked worktree stops before state.sh" \
-    "stop: $linked is a linked git worktree on branch linked-branch, not the main checkout $project; a worker there would commit to a branch nobody pushes, so run /supervise from $project" \
+    "stop: $(linked_why linked-branch)" \
     "$(sh "$scripts/step.sh" "$linked" </dev/null)"
 mkdir -p "$linked/sub"
 echo x >"$linked/sub/file"
 project_git -C "$linked" add sub
 project_git -C "$linked" commit -m sub
 out=$(launch_dir "$linked/sub" --ticket 56 2>&1); rc=$?
-not_launched "a subfolder of a linked worktree" "Error: $linked is a linked git worktree on branch linked-branch, not the main checkout $project; a worker there would commit to a branch nobody pushes, so run /supervise from $project; not launched"
+not_launched "a subfolder of a linked worktree" "Error: $(linked_why linked-branch); not launched"
 project_git worktree remove --force "$linked"
 project_git branch -D linked-branch
 # With the main checkout on another branch, a worktree can hold the default
@@ -896,7 +895,7 @@ project_git branch -D linked-branch
 project_git checkout -q -b elsewhere
 project_git worktree add -q "$linked" main
 out=$(launch_dir "$linked" --ticket 56 2>&1); rc=$?
-not_launched "a linked worktree on the default branch" "Error: $linked is a linked git worktree on branch main, not the main checkout $project; a worker there would commit to a branch nobody pushes, so run /supervise from $project; not launched"
+not_launched "a linked worktree on the default branch" "Error: $(linked_why main); not launched"
 project_git worktree remove --force "$linked"
 project_git checkout -q main
 project_git branch -D elsewhere
@@ -907,6 +906,8 @@ project_git add sub
 project_git commit -m sub
 out=$(launch_dir "$project/sub" --ticket 56 2>&1); rc=$?
 check "launch: a subfolder of the main checkout launches" "0 c2a368ee" "$rc $out"
+check "main-checkout: a subfolder of the main checkout passes, silently" "0 " \
+    "$(out=$(sh "$scripts/main-checkout.sh" "$project/sub" </dev/null 2>&1); echo "$? $out")"
 command rm -f "$marker"
 
 # The grants come from grant.sh's source, docs/agents/supervision.md on
