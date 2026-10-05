@@ -6,7 +6,9 @@
 # `implement #N` when that step is /implement of a ready-for-agent ticket and
 # nothing else is in flight: case 2, or case 1 when its only work in flight is
 # an in-motion parent whose next child is ready-for-agent. Otherwise prints
-# `stop: ` and the `next:` line, for the supervisor to report. Writes nothing.
+# `stop: ` and the `next:` line, for the supervisor to report. A folder in a
+# linked git worktree stops first, with main-checkout.sh's reason in place of
+# the `next:` line. Writes nothing.
 #
 # Usage:
 #   step.sh DIR          run state.sh in DIR
@@ -30,6 +32,9 @@ case "${1:-}" in
         exit 1 ;;
     *)
         [ -d "$1" ] || { printf 'Error: not a directory: %s\n' "$1" >&2; exit 1; }
+        # A linked worktree stops here, named as one (#79), before state.sh
+        # would call its branch work in flight.
+        linked=$(sh "$SCRIPT_DIR/main-checkout.sh" "$1" </dev/null) || { echo "stop: $linked"; exit 0; }
         report=$(sh "$state" "$1" </dev/null) ;;
 esac
 

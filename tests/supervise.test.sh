@@ -647,6 +647,12 @@ launch() { # [args...] -- launch.sh --dir $project with the fake claude
     echo "${LAUNCH_AGENTS:-$fixtures/working-busy.json}" >"$fake/seq"
     PATH="$work/bin:$PATH" sh "$scripts/launch.sh" --dir "$project" "$@" </dev/null
 }
+launch_dir() { # <dir> [args...] -- launch.sh --dir <dir> with the fake claude
+    d=$1; shift
+    reset_fake
+    echo "${LAUNCH_AGENTS:-$fixtures/working-busy.json}" >"$fake/seq"
+    PATH="$work/bin:$PATH" sh "$scripts/launch.sh" --dir "$d" "$@" </dev/null
+}
 out=$(launch --ticket 56 2>&1)
 rc=$?
 check "launch: exit 0" "0" "$rc"
@@ -864,6 +870,44 @@ check "launch: a stale marker is replaced" "c2a368ee" "$(command cat "$marker")"
 mkdir -p "$work/not-a-repo"
 out=$(PATH="$work/bin:$PATH" sh "$scripts/launch.sh" --dir "$work/not-a-repo" --ticket 56 </dev/null 2>&1); rc=$?
 check "launch: not a git checkout exits 1" "1 Error: $work/not-a-repo is not a git checkout; not launched" "$rc $out"
+
+# A linked worktree is refused before anything launches (#79), whichever
+# branch it holds: a worker there commits to the worktree's branch, which
+# nobody pushes. --path-format=absolute keeps a subfolder of the main
+# checkout, whose --git-dir and --git-common-dir print in different forms,
+# from reading as one.
+linked="$work/linked"
+project_git worktree add -q "$linked" -b linked-branch
+out=$(launch_dir "$linked" --ticket 56 2>&1); rc=$?
+not_launched "a linked worktree" "Error: $linked is a linked git worktree on branch linked-branch, not the main checkout $project; a worker there would commit to a branch nobody pushes, so run /supervise from $project; not launched"
+check "step: a linked worktree stops before state.sh" \
+    "stop: $linked is a linked git worktree on branch linked-branch, not the main checkout $project; a worker there would commit to a branch nobody pushes, so run /supervise from $project" \
+    "$(sh "$scripts/step.sh" "$linked" </dev/null)"
+mkdir -p "$linked/sub"
+echo x >"$linked/sub/file"
+project_git -C "$linked" add sub
+project_git -C "$linked" commit -m sub
+out=$(launch_dir "$linked/sub" --ticket 56 2>&1); rc=$?
+not_launched "a subfolder of a linked worktree" "Error: $linked is a linked git worktree on branch linked-branch, not the main checkout $project; a worker there would commit to a branch nobody pushes, so run /supervise from $project; not launched"
+project_git worktree remove --force "$linked"
+project_git branch -D linked-branch
+# With the main checkout on another branch, a worktree can hold the default
+# branch, and the branch check alone would pass it.
+project_git checkout -q -b elsewhere
+project_git worktree add -q "$linked" main
+out=$(launch_dir "$linked" --ticket 56 2>&1); rc=$?
+not_launched "a linked worktree on the default branch" "Error: $linked is a linked git worktree on branch main, not the main checkout $project; a worker there would commit to a branch nobody pushes, so run /supervise from $project; not launched"
+project_git worktree remove --force "$linked"
+project_git checkout -q main
+project_git branch -D elsewhere
+# A subfolder of the main checkout is not a worktree.
+mkdir -p "$project/sub"
+echo x >"$project/sub/file"
+project_git add sub
+project_git commit -m sub
+out=$(launch_dir "$project/sub" --ticket 56 2>&1); rc=$?
+check "launch: a subfolder of the main checkout launches" "0 c2a368ee" "$rc $out"
+command rm -f "$marker"
 
 # The grants come from grant.sh's source, docs/agents/supervision.md on
 # origin's default branch (#88): one committed but not pushed is not listed.

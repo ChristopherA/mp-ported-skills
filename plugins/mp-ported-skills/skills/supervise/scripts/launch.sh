@@ -95,8 +95,9 @@
 # line then ends ` · <name>`, and with FORCE_COLOR set its id is colored, so
 # both are read past.
 #
-# Before launching, it checks that DIR is a git checkout on its default
-# branch with a clean tree and no other live background session in it
+# Before launching, it checks that DIR is a git checkout, in the main
+# checkout rather than a linked worktree (main-checkout.sh, #79), on its
+# default branch with a clean tree and no other live background session in it
 # (#76). Once the session passes its checks, it writes the session's id to
 # the marker `git rev-parse --git-path mp-supervise-worker`, which keeps an
 # attended session read-only in the checkout (scripts/supervise-read-only.sh)
@@ -157,6 +158,10 @@ set -- "$CONFIG"/plugins/cache/*/mattpocock-skills/*/skills/*/implement/SKILL.md
 # starts where its commits belong and alone. The default branch is found as
 # resuming's state.sh finds it.
 git -C "$DIR" rev-parse --git-dir >/dev/null 2>&1 || fail "$DIR is not a git checkout; not launched"
+# A linked worktree is refused first (#79), whatever branch it holds: a
+# worktree can hold the default branch while the main checkout is elsewhere.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+linked=$(sh "$SCRIPT_DIR/main-checkout.sh" "$DIR" </dev/null) || fail "$linked; not launched"
 status=$(git -C "$DIR" status --porcelain) || fail "git status failed in $DIR, so its tree is unconfirmed; not launched"
 dirty=$(printf '%s' "$status" | grep -c '^')
 if [ "$dirty" -gt 0 ]; then
@@ -192,7 +197,6 @@ marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-
 # grant.sh exits 1 both for "not granted" and for an error, so its stderr
 # tells them apart: an error stops the launch rather than reading as no
 # grant, and a note (a grant committed only locally) is passed on.
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 errs=$(mktemp) || fail "mktemp failed, so the grants cannot be read; not launched"
 granted=""
 for action in push pr-create pr-merge issue-close issue-comment issue-create; do
