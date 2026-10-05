@@ -300,6 +300,18 @@ check "case 1: git-only runner-up when gh fails" "none known: the tracker was no
 command rm -f "$proj/scratch"
 g commit -q --allow-empty -m wip
 check "case 1: unpushed" "1 work in flight: 1 unpushed commits" "$(next "$(run)")"
+# The state a capture ends in (#108): unpushed work, an in-motion parent whose
+# ready-for-human child waits on a live check behind a ready-for-agent child,
+# and a lower-numbered ready ticket outside the parent. Capturing's first next
+# step reads these lines, so the parent's next child must lead, not #67.
+issues "$(list "$(issue 40 ready-for-human,in-motion)" "$(issue 67 ready-for-agent)" \
+    "$(issue 98 ready-for-agent)" "$(issue 102 ready-for-human)")"
+list "$(issue 98 ready-for-agent)" "$(issue 102 ready-for-human)" >"$FAKE_GH/sub-40.json"
+out=$(run)
+check "capture state: next is the parent's next child" "1 work in flight: 1 unpushed commits, in motion #40 t40; next child #98 (ready-for-agent, /implement #98, you type it; user-invoked): t98" "$(next "$out")"
+check "capture state: runner-up is the lowest ready ticket" "2 /implement #67 (you type it; user-invoked): #67 t67" "$(runner "$out")"
+command rm -f "$FAKE_GH/sub-40.json"
+issues "$saved_issues"
 g push -q
 g checkout -q -b feature
 check "case 1: off the default branch" "1 work in flight: on feature not main" "$(next "$(run)")"

@@ -14,12 +14,14 @@ sh "${CLAUDE_SKILL_DIR}/scripts/state.sh" </dev/null
 It reads git (no fetch) and, when `docs/agents/issue-tracker.md` names GitHub, the tracker through `gh`, taking label strings from `docs/agents/triage-labels.md`. Its `next:` line is the first of these cases that applies, and its `runner-up:` line the second, or case 7's suggestions when no other applies. A ticket labelled `parked` is never a step in any case:
 
 1. **Work in flight**: uncommitted changes, unpushed commits, a branch other than the default, an open PR from this repo, or a ticket labelled `in-motion`, the `ready-for-human` ticket `capturing` marks as the one a session was working on, which git cannot see. Finish it. When that ticket has open sub-issues, its work is its **next child**: the first open one in the parent's order with every blocker closed, the blocker test of the frontier rule in `docs/agents/issue-tracker.md`, and not `parked`.
-2. **A `ready-for-agent` ticket with every blocker closed**: `/implement #N`, lowest number first. When no ticket is `in-motion`, this is `capturing`'s one first next step, so what capture leaves, resume finds.
+2. **A `ready-for-agent` ticket with every blocker closed**: `/implement #N`, lowest number first.
 3. **Incoming work**: unlabelled issues, `needs-triage`, or `needs-info` with a reply since the last triage notes. `/triage`.
 4. **Tracker and repo disagree**: an open ticket a commit on the default branch already closes. Fix the tracker, since every later session starts from it.
 5. **An open `wayfinder:map`**: continue `/wayfinder`.
 6. **Hand work**: a `ready-for-human` ticket, not `in-motion`, with every blocker closed. Do it by hand. The highest priority line wins (High, Medium, none, Low), then the lowest number. When this case wins, the second such ticket, if any, is the runner-up.
 7. **Nothing in motion**: say so plainly. Runner-ups: `/grill-with-docs` on a new idea, or `/improve-codebase-architecture`.
+
+`capturing` runs this script for its report, so what capture leaves, resume finds: capturing's one first next step is the in-motion ticket `state.sh`'s `next:` line names, or that ticket's next child when the line names one; otherwise the ticket on its `2 /implement` line, in `next:` or `runner-up:`. An edit to cases 1 or 2 is made to that rule too.
 
 When the next step is `/implement #N` (case 2, or an in-motion parent's next child), a `supervise:` line follows. It holds the `/mp-ported-skills:supervise` command that would hand the ticket to a background worker instead, when `/supervise` would take it: a clean tree, the default branch, no unpushed commits or open PR, no other work in flight its `step.sh` would refuse, and no other live background session in the folder. Otherwise it reads `not offered:` and the first of those that fails. Any other step prints no `supervise:` line.
 
