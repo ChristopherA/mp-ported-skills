@@ -44,7 +44,7 @@ Add `--model <id>` when the user gave one; the default is `claude-sonnet-5`, and
 
 With `--watch tmux` or `--watch iterm`, open the worker's viewer now (Watching, below).
 
-Once the launch has succeeded and any viewer is open, and before the watch, tell the maintainer which ticket the worker took, as `#N <title>`, with the worker's short id, and give a few lines on what it asks for: what to build and its acceptance criteria in brief. Build the summary to the latest Agent Brief in the ticket's comments when there is one, and to its body otherwise, from what step 1 read: no new tracker call. A launch that exits 1 or 2 gets no summary. With `--loop`, each ticket's launch gets its own.
+Once the launch has succeeded and any viewer is open, and before the watch, tell the maintainer which ticket the worker took, as `#N <title>`, with the worker's short id, and give a few lines on what it asks for: what to build and its acceptance criteria in brief. Build the summary to the latest Agent Brief (the comment `/triage` posts, with acceptance criteria) when there is one, and to the ticket's body otherwise, from what step 1 read: no new tracker call. A launch that exits 1 or 2 gets no summary. With `--loop`, each ticket's launch gets its own (#117).
 
 ## 3. Watch
 
