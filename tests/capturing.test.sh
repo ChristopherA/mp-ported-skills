@@ -7,7 +7,9 @@
 # resolves to the script from capturing's own folder, and that both skills
 # carry the rule, and the use of what the step unblocks, in the same words.
 # It also checks that move 1 reads a ticket's parent before moving the
-# in-motion label, so an in-motion parent keeps it. What state.sh prints in
+# in-motion label, so an in-motion parent keeps it, and that a ticket the
+# sweep files under a parent gets its blockers and a place in the parent's
+# order (#124). What state.sh prints in
 # that state is checked in tests/resuming.test.sh. Reads only files in this
 # checkout.
 #
@@ -55,6 +57,19 @@ check "move 1 reads the ticket's parent" yes \
     "$(contains "$capturing" "gh api 'repos/{owner}/{repo}/issues/N/parent'")"
 check "an in-motion parent keeps its label" yes \
     "$(contains "$capturing" "When the parent is labelled \`in-motion\`, change no label")"
+
+# A ticket filed under a parent: blockers from what the session reasoned,
+# a placement asked with the filing, and no reorder unattended (#124).
+check "the new-ticket routes point at placing" yes \
+    "$(contains "$capturing" "placed per **A new ticket under a parent**")"
+check "an ordering reasoned in prose becomes a Blocked by line" yes \
+    "$(contains "$capturing" "\"land #N first\" becomes \`Blocked by: #N\`")"
+check "the placement is asked in the filing's question" yes \
+    "$(contains "$capturing" "in the same AskUserQuestion that confirms the filing")"
+check "a yes applies the placement through the priority API" yes \
+    "$(contains "$capturing" "sub_issues/priority")"
+check "unattended leaves the order alone" yes \
+    "$(contains "$capturing" "no grant covers a sub-issue reorder")"
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]
