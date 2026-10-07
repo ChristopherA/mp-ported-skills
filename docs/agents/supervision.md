@@ -29,3 +29,4 @@ itself one by editing this file.
      Example: `- push: release branches only` -->
 
 - push: to main, after the worker's own tests and /code-review pass
+- issue-comment: a capture's findings, on this repo's tickets
