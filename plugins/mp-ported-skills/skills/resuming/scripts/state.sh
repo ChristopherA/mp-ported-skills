@@ -135,9 +135,10 @@ git_state() {
         r_unpushed=0
     fi
     if up=$(git -C "$1" rev-parse --abbrev-ref -q '@{u}' 2>/dev/null); then
-        set -- $(git -C "$1" rev-list --left-right --count "$up...HEAD")
-        if [ "$1" = 0 ] && [ "$2" = 0 ]; then r_sync="in sync with $up"
-        else r_sync="ahead $2, behind $1 of $up"; fi
+        counts=$(git -C "$1" rev-list --left-right --count "$up...HEAD")
+        behind=${counts%%[!0-9]*} ahead=${counts##*[!0-9]}
+        if [ "$behind" = 0 ] && [ "$ahead" = 0 ]; then r_sync="in sync with $up"
+        else r_sync="ahead $ahead, behind $behind of $up"; fi
     else
         r_sync="no upstream"
     fi
@@ -170,9 +171,11 @@ gather() {
     inflight=$(git_inflight)
 
     # The Distribution repo, from the working tree's copy of
-    # docs/agents/distribution-repo.md: read, not trusted, so not origin's
-    # as launch.sh reads it. One that cannot be read is never clean: its
-    # reason goes in dist_unread, which keeps the /supervise offer back.
+    # docs/agents/distribution-repo.md, as the other docs/agents files are
+    # read: this readout only reads, so it needs none of the protection
+    # launch.sh gets from origin's copy. One that cannot be read is never
+    # clean: its reason goes in dist_unread, which keeps the /supervise
+    # offer back.
     dist= dist_inflight= dist_unread=
     if ! dist=$(sh "$distribution" --dir . --working-tree </dev/null 2>"$tmp/dist-err"); then
         dist_unread="not read: $(cat "$tmp/dist-err")"
@@ -180,8 +183,12 @@ gather() {
         :
     elif [ ! -d "$dist" ]; then
         dist_unread="$dist not read: no such folder"
-    elif ! git -C "$dist" rev-parse --git-dir >/dev/null 2>&1; then
+    # A plain folder inside a repo is not one: rev-parse would answer for
+    # the repo around it, as it would for the Project itself.
+    elif [ "$(git -C "$dist" rev-parse --show-toplevel 2>/dev/null)" != "$dist" ]; then
         dist_unread="$dist not read: not a git checkout"
+    elif [ "$dist" = "$(git rev-parse --show-toplevel)" ]; then
+        dist_unread="$dist not read: the Project's own repo"
     else
         git_state "$dist"
         echo "distribution repo: $dist"
@@ -417,7 +424,11 @@ gather() {
 "; }
     [ -n "$inflight" ] && add_case "1 work in flight: ${inflight#, }"
     if [ $reached = 0 ]; then
-        [ -n "$inflight" ] || add_case "undecided: git shows nothing in flight; the tracker was not read"
+        if [ -n "$dist_unread" ]; then
+            [ -n "$inflight" ] || add_case "undecided: git shows nothing in flight, but the distribution repo was not read; the tracker was not read"
+        else
+            [ -n "$inflight" ] || add_case "undecided: git shows nothing in flight; the tracker was not read"
+        fi
         add_case "none known: the tracker was not read"
     else
         [ -n "$pick" ] && add_case "2 /implement ${pick%% *} $you_type: $pick"

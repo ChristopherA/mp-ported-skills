@@ -601,6 +601,7 @@ command rm -f "$dist/scratch"
 
 dg commit -q --allow-empty -m wip
 out=$(run)
+check "dist: unpushed, ahead of its upstream" "main (default main), ahead 1, behind 0 of origin/main, as of last fetch" "$(line_of "$out" 'distribution repo branch')"
 check "dist: unpushed is case 1" "1 work in flight: 1 unpushed commits in distribution repo $dist, $child" "$(next "$out")"
 check "dist: unpushed, supervise not offered" "not offered: work in flight in distribution repo $dist: 1 unpushed commits in distribution repo $dist" "$(sup "$out")"
 dg push -q
@@ -634,6 +635,19 @@ out=$(run)
 check "dist: not a git checkout is not read" "$plain not read: not a git checkout" "$(line_of "$out" 'distribution repo')"
 check "dist: not read, next unchanged" "1 work in flight: $child" "$(next "$out")"
 check "dist: not read is never clean" "not offered: distribution repo $plain not read: not a git checkout" "$(sup "$out")"
+check "dist: not read, tracker unreached, not called clean" "undecided: git shows nothing in flight, but the distribution repo was not read; the tracker was not read" "$(next "$(FAKE_GH_FAIL=1 run)")"
+# A folder inside the Project is no repo of its own, and the Project is not
+# its own Distribution repo.
+printf 'docs\n' >"$proj/docs/agents/distribution-repo.md"
+g commit -qam 'Point at a folder inside the Project'
+g push -q
+out=$(run)
+check "dist: a folder inside the Project is not read" "$real/docs not read: not a git checkout" "$(line_of "$out" 'distribution repo')"
+check "dist: a folder inside the Project, supervise not offered" "not offered: distribution repo $real/docs not read: not a git checkout" "$(sup "$out")"
+printf '.\n' >"$proj/docs/agents/distribution-repo.md"
+g commit -qam 'Point at the Project'
+g push -q
+check "dist: the Project itself is not read" "$real not read: the Project's own repo" "$(line_of "$(run)" 'distribution repo')"
 printf '# Distribution repo\n' >"$proj/docs/agents/distribution-repo.md"
 g commit -qam 'No path'
 g push -q
