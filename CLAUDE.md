@@ -72,6 +72,10 @@ A live run of a skill that launches `/implement` workers is the maintainer's to 
 
 A test that puts a fake command on `PATH` makes it executable and checks, before any call that could reach the real one, that `command -v` finds the fake, as `tests/supervise.test.sh` does for `claude`. A fake written without `chmod +x` is skipped silently: its launch tests ran the real `claude --bg`, which only its folder-trust check stopped.
 
+## Grant actions
+
+A new grant action, or a change to what one covers, goes into every list of the actions, not only the scripts that enforce it: `grant.sh`, the classifier `shared-action-classify.sh` (`grant_action`), `launch.sh`'s grants text, `actions.sh`, `answer.sh`, `capturing`'s `before-clear.sh` and its `SKILL.md`, the template in `setup-mp-ported-skills`' `setup.sh`, `docs/agents/supervision.md`, and ADR 0005. Find them with `rg -l 'issue-create' plugins docs`. A list left behind still accepts the old set: in #141, `before-clear.sh` would have reported a Distribution repo push as covered by the `push` grant, and the hook would then have refused it.
+
 ## Calling claude from scripts
 
 A `claude` option that takes a list (`--allowedTools`, `--disallowedTools`, and any other `claude --help` shows as `<tools...>` or `<values...>`) goes before another option, never right before the prompt, as `launch.sh` places `--disallowedTools`. A list option reads every word after it that does not start with `-`, so the prompt becomes an entry in the list: `claude -p --disallowedTools EnterWorktree 'Reply OK'` warns that the deny rule "Reply" matches no known tool, then fails with `Input must be provided`.
