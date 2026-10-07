@@ -88,7 +88,9 @@ next_child() {
             by="$by
 $(open_link_blockers "$k" | jq -r '.[]')"
         fi
-        by=$(printf '%s\n' "$by" | grep . | sort -un | sed 's/^/#/' | tr '\n' ' ')
+        # This repo's blockers by number, then any in other repos.
+        by=$({ printf '%s\n' "$by" | grep -E '^[0-9]+$' | sort -un | sed 's/^/#/'
+               printf '%s\n' "$by" | grep -v -E '^([0-9]+)?$' | sort -u; } | tr '\n' ' ')
         blocked="$blocked, #$k by ${by:-an unread blocker}"
     done
     blocked=$(printf '%s' "$blocked" | sed 's/ ,/,/g; s/ $//')
@@ -96,10 +98,14 @@ $(open_link_blockers "$k" | jq -r '.[]')"
 }
 
 # open_link_blockers <n>: a JSON array of the open tickets GitHub links as
-# blocking #n; nothing when the list cannot be read.
+# blocking #n, a number for one in this repo and "owner/repo#N" for one in
+# another, so a blocker elsewhere is never read as the local ticket with its
+# number; nothing when the list cannot be read. Reads $repo_url.
 open_link_blockers() {
     gh api "repos/{owner}/{repo}/issues/$1/dependencies/blocked_by" 2>/dev/null |
-        jq -c '[.[] | select(.state == "open") | .number]' 2>/dev/null
+        jq -c --arg repo "$repo_url" '[.[] | select(.state == "open")
+            | if (.repository_url // $repo) == $repo then .number
+              else "\(.repository_url | sub("^.*/repos/"; ""))#\(.number)" end]' 2>/dev/null
 }
 
 gather() {
@@ -223,6 +229,9 @@ gather() {
                         else "unlabelled" end)]
             | sort_by(.n)')
         open_nums=$(printf '%s' "$rows" | jq -c '[.[].n]')
+        # This repo's API URL, which a linked blocker's repository_url matches
+        # when the blocker is in this repo.
+        repo_url=$(printf '%s' "$issues" | jq -r 'first(.[].repository_url // empty) // ""')
         # -n, not -R on stdin: with no closing commits the input is empty, -R
         # emits nothing, and every --argjson fx below fails.
         fixed_nums=$(jq -nc --arg f "$fixed" '$f | split(" ") | map(select(. != "") | tonumber)')

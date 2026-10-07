@@ -81,10 +81,12 @@ unset FAKE_GH_FAIL FAKE_CLAUDE_FAIL FAKE_GH_SLEEP MP_RESUME_BUDGET CLAUDE_PROJEC
 
 issues() { printf '%s' "$1" >"$FAKE_GH/issues.json"; }
 prs() { printf '%s' "$1" >"$FAKE_GH/prs.json"; }
-# issue <n> <labels csv> [blocked_by] [body]
+# issue <n> <labels csv> [blocked_by] [body]; every issue is in me/proj, and a
+# blocker fixture names other/lib for a ticket in another repo.
 issue() {
     jq -nc --argjson n "$1" --arg l "$2" --argjson d "${3:-0}" --arg b "${4:-}" \
         '{number: $n, title: "t\($n)", body: $b, comments: 0, state: "open",
+          repository_url: "https://api.github.com/repos/me/proj",
           labels: ($l | split(",") | map(select(. != "") | {name: .})),
           issue_dependencies_summary: {blocked_by: $d}}'
 }
@@ -288,6 +290,10 @@ check "in-motion ticket: no sub-issues" "1 work in flight: in motion #24 t24" "$
 list "$(issue 27 ready-for-agent 1)" "$(issue 28 ready-for-agent 0 'Blocked by: #52')" >"$FAKE_GH/sub-24.json"
 printf '[{"number":26,"state":"open"},{"number":9,"state":"closed"}]' >"$FAKE_GH/deps-27.json"
 check "in-motion parent: open children all blocked" "1 work in flight: in motion #24 t24; every open child blocked: #27 by #26, #28 by #52" "$(next "$(run)")"
+# A linked blocker in another repo is named with its repo, never as the
+# local ticket with the same number (#147).
+printf '[{"number":26,"state":"open","repository_url":"https://api.github.com/repos/other/lib"},{"number":52,"state":"open","repository_url":"https://api.github.com/repos/me/proj"}]' >"$FAKE_GH/deps-27.json"
+check "in-motion parent: a blocker in another repo" "1 work in flight: in motion #24 t24; every open child blocked: #27 by #52 other/lib#26, #28 by #52" "$(next "$(run)")"
 printf 'not json' >"$FAKE_GH/deps-27.json"
 check "in-motion parent: blocker list unread" "1 work in flight: in motion #24 t24; every open child blocked: #27 by an unread blocker, #28 by #52" "$(next "$(run)")"
 list "$(issue 28 ready-for-agent 0 '## Blocked by
@@ -322,8 +328,10 @@ issues "$saved_issues"
 # blocker is a GitHub link, a Blocked by: line or a bullet under a heading.
 # Parked, wontfix and already-fixed tickets are never listed, and a ticket
 # with two open links has them left unread (#99's fixture would list it).
+# #87's one open link is #90 of another repo, not this one's (#147).
 issues "$(list "$(issue 30 needs-info 0 'Blocked by: #90')" "$(issue 88 wontfix 0 'Blocked by: #90')" \
     "$(issue 89 needs-info,parked 0 'Blocked by: #90')" "$(issue 99 ready-for-agent 2)" \
+    "$(issue 87 ready-for-agent 1)" \
     "$(issue 90 ready-for-agent)" \
     "$(issue 91 ready-for-human 1 '**Priority: High.** Linked.')" \
     "$(issue 92 needs-triage 0 '**Priority: Medium.** On a line.
@@ -347,6 +355,7 @@ Blocked by: #90')" \
 ```
 Blocked by: #90
 ```')")"
+printf '[{"number":90,"state":"open","repository_url":"https://api.github.com/repos/other/lib"}]' >"$FAKE_GH/deps-87.json"
 printf '[{"number":90,"state":"open"}]' >"$FAKE_GH/deps-91.json"
 printf '[{"number":90,"state":"open"}]' >"$FAKE_GH/deps-95.json"
 printf '[{"number":90,"state":"open"},{"number":9,"state":"closed"}]' >"$FAKE_GH/deps-96.json"
@@ -359,7 +368,7 @@ check "unblocks: next line unchanged" "2 /implement #90 (you type it; user-invok
 check "unblocks: runner-up line unchanged" "3 /triage (you type it; user-invoked): 0 unlabelled, 1 needs-triage, replied needs-info: none" "$(runner "$out")"
 check "unblocks: for the next ticket" "#91 (High), #92 (Medium), #93, #96 (Low)" "$(line_of "$out" 'next unblocks')"
 check "unblocks: none for a runner-up that names no ticket" "" "$(line_of "$out" 'runner-up unblocks')"
-command rm -f "$FAKE_GH"/deps-9[1-9].json
+command rm -f "$FAKE_GH"/deps-9[1-9].json "$FAKE_GH/deps-87.json"
 
 # The next child and the runner-up each carry what they unblock.
 issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)" \
