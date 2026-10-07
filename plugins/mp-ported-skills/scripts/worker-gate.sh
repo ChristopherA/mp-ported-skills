@@ -46,15 +46,19 @@ matched=""
 classify_git_cmd=$real
 classify_base=$PWD
 classify_text="$*"
+classify_session=$PWD
+classify_distribution_sh="$here/../skills/supervise/scripts/distribution.sh"
 case "$prog" in
 git) classify_git "$@" ;;
 gh) classify_gh "$@" ;;
 esac
 [ -n "$matched" ] || exec "$real" "$@"
+classify_distribution
 
 action=$(grant_action "$matched")
 # A grant is read from the repo the command acts on: `git -C <dir>`'s, or
-# the working directory.
+# the working directory; for a push in a Distribution repo, its Project's
+# (#141).
 grant_dir=$PWD
 case "$matched" in git*) grant_dir=$classify_dir ;; esac
 if [ -n "$action" ] && sh "$here/../skills/supervise/scripts/grant.sh" --dir "$grant_dir" --action "$action" >/dev/null 2>&1; then

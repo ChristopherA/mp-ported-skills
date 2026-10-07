@@ -54,6 +54,40 @@ classify_git() {
     fi
 }
 
+# classify_distribution: after classify_git matched a push, name it as a
+# push in a Project's Distribution repo when classify_dir is one (#141).
+# Such a push is the Project's to grant, as `distribution-push`, never
+# `push`, and never by the Distribution repo's own supervision.md: matched
+# gains ` in Distribution repo <path>` and classify_dir becomes the
+# Project, where the caller looks the grant up. A repo is a Project's
+# Distribution repo when distribution.sh, run on the Project, names it; the
+# Project is looked for in the repo's worker marker (`project <path>`, which
+# launch.sh writes) and in classify_session, the session's own folder. A
+# marker only says where to look: distribution.sh reads the Project's
+# origin, so a marker a worker rewrote cannot make another repo one. The
+# caller sets classify_distribution_sh to distribution.sh's path and
+# classify_session; with no distribution.sh this does nothing.
+classify_distribution() {
+    [ -f "${classify_distribution_sh:-}" ] || return 0
+    case "$matched" in "git push"* | "git subtree push"*) ;; *) return 0 ;; esac
+    _ctop=$("${classify_git_cmd:-git}" -C "$classify_dir" rev-parse --show-toplevel 2>/dev/null) || return 0
+    _ctop=$(CDPATH= cd -- "$_ctop" 2>/dev/null && pwd -P) || return 0
+    _cmarker=$("${classify_git_cmd:-git}" -C "$_ctop" rev-parse --path-format=absolute --git-path mp-supervise-worker 2>/dev/null)
+    _cproj=""
+    [ ! -f "$_cmarker" ] || _cproj=$(sed -n 's/^project //p' "$_cmarker" | head -n 1)
+    for _cp in "$_cproj" "${classify_session:-}"; do
+        [ -n "$_cp" ] && [ -d "$_cp" ] || continue
+        _cp=$(CDPATH= cd -- "$_cp" && pwd -P) || continue
+        _cptop=$("${classify_git_cmd:-git}" -C "$_cp" rev-parse --show-toplevel 2>/dev/null) || continue
+        [ "$_cptop" != "$_ctop" ] || continue
+        if [ "$(sh "$classify_distribution_sh" --dir "$_cp" </dev/null 2>/dev/null)" = "$_ctop" ]; then
+            matched="$matched in Distribution repo $_ctop"
+            classify_dir=$_cp
+            return 0
+        fi
+    done
+}
+
 # gh_words <args after "gh">: sets gh_sub and gh_act to the subcommand and
 # its action, passing over a repo flag (-R <repo>, -R=<repo>, -R<repo>,
 # --repo <repo>, --repo=<repo>) wherever gh takes one: before the
@@ -158,6 +192,7 @@ classify_gh() {
 grant_action() { # <matched>
     case "$1" in
     "git push (piped"* | "gh (piped"*) ;;
+    *" in Distribution repo "*) echo distribution-push ;;
     "git push"* | "git subtree push"* | "git send-pack"*) echo push ;;
     "gh pr create"*) echo pr-create ;;
     "gh pr merge"*) echo pr-merge ;;

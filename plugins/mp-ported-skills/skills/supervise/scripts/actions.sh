@@ -40,7 +40,8 @@
 # worker commits locally but cannot push stays ungranted, reported as a
 # `note` line naming it as ignored, not silently treated as absent.
 # A branch line's action is always push. A command line's action is the
-# one the hook's own scan names for it (push, pr-create, pr-merge,
+# one the hook's own scan names for it (push, distribution-push for a push
+# in the Project's Distribution repo (#141), pr-create, pr-merge,
 # issue-close, issue-comment or issue-create), or, when the scan names
 # none, a light word-token guess from its text and the recorded op, good
 # enough to cite a grant, not an enforcement check; a gh write neither
@@ -225,7 +226,7 @@ calls() {
                   + (if $ops != "" then " -- " + $ops else "" end))}' "$1" 2>/dev/null
 }
 
-# action_for <cmd> <ops>: push, pr-create, pr-merge, issue-close,
+# action_for <cmd> <ops>: push, distribution-push, pr-create, pr-merge, issue-close,
 # issue-comment, issue-create, or empty. The action of the form the hook
 # itself matched, so the line cites the grant the hook would have let the
 # command through on (#110). When the hook matched no form a grant names --

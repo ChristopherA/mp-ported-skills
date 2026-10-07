@@ -129,6 +129,26 @@ commit_file "$repo" docs/agents/supervision.md \
 push_main "$repo"
 check "pr-merge: cites the action" "pr-merge" "$(grant pr-merge)"
 
+# distribution-push (#141), a grant of its own: push does not cover it, nor
+# it push.
+commit_file "$repo" docs/agents/supervision.md \
+'## Grants
+
+- distribution-push: the code, once tests pass
+' "grant distribution-push"
+push_main "$repo"
+check "distribution-push: cites the whole bullet" "distribution-push: the code, once tests pass" "$(grant distribution-push)"
+out=$(grant push); rc=$?
+check "distribution-push: push not granted" "1 " "$rc $out"
+commit_file "$repo" docs/agents/supervision.md \
+'## Grants
+
+- push
+' "grant push only"
+push_main "$repo"
+out=$(grant distribution-push); rc=$?
+check "push: distribution-push not granted" "1 " "$rc $out"
+
 # issue-comment and issue-create (#110), each granted on its own.
 commit_file "$repo" docs/agents/supervision.md \
 '## Grants

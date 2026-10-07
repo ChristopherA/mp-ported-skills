@@ -1505,7 +1505,7 @@ check "actions: config dir required" "1" "$?"
 # matching branch and command lines, which read granted instead of
 # ungranted (#58); a fresh repo and remote for each case, so the earlier
 # checks above stay exact and the two grant cases do not share history.
-new_grant_repo() { # <folder var name> <grant file content>: a repo with the
+new_grant_repo() { # <folder var name> <grant file content> [dist path]: a repo with the
     # grant committed and pushed to origin/main before any worker commit,
     # then one worker commit pushed only to a topic branch, never main.
     # It resets gstart to this repo's commit, so a check runs actions.sh on
@@ -1523,7 +1523,8 @@ new_grant_repo() { # <folder var name> <grant file content>: a repo with the
     git -C "$grepo" remote set-head origin main
     mkdir -p "$grepo/docs/agents"
     printf '%s' "$2" >"$grepo/docs/agents/supervision.md"
-    repo_git "$grepo" add docs/agents/supervision.md
+    [ -z "${3:-}" ] || printf '%s\n' "$3" >"$grepo/docs/agents/distribution-repo.md"
+    repo_git "$grepo" add docs/agents
     repo_git "$grepo" commit -q -m "grant"
     repo_git "$grepo" push -q origin main 2>/dev/null
     gstart=$(git -C "$grepo" rev-parse HEAD)
@@ -1649,6 +1650,41 @@ command succeeded ungranted: gh pr new --fill
 command succeeded ungranted: gh pr -R o/r new --fill" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo6" --start "$gstart" </dev/null | grep '^command')"
 
+# A push in the Project's Distribution repo (#141) cites the Project's
+# distribution-push grant, and push covers only the Project's own repo.
+gdist="$work/grant-dist"
+git init -q -b main "$gdist"
+repo_git "$gdist" commit -q --allow-empty -m start
+gdist=$(CDPATH= cd -- "$gdist" && pwd -P)
+{
+    bash_call d1 "git -C $gdist push origin main"
+    bash_call d2 'git push origin main'
+} >"$cfg/projects/-work-project/$sid.jsonl"
+new_grant_repo grepo7 '## Grants
+
+- push: the Project'"'"'s tickets
+' "$gdist"
+check "actions: a push grant alone leaves the Distribution repo's push ungranted" \
+    "command succeeded ungranted: git -C $gdist push origin main
+command succeeded granted (push: the Project's tickets): git push origin main" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo7" --start "$gstart" </dev/null | grep '^command')"
+new_grant_repo grepo8 '## Grants
+
+- distribution-push: the code
+' "$gdist"
+check "actions: a distribution-push grant cites the Distribution repo's push" \
+    "command succeeded granted (distribution-push: the code): git -C $gdist push origin main
+command succeeded ungranted: git push origin main" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo8" --start "$gstart" </dev/null | grep '^command')"
+new_grant_repo grepo9 '## Grants
+
+- push
+'
+check "actions: with no Distribution repo, a push anywhere reads push, as before" \
+    "command succeeded granted (push): git -C $gdist push origin main
+command succeeded granted (push): git push origin main" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo9" --start "$gstart" </dev/null | grep '^command')"
+
 # A command the hook matches no form a grant names in reaches action_for's
 # guess. A PR op Claude Code recorded lists it; sudo hides the gh form from
 # the hook, and a piped push is a form no grant names.
@@ -1763,12 +1799,29 @@ $dist
 --disallowedTools" "$(sed -n '/^--add-dir$/,/^--disallowedTools$/p' "$fake/args")"
 check "launch dist: runs in the Project folder" "$dproj" "$(command cat "$fake/cwd")"
 check "launch dist: the worker is told the repo" "This Project's code lives in its Distribution repo, $dist, named in docs/agents/distribution-repo.md. Make the ticket's code changes and commits there, by path (\`git -C $dist\`), on its current branch, with no new branch or worktree; read the ticket and the Project's docs from this folder." \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 2 | head -n 1)"
+check "launch dist: the worker is told a Distribution repo push needs distribution-push (#141)" "A push in the Distribution repo is covered only by a distribution-push grant, never by push (#141). With none, do not push it: end your turn on \`Waiting on: git -C $dist push origin main\`, or, when this Project's push waits too, on \`Waiting on: git push origin main; git -C $dist push origin main\`." \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 1)"
 check "launch dist: the Project's marker names the repo" "c2a368ee
 distribution $dist" "$(command cat "$dproj_marker")"
 check "launch dist: the repo's marker names the Project" "c2a368ee
 project $dproj" "$(command cat "$dist_marker")"
 clear_markers
+# A distribution-push grant is listed, and the grants text says which push
+# is which.
+printf '## Grants\n\n- push\n- distribution-push: the code\n' >"$dproj/docs/agents/supervision.md"
+dgit "$dproj" add docs
+dgit "$dproj" commit -m "Grant both pushes"
+dgit "$dproj" push origin main
+launch_dir "$dproj" --ticket 56 >/dev/null 2>&1
+check "launch dist: the grants name distribution-push, and which push is which" "You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/main (push is git push in this Project's repo, distribution-push is git push in its Distribution repo; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create):
+- push
+- distribution-push: the code" \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | head -n 3)"
+clear_markers
+dgit "$dproj" rm -q docs/agents/supervision.md
+dgit "$dproj" commit -m "Drop the grants"
+dgit "$dproj" push origin main
 
 echo dirty >"$dist/x"
 out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?

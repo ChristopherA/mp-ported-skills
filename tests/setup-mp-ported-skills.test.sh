@@ -274,6 +274,7 @@ check "supervision-doc write: exit 0" "0" "$rc"
 check "supervision-doc write: file created" "./docs/agents/supervision.md" "$(cd "$proj" && find . -type f)"
 has "supervision-doc write: has a Grants heading" "## Grants" "$(cat "$proj/docs/agents/supervision.md")"
 has "supervision-doc write: says an empty file grants nothing" "grants nothing" "$(cat "$proj/docs/agents/supervision.md")"
+has "supervision-doc write: lists distribution-push" "       distribution-push" "$(cat "$proj/docs/agents/supervision.md")"
 has "supervision-doc write: says what it did" "written, in project $proj" "$out"
 
 setup "$v1" "$p" --project-dir "$proj" report

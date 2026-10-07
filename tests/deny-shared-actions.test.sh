@@ -231,6 +231,59 @@ check "git -C into an ungranted repo is refused from a granted one" "deny" \
     "$(decision 0 auto "git -C $outside push" "$granted")"
 check "a push piped into a shell is never granted, even alongside a push grant" "deny" \
     "$(decision 0 auto 'echo git push | sh' "$granted")"
+# A cd before the git moves the repo the grant is read from (#141).
+check "cd into an ungranted repo, then push, is refused from a granted one" "deny" \
+    "$(decision 0 auto "cd $outside && git push" "$granted")"
+check "cd into a granted repo, then push, goes through from elsewhere" "" \
+    "$(decision 0 auto "cd $granted && git push" "$outside")"
+
+# A Project's Distribution repo (#141): a push there needs the Project's
+# distribution-push grant, never push, and never the Distribution repo's
+# own supervision.md.
+dgit_in() { d=$1; shift; git -C "$d" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@"; }
+pushed_repo() { # <dir> <grants>: a repo with <grants> in supervision.md on origin/main
+    git init -q --bare "$1.git"
+    git init -q -b main "$1"
+    mkdir -p "$1/docs/agents"
+    printf '## Grants\n\n%s\n' "$2" >"$1/docs/agents/supervision.md"
+    dgit_in "$1" add docs
+    dgit_in "$1" commit -q -m grants
+    dgit_in "$1" remote add origin "$1.git"
+    dgit_in "$1" push -q origin main 2>/dev/null
+    dgit_in "$1" remote set-head origin main
+}
+hproj="$outside/hproj"
+hdist="$outside/hdist"
+pushed_repo "$hdist" '- push'
+pushed_repo "$hproj" '- push'
+printf '../hdist\n' >"$hproj/docs/agents/distribution-repo.md"
+dgit_in "$hproj" add docs
+dgit_in "$hproj" commit -q -m dist
+dgit_in "$hproj" push -q origin main 2>/dev/null
+hdist_real=$(cd "$hdist" && pwd -P)
+check "push grant alone: a push into the Distribution repo is refused" "deny" \
+    "$(decision 0 auto "git -C $hdist push origin main" "$hproj")"
+check "push grant alone: the refusal names the Distribution repo" \
+    "A background session in auto mode cannot run 'git push in Distribution repo $hdist_real' on its own (#66): main has no branch protection, and the auto-mode classifier makes a judgment call here, not a rule. Route this through a standing grant in docs/agents/supervision.md (#58), driven by the supervisor, or leave it for the maintainer's own interactive session." \
+    "$(reason 0 auto "git -C $hdist push origin main" "$hproj")"
+check "push grant alone: a cd into the Distribution repo, then push, is refused" "deny" \
+    "$(decision 0 auto "cd ../hdist && git push" "$hproj")"
+check "push grant alone: the Project's own push goes through" "" \
+    "$(decision 0 auto "git push origin main" "$hproj")"
+check "push grant alone: with no marker, a session in the Distribution repo reads its own grants" "" \
+    "$(decision 0 auto "git push origin main" "$hdist")"
+printf 'c2a368ee\nproject %s\n' "$hproj" >"$(git -C "$hdist" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
+check "push grant alone: with the worker's marker, a session in the Distribution repo is refused" "deny" \
+    "$(decision 0 auto "git push origin main" "$hdist")"
+printf '## Grants\n\n- distribution-push\n' >"$hproj/docs/agents/supervision.md"
+dgit_in "$hproj" commit -q -am 'distribution-push only'
+dgit_in "$hproj" push -q origin main 2>/dev/null
+check "distribution-push grant: a push into the Distribution repo goes through" "" \
+    "$(decision 0 auto "git -C $hdist push origin main" "$hproj")"
+check "distribution-push grant: and from a session in it, by its marker" "" \
+    "$(decision 0 auto "git push origin main" "$hdist")"
+check "distribution-push grant alone: the Project's own push is refused" "deny" \
+    "$(decision 0 auto "git push origin main" "$hproj")"
 
 ungranted=$(mktemp -d)
 git init -q -b main "$ungranted"

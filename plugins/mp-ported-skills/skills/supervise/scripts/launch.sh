@@ -117,6 +117,8 @@
 # access the launch declares and checks, not one auto mode was seen to
 # require. The marker is written in both repos, each naming the other on
 # its second line, so the read-only hook holds the supervisor out of both.
+# The grants text then names distribution-push, the grant a push in that
+# repo needs (#141), and the Waiting on line for that push.
 #
 # Exits 0 launched and confirmed; 1 not launched; 2 launched, failed a check
 # and stopped.
@@ -212,6 +214,7 @@ DIST=$(sh "$SCRIPT_DIR/distribution.sh" --dir "$DIR" </dev/null) ||
 if [ -n "$DIST" ]; then
     [ -d "$DIST" ] || fail "Distribution repo $DIST, named in docs/agents/distribution-repo.md, is missing; not launched"
     check_repo "$DIST" "Distribution repo "
+    dist_default=$default
     [ "$(git -C "$DIST" rev-parse --show-toplevel)" != "$(git -C "$DIR" rev-parse --show-toplevel)" ] ||
         fail "Distribution repo $DIST is the Project's own repo; name another repo in docs/agents/distribution-repo.md, or remove it; not launched"
 fi
@@ -247,7 +250,9 @@ marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-
 # grant, and a note (a grant committed only locally) is passed on.
 errs=$(mktemp) || fail "mktemp failed, so the grants cannot be read; not launched"
 granted=""
-for action in push pr-create pr-merge issue-close issue-comment issue-create; do
+actions="push pr-create pr-merge issue-close issue-comment issue-create"
+[ -z "$DIST" ] || actions="push distribution-push pr-create pr-merge issue-close issue-comment issue-create"
+for action in $actions; do
     cited=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$action" </dev/null 2>"$errs") &&
         granted="$granted
 - $cited"
@@ -259,8 +264,10 @@ for action in push pr-create pr-merge issue-close issue-comment issue-create; do
     command cat "$errs" >&2
 done
 command rm -f "$errs"
+pushes="push is git push"
+[ -z "$DIST" ] || pushes="push is git push in this Project's repo, distribution-push is git push in its Distribution repo"
 if [ -n "$granted" ]; then
-    GRANTS="You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/$default (push is git push; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create):$granted
+    GRANTS="You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/$default ($pushes; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create):$granted
 A shared action one of these grants covers goes ahead without asking: when /implement or a capture reaches it, take it, and do not end your turn to ask first."
 else
     GRANTS="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/$default, holds no standing grant."
@@ -268,7 +275,8 @@ fi
 GRANTS="$GRANTS
 A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin $default\`."
 [ -z "$DIST" ] || GRANTS="$GRANTS
-This Project's code lives in its Distribution repo, $DIST, named in docs/agents/distribution-repo.md. Make the ticket's code changes and commits there, by path (\`git -C $DIST\`), on its current branch, with no new branch or worktree; read the ticket and the Project's docs from this folder."
+This Project's code lives in its Distribution repo, $DIST, named in docs/agents/distribution-repo.md. Make the ticket's code changes and commits there, by path (\`git -C $DIST\`), on its current branch, with no new branch or worktree; read the ticket and the Project's docs from this folder.
+A push in the Distribution repo is covered only by a distribution-push grant, never by push (#141). With none, do not push it: end your turn on \`Waiting on: git -C $DIST push origin $dist_default\`, or, when this Project's push waits too, on \`Waiting on: git push origin $default; git -C $DIST push origin $dist_default\`."
 
 # The worker's name (#103), in characters, not bytes, whatever the locale.
 top=$(git -C "$DIR" rev-parse --show-toplevel)

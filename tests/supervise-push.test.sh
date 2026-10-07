@@ -41,13 +41,15 @@ repo_git() { # <folder> <git args...> -- git there, unsigned, with a test identi
     git -C "$repo_dir" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@"
 }
 
-# The sweep stub: records its arguments, prints a hit and exits 1 when
-# $work/sweep-hit exists.
+# The sweep stub: records its arguments, and its folder with them in
+# sweep-log; prints a hit and exits 1 when $work/sweep-hit exists, empty or
+# naming the folder it runs in.
 sweep="$work/sweep.sh"
 cat >"$sweep" <<EOF
 #!/bin/sh
 printf '%s\n' "\$*" >"$work/sweep-args"
-if [ -f "$work/sweep-hit" ]; then echo 'docs/x.md:3: private path'; exit 1; fi
+printf '%s %s\n' "\$(pwd -P)" "\$*" >>"$work/sweep-log"
+if [ -f "$work/sweep-hit" ] && { [ ! -s "$work/sweep-hit" ] || [ "\$(command cat "$work/sweep-hit")" = "\$(pwd -P)" ]; }; then echo 'docs/x.md:3: private path'; exit 1; fi
 echo 'sweep: clean'
 EOF
 chmod +x "$sweep"
@@ -76,7 +78,7 @@ new_project() {
     repo_git "$project" commit -q -am "Bump plugin to 0.8.23"
     head=$(git -C "$project" rev-parse HEAD)
     remote_main=$start
-    command rm -f "$work/sweep-hit" "$work/sweep-args"
+    command rm -f "$work/sweep-hit" "$work/sweep-args" "$work/sweep-log"
 }
 push() { # [args...] -- push.sh for worker 3fb49286 in $project, its output
     sh "$scripts/push.sh" --dir "$project" --id 3fb49286 --start "$start" "$@" </dev/null 2>&1
@@ -248,6 +250,158 @@ command cp -f "$CLAUDE_CONFIG_DIR/jobs/3fb49286/state.json" "$CLAUDE_CONFIG_DIR/
 check "actions: another worker's run is not covered" \
     "branch origin/main pushed by someone else: holds the worker's commits" \
     "$(sh "$scripts/actions.sh" --id 4aa00000 --dir "$project" --start "$start" </dev/null)"
+
+# --- a Project with a Distribution repo (#141) ------------------------------
+# new_dist [project commits]: a Project in $project whose origin names
+# $dist in docs/agents/distribution-repo.md, with $start on origin/main and
+# <project commits> (0 by default) of the worker's on top; and $dist, with
+# its own remote $dist_remote, $dist_start on origin/main and the worker's
+# two commits, the second bumping its plugin from 1.2.3 to 1.2.4.
+new_dist() {
+    new_project
+    repo_git "$project" reset -q --hard "$start"
+    dist="$work/dist$n"
+    dist_remote="$work/dist$n.git"
+    mkdir -p "$project/docs/agents"
+    printf '%s\n' "$dist" >"$project/docs/agents/distribution-repo.md"
+    repo_git "$project" add docs
+    repo_git "$project" commit -q -m "Name the Distribution repo"
+    repo_git "$project" push -q origin main 2>/dev/null
+    git -C "$project" remote set-head origin main
+    start=$(git -C "$project" rev-parse HEAD)
+    remote_main=$start
+    i=0
+    while [ "$i" -lt "${1:-0}" ]; do
+        i=$((i + 1))
+        repo_git "$project" commit -q --allow-empty -m "Capture notes $i"
+    done
+    head=$(git -C "$project" rev-parse HEAD)
+    git init -q --bare "$dist_remote"
+    git init -q -b main "$dist"
+    mkdir -p "$dist/plugin/.claude-plugin"
+    printf '{"name": "d", "version": "1.2.3"}\n' >"$dist/plugin/.claude-plugin/plugin.json"
+    repo_git "$dist" add -A
+    repo_git "$dist" commit -q -m "dist start"
+    repo_git "$dist" remote add origin "$dist_remote"
+    repo_git "$dist" push -q -u origin main 2>/dev/null
+    dist_start=$(git -C "$dist" rev-parse HEAD)
+    echo code >"$dist/code.txt"
+    repo_git "$dist" add code.txt
+    repo_git "$dist" commit -q -m "Write the code"
+    printf '{"name": "d", "version": "1.2.4"}\n' >"$dist/plugin/.claude-plugin/plugin.json"
+    repo_git "$dist" commit -q -am "Bump plugin to 1.2.4"
+    dist_head=$(git -C "$dist" rev-parse HEAD)
+}
+dpush() { # [args...] -- push.sh for worker 3fb49286 with both starts
+    sh "$scripts/push.sh" --dir "$project" --id 3fb49286 --start "$start" --dist-start "$dist_start" "$@" </dev/null 2>&1
+}
+dshort() { git -C "$dist" rev-parse --short "$1"; }
+nothing_pushed() { # <name>: neither remote moved
+    check "$1: the Project's remote did not move" "$remote_main" "$(git -C "$remote" rev-parse main)"
+    check "$1: the Distribution repo's remote did not move" "$dist_start" "$(git -C "$dist_remote" rev-parse main)"
+}
+
+# Commits in both repos: one check covers both, each line naming its repo.
+new_dist 1
+out=$(dpush --check --sweep "$sweep")
+check "dist check: exits 0" "0" "$?"
+check "dist check: both repos, each line naming its repo" "push project main to origin/main: $(short "$start")..$(short "$head")
+$(git -C "$project" log --format='commit project %h %s' "$start..HEAD")
+ok project marker: no worker marker in the checkout
+ok project tree: clean
+ok project fast-forward: 1 ahead of origin/main, 0 behind
+ok project start: $(short "$start") is on origin/main
+ok project version: no plugin version change
+ok project sweep: clean over $(short "$start")..$(short "$head")
+push distribution main to origin/main: $(dshort "$dist_start")..$(dshort "$dist_head")
+$(git -C "$dist" log --format='commit distribution %h %s' "$dist_start..HEAD")
+ok distribution marker: no worker marker in the checkout
+ok distribution tree: clean
+ok distribution fast-forward: 2 ahead of origin/main, 0 behind
+ok distribution start: $(dshort "$dist_start") is on origin/main
+ok distribution version: plugin/.claude-plugin/plugin.json 1.2.3 -> 1.2.4 (patch)
+ok distribution sweep: clean over $(dshort "$dist_start")..$(dshort "$dist_head")" "$out"
+check "dist check: each repo is swept over its own range" "$project --range $start..$head
+$dist --range $dist_start..$dist_head" "$(command cat "$work/sweep-log")"
+nothing_pushed "dist check"
+
+out=$(dpush --sweep "$sweep")
+check "dist push: exits 0" "0" "$?"
+check "dist push: names both pushes" "pushed origin/main $(short "$start")..$(short "$head")
+pushed distribution:origin/main $(dshort "$dist_start")..$(dshort "$dist_head")" "$(printf '%s\n' "$out" | grep '^pushed')"
+check "dist push: the Project's remote has its commit" "$head" "$(git -C "$remote" rev-parse main)"
+check "dist push: the Distribution repo's remote has its commits" "$dist_head" "$(git -C "$dist_remote" rev-parse main)"
+check "dist push: both recorded in the Project, the Distribution repo's by name" "3fb49286 origin/main $start $head
+3fb49286 distribution:origin/main $dist_start $dist_head" \
+    "$(sed 's/ [^ ]*$//' "$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-pushed)")"
+mkdir -p "$CLAUDE_CONFIG_DIR/jobs/3fb49286" "$CLAUDE_CONFIG_DIR/projects/p"
+printf '{"sessionId": "s1", "children": []}\n' >"$CLAUDE_CONFIG_DIR/jobs/3fb49286/state.json"
+: >"$CLAUDE_CONFIG_DIR/projects/p/s1.jsonl"
+check "dist push: actions.sh names the Project's branch as the supervisor's push" \
+    "branch origin/main pushed by the supervisor on the maintainer's approval: holds the worker's commits" \
+    "$(sh "$scripts/actions.sh" --id 3fb49286 --dir "$project" --start "$start" </dev/null)"
+
+# Only the Distribution repo has commits: the Project is passed over.
+new_dist
+out=$(dpush --sweep "$sweep")
+check "dist only: exits 0" "0" "$?"
+check "dist only: the Project has nothing to go" "ok project fast-forward: nothing to push, 0 ahead of origin/main" \
+    "$(printf '%s\n' "$out" | grep '^ok project fast-forward')"
+check "dist only: only the Distribution repo is pushed" "pushed distribution:origin/main $(dshort "$dist_start")..$(dshort "$dist_head")" \
+    "$(printf '%s\n' "$out" | grep '^pushed')"
+check "dist only: the Distribution repo's remote has its commits" "$dist_head" "$(git -C "$dist_remote" rev-parse main)"
+
+# A failing check in either repo pushes neither.
+dist_refused() { # <name> <expected fail lines>
+    out=$(dpush --sweep "$sweep")
+    check "$1: exits 2" "2" "$?"
+    check "$1: says which" "$2" "$(printf '%s\n' "$out" | grep '^fail')"
+    nothing_pushed "$1"
+}
+new_dist 1
+printf '%s\n' "$dist" >"$work/sweep-hit"
+dist_refused "dist sweep hits" "fail distribution sweep: exit 1 over $(dshort "$dist_start")..$(dshort "$dist_head")"
+check "dist sweep hits: its output is shown" "  docs/x.md:3: private path" "$(dpush --sweep "$sweep" | grep '^  ')"
+
+new_dist 1
+printf '{"name": "d", "version": "1.3.0"}\n' >"$dist/plugin/.claude-plugin/plugin.json"
+repo_git "$dist" commit -q --amend -am "Bump plugin to 1.3.0"
+dist_refused "dist minor bump" "fail distribution version: plugin/.claude-plugin/plugin.json 1.2.3 -> 1.3.0 is past a patch bump"
+
+new_dist 1
+printf 'x\n' >"$(git -C "$dist" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
+dist_refused "dist marker in place" "fail distribution marker: worker x still holds the checkout; stop it and release its marker first"
+
+new_dist 1
+echo dirty >>"$dist/code.txt"
+dist_refused "dist dirty tree" "fail distribution tree: 1 uncommitted path"
+
+new_dist 1
+echo dirty >>"$project/file.txt"
+dist_refused "project dirty, dist clean" "fail project tree: 1 uncommitted path"
+
+new_dist
+repo_git "$dist" reset -q --hard "$dist_start"
+dist_refused "nothing in either" "fail fast-forward: nothing to push in the Project or its Distribution repo"
+
+# The second push failing leaves the first in place, and says so.
+new_dist 1
+printf '#!/bin/sh\nexit 1\n' >"$dist_remote/hooks/pre-receive"
+chmod +x "$dist_remote/hooks/pre-receive"
+out=$(dpush --sweep "$sweep")
+check "dist push refused by its remote: exits 3" "3" "$?"
+check "dist push refused by its remote: names what already went" "Error: origin/main was already pushed" \
+    "$(printf '%s\n' "$out" | tail -n 1)"
+
+# Usage: --dist-start goes with a Distribution repo, and only with one.
+new_dist 1
+out=$(push --sweep "$sweep")
+check "dist usage: --dist-start is required" "1 Error: --dist-start is required: $project names Distribution repo $dist (give the snapshot's dist head line)" \
+    "$? $(printf '%s\n' "$out" | tail -n 1)"
+nothing_pushed "dist usage"
+new_project
+out=$(sh "$scripts/push.sh" --dir "$project" --id 3fb49286 --start "$start" --dist-start "$start" --sweep "$sweep" </dev/null 2>&1)
+check "dist usage: --dist-start with no Distribution repo" "1 Error: --dist-start given, but $project names no Distribution repo" "$? $out"
 
 echo "supervise-push: $pass passed, $fail failed"
 [ "$fail" = 0 ]

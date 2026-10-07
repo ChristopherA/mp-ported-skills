@@ -194,6 +194,61 @@ check "an ungranted action beside a grant is refused" "exit=1" \
 check "gh api is never granted" "exit=1" \
     "$(last "$(worker 0 granted 'gh api -X PUT repos/o/r/pulls/5/merge')")"
 
+# A Project's Distribution repo (#141): a push there needs the Project's
+# distribution-push grant. push covers only the Project's own repo, and the
+# Distribution repo's own supervision.md grants nothing for it.
+repo proj
+mkdir -p proj/docs/agents
+printf '## Grants\n\n- push\n' >proj/docs/agents/supervision.md
+printf '../dist\n' >proj/docs/agents/distribution-repo.md
+git -C proj add docs
+git -C proj -c commit.gpgsign=false commit -q -m 'grants and dist'
+git -C proj push -q origin main 2>/dev/null
+repo dist
+mkdir -p dist/docs/agents
+printf '## Grants\n\n- push\n- distribution-push\n' >dist/docs/agents/supervision.md
+git -C dist add docs
+git -C dist -c commit.gpgsign=false commit -q -m 'its own grants'
+git -C dist push -q origin main 2>/dev/null
+dist_real=$(cd dist && pwd -P)
+printf 'c2a368ee\nproject %s\n' "$(cd proj && pwd -P)" >"$(git -C dist rev-parse --path-format=absolute --git-path mp-supervise-worker)"
+git -C dist -c commit.gpgsign=false commit -q --allow-empty -m code
+before=$(git -C dist.git rev-parse main)
+
+out=$(worker 0 proj 'git -C ../dist push -q origin main')
+check "push grant alone: a push in the Distribution repo is refused" "exit=1" "$(last "$out")"
+check "push grant alone: the refusal names the Distribution repo" "1" \
+    "$(printf '%s\n' "$out" | grep -c "cannot run 'git push in Distribution repo $dist_real' on its own")"
+check "push grant alone: refused from inside the Distribution repo too" "exit=1" \
+    "$(last "$(worker 0 dist 'git push -q origin main')")"
+check "push grant alone: refused from a script" "exit=1" \
+    "$(last "$(worker 0 proj 'sh -c "cd ../dist && git push -q origin main"')")"
+check "push grant alone: the Distribution repo's remote did not move" "$before" "$(git -C dist.git rev-parse main)"
+git -C proj -c commit.gpgsign=false commit -q --allow-empty -m capture
+check "push grant alone: the Project's own push goes through" "exit=0" \
+    "$(last "$(worker 0 proj 'git push -q origin main')")"
+check "push grant alone: the Project's remote moved" "$(git -C proj rev-parse main)" "$(git -C proj.git rev-parse main)"
+# The marker only says where to look: a Project named there whose origin
+# does not name the repo leaves it gated by its own grants, as before.
+printf 'c2a368ee\nproject %s\n' "$work/plain" >"$(git -C dist rev-parse --path-format=absolute --git-path mp-supervise-worker)"
+check "a marker naming another Project does not make the repo its Distribution repo" "exit=0" \
+    "$(last "$(worker 0 dist 'git push -q origin main')")"
+git -C dist.git update-ref refs/heads/main "$before"
+printf 'c2a368ee\nproject %s\n' "$(cd proj && pwd -P)" >"$(git -C dist rev-parse --path-format=absolute --git-path mp-supervise-worker)"
+
+printf '## Grants\n\n- distribution-push: the code, once tests pass\n' >proj/docs/agents/supervision.md
+git -C proj -c commit.gpgsign=false commit -q -am 'grant distribution-push only'
+git -C proj push -q origin main 2>/dev/null
+check "distribution-push grant: a push in the Distribution repo goes through" "exit=0" \
+    "$(last "$(worker 0 proj 'git -C ../dist push -q origin main')")"
+check "distribution-push grant: the Distribution repo's remote moved" "$(git -C dist rev-parse main)" "$(git -C dist.git rev-parse main)"
+git -C dist -c commit.gpgsign=false commit -q --allow-empty -m more-code
+check "distribution-push grant: from inside the Distribution repo too" "exit=0" \
+    "$(last "$(worker 0 dist 'git push -q origin main')")"
+git -C proj -c commit.gpgsign=false commit -q --allow-empty -m capture2
+check "distribution-push grant alone: the Project's own push is refused" "exit=1" \
+    "$(last "$(worker 0 proj 'git push -q origin main')")"
+
 # The maintainer's own session: if the env file reached it, the wrappers
 # still let everything through.
 git -C plain -c commit.gpgsign=false commit -q --allow-empty -m attended

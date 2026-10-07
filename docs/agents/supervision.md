@@ -15,6 +15,10 @@ itself one by editing this file.
 <!-- One grant per line, as `- <action>` or `- <action>: <note>`.
      <action> is one of:
        push           git push (also git subtree push, git send-pack)
+                      in this repo
+       distribution-push
+                      the same, in the Distribution repo that
+                      docs/agents/distribution-repo.md names
        pr-create      gh pr create
        pr-merge       gh pr merge
        issue-close    gh issue close

@@ -40,6 +40,9 @@
 # program by basename, so `/usr/bin/git push` counts, treats
 # `git send-pack` and `git subtree push` as pushes, and resolves a git
 # alias given with `-c alias.X=...` or found in git config.
+# A `cd <dir>` before the git moves the repo the grant is read from. A push
+# in a Project's Distribution repo needs the Project's distribution-push
+# grant, not push (classify_distribution, #141).
 # It does not parse quoting, so a separator inside a quoted string splits
 # too: `git commit -m "a; git push"` is refused. In an unattended session
 # that false refusal costs a detour through the supervisor, where a miss
@@ -83,6 +86,8 @@ here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 classify_git_cmd=git
 classify_base=$cwd
 classify_text=$cmd
+classify_session=$cwd
+classify_distribution_sh="$here/../skills/supervise/scripts/distribution.sh"
 
 split=$(printf '%s' "$cmd" | sed -E 's/(&&|\|\||[;&|()`])/\n/g')
 
@@ -181,7 +186,24 @@ for seg in $split; do
     done
     [ $# -gt 0 ] || continue
     case "${1##*/}" in
-    git-push | git-send-pack) matched="git push" ;;
+    cd)
+        # A later git runs where cd went (`cd <repo> && git push`), so the
+        # grant is read there (#141). `cd` alone goes home; `cd -` is not
+        # followed.
+        shift
+        [ "${1:-}" != -- ] || shift
+        case "${1:-}" in
+        '' | '~') classify_base=$HOME ;;
+        -*) ;;
+        /*) classify_base=$1 ;;
+        '~/'*) classify_base="$HOME/${1#\~/}" ;;
+        *) classify_base="$classify_base/$1" ;;
+        esac
+        ;;
+    git-push | git-send-pack)
+        matched="git push"
+        classify_dir=$classify_base
+        ;;
     git)
         shift
         classify_git "$@"
@@ -210,6 +232,10 @@ fi
 
 [ -n "$matched" ] || exit 0
 
+# A push in a Project's Distribution repo is named as one, and granted by
+# the Project as distribution-push (#141).
+classify_distribution
+
 # A comment's body can hold a separator (`--body "a; b" --edit-last`), and
 # the scan above then classified only the words before it. Editing or
 # deleting a comment is not the comment grant's (#113), so look for the
@@ -232,8 +258,9 @@ fi
 # variable can only ever make this hook refuse more, never less.
 action=""
 [ -n "${MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS:-}" ] || action=$(grant_action "$matched")
-# A grant is read from the repo the command acts on: `git -C <dir>`'s, or
-# the session's working directory.
+# A grant is read from the repo the command acts on: `git -C <dir>`'s, the
+# folder a `cd` before it went to, or the session's working directory; for a
+# push in a Distribution repo, its Project's (#141).
 grant_dir=$cwd
 case "$matched" in git*) grant_dir=$classify_dir ;; esac
 if [ -n "$action" ]; then
