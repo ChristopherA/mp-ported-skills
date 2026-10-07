@@ -201,6 +201,10 @@ check "case 7: needs-info awaiting reporter" "7 nothing in motion" "$(next "$(ru
 # Past 100 comments, the newest is the second page's last.
 printf '[{"user":{"login":"me"}},{"user":{"login":"reporter"}}]' >"$FAKE_GH/comments-41.page2.json"
 check "case 3: needs-info replied on the second page" "3 /triage (you type it; user-invoked): 0 unlabelled, 0 needs-triage, replied needs-info: #41" "$(next "$(run)")"
+# And the pages are read as one list, not each page's last on its own.
+printf '[{"user":{"login":"me"}},{"user":{"login":"reporter"}}]' >"$FAKE_GH/comments-41.json"
+printf '[{"user":{"login":"reporter"}},{"user":{"login":"me"}}]' >"$FAKE_GH/comments-41.page2.json"
+check "case 7: needs-info answered on the second page" "7 nothing in motion" "$(next "$(run)")"
 command rm -f "$FAKE_GH/comments-41.page2.json"
 printf 'not json' >"$FAKE_GH/comments-41.json"
 check "case 7: comments unreadable, not replied" "7 nothing in motion" "$(next "$(run)")"
