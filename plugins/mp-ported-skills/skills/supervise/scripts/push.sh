@@ -42,8 +42,11 @@
 # a `note` line follows when that write fails. A Distribution repo's push
 # is recorded there too, as `distribution:<upstream>`, so it names no
 # branch of DIR's. With two repos to push, both are tried with --dry-run
-# before either is pushed, so a remote that would refuse one pushes
-# neither.
+# before either is pushed, so a remote that cannot be reached, or a ref it
+# would refuse as not a fast-forward, pushes neither. A dry run runs no hook
+# or branch rule on the remote, and two remotes cannot be pushed as one:
+# when the second push is still refused, the first stays pushed, and the
+# error says so.
 # A push is refused in a background session (CLAUDE_CODE_SESSION_ATTENDED=0):
 # there a push goes only on a standing grant.
 #
@@ -284,4 +287,4 @@ printf '%s\n' "$pushes" | {
         printf '%s %s %s %s %s\n' "$ID" "$name" "$up" "$tip" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$record" ||
             echo "note the push was not recorded in $record, so actions.sh will read $name as the worker's ungranted push"
     done
-}
+} || exit 3

@@ -251,7 +251,7 @@ marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-
 errs=$(mktemp) || fail "mktemp failed, so the grants cannot be read; not launched"
 granted=""
 actions="push pr-create pr-merge issue-close issue-comment issue-create"
-[ -z "$DIST" ] || actions="push distribution-push pr-create pr-merge issue-close issue-comment issue-create"
+[ -z "$DIST" ] || actions="$actions distribution-push"
 for action in $actions; do
     cited=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$action" </dev/null 2>"$errs") &&
         granted="$granted

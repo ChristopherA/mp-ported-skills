@@ -226,10 +226,10 @@ calls() {
                   + (if $ops != "" then " -- " + $ops else "" end))}' "$1" 2>/dev/null
 }
 
-# action_for <cmd> <ops>: push, distribution-push, pr-create, pr-merge, issue-close,
-# issue-comment, issue-create, or empty. The action of the form the hook
-# itself matched, so the line cites the grant the hook would have let the
-# command through on (#110). When the hook matched no form a grant names --
+# action_for <cmd> <ops>: push, distribution-push, pr-create, pr-merge,
+# issue-close, issue-comment, issue-create, or empty. The action of the
+# form the hook itself matched, so the line cites the grant the hook would
+# have let the command through on (#110). When the hook matched no form a grant names --
 # a script whose push Claude Code recorded on the result, say, or a gh
 # behind sudo -- a guess, good enough to cite, not an enforcement check: a
 # push word in the command or its recorded op, else the first gh form

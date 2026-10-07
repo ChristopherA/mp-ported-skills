@@ -268,6 +268,18 @@ check "push grant alone: the refusal names the Distribution repo" \
     "$(reason 0 auto "git -C $hdist push origin main" "$hproj")"
 check "push grant alone: a cd into the Distribution repo, then push, is refused" "deny" \
     "$(decision 0 auto "cd ../hdist && git push" "$hproj")"
+check "push grant alone: a cd -P into the Distribution repo, then push, is refused" "deny" \
+    "$(decision 0 auto "cd -P ../hdist; git push" "$hproj")"
+# A cd in a subshell, a pipe or a background job leaves the folder as it
+# was, so it is not followed.
+printf 'c2a368ee\nproject %s\n' "$hproj" >"$(git -C "$hdist" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
+check "a cd in a subshell is not followed into the Project" "deny" \
+    "$(decision 0 auto "(cd ../hproj); git push origin main" "$hdist")"
+check "a cd in a pipe is not followed into the Project" "deny" \
+    "$(decision 0 auto "cd ../hproj | true; git push origin main" "$hdist")"
+check "a cd in a background job is not followed into the Project" "deny" \
+    "$(decision 0 auto "cd ../hproj & git push origin main" "$hdist")"
+command rm -f "$(git -C "$hdist" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
 check "push grant alone: the Project's own push goes through" "" \
     "$(decision 0 auto "git push origin main" "$hproj")"
 check "push grant alone: with no marker, a session in the Distribution repo reads its own grants" "" \

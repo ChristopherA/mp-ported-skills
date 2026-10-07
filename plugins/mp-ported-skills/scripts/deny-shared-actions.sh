@@ -91,6 +91,15 @@ classify_distribution_sh="$here/../skills/supervise/scripts/distribution.sh"
 
 split=$(printf '%s' "$cmd" | sed -E 's/(&&|\|\||[;&|()`])/\n/g')
 
+# A cd is followed only in a command of plain sequences (`;`, `&&`, `||`,
+# newlines). A cd in a subshell, a pipe or a background job leaves the
+# shell's own folder where it was, and the split above cannot tell where
+# one ends: `(cd ../proj); git push` would read another repo's grant.
+follow_cd=yes
+case "$(printf '%s' "$cmd" | sed -E 's/&&|\|\|//g')" in
+*[\(\)\|\&\`]*) follow_cd="" ;;
+esac
+
 matched=""
 piped=""
 oldIFS=$IFS
@@ -188,9 +197,11 @@ for seg in $split; do
     case "${1##*/}" in
     cd)
         # A later git runs where cd went (`cd <repo> && git push`), so the
-        # grant is read there (#141). `cd` alone goes home; `cd -` is not
-        # followed.
+        # grant is read there (#141), when follow_cd says it can be. `cd`
+        # alone goes home; `cd -` is not followed.
         shift
+        [ -n "$follow_cd" ] || continue
+        while [ "${1:-}" = -P ] || [ "${1:-}" = -L ] || [ "${1:-}" = -e ]; do shift; done
         [ "${1:-}" != -- ] || shift
         case "${1:-}" in
         '' | '~') classify_base=$HOME ;;
