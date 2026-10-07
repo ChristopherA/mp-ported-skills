@@ -168,7 +168,9 @@ gather() {
     if [ $tracker = github ]; then
         if ! command -v jq >/dev/null; then why="jq not installed"
         elif ! command -v gh >/dev/null; then why="gh not installed"
-        elif ! issues=$(gh api 'repos/{owner}/{repo}/issues?state=open&per_page=100' 2>/dev/null) ||
+        # Every page, merged as in next_child.
+        elif ! issues=$(gh api 'repos/{owner}/{repo}/issues?state=open&per_page=100' --paginate 2>/dev/null) ||
+            ! issues=$(printf '%s' "$issues" | jq -cs 'add' 2>/dev/null) ||
             ! printf '%s' "$issues" | jq -e 'type == "array"' >/dev/null 2>&1; then
             why="gh api failed (offline, unauthenticated, or no GitHub remote)"
         elif ! prs=$(gh pr list --state open --json number,title,headRefName,isCrossRepository 2>/dev/null) ||
@@ -333,8 +335,8 @@ gather() {
         if [ -n "$infos" ]; then
             me=$(gh api user 2>/dev/null | jq -r '.login // empty')
             for n in $infos; do
-                last=$(gh api "repos/{owner}/{repo}/issues/$n/comments?per_page=100" 2>/dev/null |
-                    jq -r 'last.user.login // empty')
+                last=$(gh api "repos/{owner}/{repo}/issues/$n/comments?per_page=100" --paginate 2>/dev/null |
+                    jq -rs 'add | last.user.login // empty')
                 [ -n "$last" ] && [ "$last" != "$me" ] && replied="$replied #$n"
             done
         fi

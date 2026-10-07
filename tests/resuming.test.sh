@@ -46,7 +46,9 @@ cat >"$work/bin/gh" <<'EOF'
 [ -n "${FAKE_GH_FAIL:-}" ] && { echo "gh: not logged in" >&2; exit 1; }
 case "$1 $2" in
     "api user") echo '{"login":"me"}' ;;
-    "api "*/comments*) n=${2%/comments*}; n=${n##*/}; cat "$FAKE_GH/comments-$n.json" ;;
+    "api "*/comments*) n=${2%/comments*}; n=${n##*/}; cat "$FAKE_GH/comments-$n.json"
+        case " $* " in *" --paginate "*)
+            if [ -f "$FAKE_GH/comments-$n.page2.json" ]; then cat "$FAKE_GH/comments-$n.page2.json"; fi ;; esac ;;
     "api "*/sub_issues*) n=${2%/sub_issues*}; n=${n##*/}
         [ -f "$FAKE_GH/sub-$n.fail" ] && exit 1
         if [ -f "$FAKE_GH/sub-$n.json" ]; then cat "$FAKE_GH/sub-$n.json"; else echo '[]'; fi
@@ -60,7 +62,9 @@ case "$1 $2" in
     "api "*/events*) n=${2%/events*}; n=${n##*/}
         [ -f "$FAKE_GH/events-$n.fail" ] && exit 1
         if [ -f "$FAKE_GH/events-$n.json" ]; then cat "$FAKE_GH/events-$n.json"; else echo '[]'; fi ;;
-    "api "*/issues*) cat "$FAKE_GH/issues.json" ;;
+    "api "*/issues*) cat "$FAKE_GH/issues.json"
+        case " $* " in *" --paginate "*)
+            if [ -f "$FAKE_GH/issues.page2.json" ]; then cat "$FAKE_GH/issues.page2.json"; fi ;; esac ;;
     "pr list") cat "$FAKE_GH/prs.json" ;;
     *) exit 1 ;;
 esac
@@ -148,6 +152,13 @@ issues "$(list "$(issue 31 ready-for-agent)")"
 out=$(run)
 has "no closing commits: ready ticket still found" "ready, blockers closed: #31 t31" "$out"
 check "no closing commits: no jq error" "" "$(printf '%s\n' "$out" | grep jq)"
+# Past 100 open issues, a ticket only on the second page is still read.
+list "$(issue 32 ready-for-agent)" >"$FAKE_GH/issues.page2.json"
+check "open issues: a ready ticket on the second page" "#31 t31; #32 t32" "$(line_of "$(run)" "ready, blockers closed")"
+command rm -f "$FAKE_GH/issues.page2.json"
+issues 'not json'
+has "open issues unreadable: report says unreached" "tracker: GitHub, UNREACHED: gh api failed (offline, unauthenticated, or no GitHub remote)" "$(run)"
+issues "$(list "$(issue 31 ready-for-agent)")"
 
 g commit -q --allow-empty -m 'Fix the thing' -m 'Closes #30'
 g push -q
@@ -187,6 +198,13 @@ issues "$(list "$(issue 40 needs-info | jq -c '.comments = 2')" "$(issue 41 need
 check "case 3: needs-info replied" "3 /triage (you type it; user-invoked): 0 unlabelled, 0 needs-triage, replied needs-info: #40" "$(next "$(run)")"
 issues "$(list "$(issue 41 needs-info | jq -c '.comments = 2')")"
 check "case 7: needs-info awaiting reporter" "7 nothing in motion" "$(next "$(run)")"
+# Past 100 comments, the newest is the second page's last.
+printf '[{"user":{"login":"me"}},{"user":{"login":"reporter"}}]' >"$FAKE_GH/comments-41.page2.json"
+check "case 3: needs-info replied on the second page" "3 /triage (you type it; user-invoked): 0 unlabelled, 0 needs-triage, replied needs-info: #41" "$(next "$(run)")"
+command rm -f "$FAKE_GH/comments-41.page2.json"
+printf 'not json' >"$FAKE_GH/comments-41.json"
+check "case 7: comments unreadable, not replied" "7 nothing in motion" "$(next "$(run)")"
+printf '[{"user":{"login":"reporter"}},{"user":{"login":"me"}}]' >"$FAKE_GH/comments-41.json"
 
 # Hand work: unblocked, unparked ready-for-human tickets, by the body's
 # priority line (High, Medium, none, Low), lowest number first within one.
