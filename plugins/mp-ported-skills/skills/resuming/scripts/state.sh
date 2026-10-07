@@ -56,8 +56,11 @@ ideas="/grill-with-docs on a new idea, or /improve-codebase-architecture (you ty
 # "parked", when none qualifies; nothing when #n has no open sub-issues.
 # Reads $open_nums, $body_blockers and the label strings. The weigh step reads
 # the child's number back from "; next child #N", so keep that wording.
+# Reads every page: gh prints one array per page, merged here into one, and
+# the first page can hold only closed children.
 next_child() {
-    subs=$(gh api "repos/{owner}/{repo}/issues/$1/sub_issues?per_page=100" 2>/dev/null) &&
+    subs=$(gh api "repos/{owner}/{repo}/issues/$1/sub_issues?per_page=100" --paginate 2>/dev/null) &&
+        subs=$(printf '%s' "$subs" | jq -cs 'add' 2>/dev/null) &&
         printf '%s' "$subs" | jq -e 'type == "array"' >/dev/null 2>&1 ||
         { printf '; sub-issues not read'; return; }
     kids=$(printf '%s' "$subs" | jq -c --argjson open "$open_nums" "$body_blockers"'

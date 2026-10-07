@@ -48,7 +48,11 @@ case "$1 $2" in
     "api "*/comments*) n=${2%/comments*}; n=${n##*/}; cat "$FAKE_GH/comments-$n.json" ;;
     "api "*/sub_issues*) n=${2%/sub_issues*}; n=${n##*/}
         [ -f "$FAKE_GH/sub-$n.fail" ] && exit 1
-        if [ -f "$FAKE_GH/sub-$n.json" ]; then cat "$FAKE_GH/sub-$n.json"; else echo '[]'; fi ;;
+        if [ -f "$FAKE_GH/sub-$n.json" ]; then cat "$FAKE_GH/sub-$n.json"; else echo '[]'; fi
+        # A second page, served only with --paginate, printed as gh prints
+        # pages: one array after another.
+        case " $* " in *" --paginate "*)
+            if [ -f "$FAKE_GH/sub-$n.page2.json" ]; then cat "$FAKE_GH/sub-$n.page2.json"; fi ;; esac ;;
     "api "*/dependencies/blocked_by*) n=${2%/dependencies*}; n=${n##*/}; cat "$FAKE_GH/deps-$n.json" ;;
     "api "*/issues*) cat "$FAKE_GH/issues.json" ;;
     "pr list") cat "$FAKE_GH/prs.json" ;;
@@ -269,6 +273,10 @@ list "$(issue 28 ready-for-agent 0 '## Blocked by
 check "in-motion parent: skips a child blocked under a heading" "1 work in flight: in motion #24 t24; next child #29 (ready-for-human, by hand): t29" "$(next "$(run)")"
 list "$(issue 27 enhancement)" >"$FAKE_GH/sub-24.json"
 check "in-motion parent: next child not ready" "1 work in flight: in motion #24 t24; next child #27 (not ready): t27" "$(next "$(run)")"
+list "$(closed 26 ready-for-human)" "$(issue 27 ready-for-agent 1)" >"$FAKE_GH/sub-24.json"
+list "$(issue 28 ready-for-agent)" >"$FAKE_GH/sub-24.page2.json"
+check "in-motion parent: next child on the second page" "1 work in flight: in motion #24 t24; next child #28 (ready-for-agent, /implement #28, you type it; user-invoked): t28" "$(next "$(run)")"
+command rm -f "$FAKE_GH/sub-24.page2.json"
 touch "$FAKE_GH/sub-24.fail"
 check "in-motion parent: sub-issues unread" "1 work in flight: in motion #24 t24; sub-issues not read" "$(next "$(run)")"
 command rm -f "$FAKE_GH/sub-24.fail" "$FAKE_GH/sub-24.json" "$FAKE_GH/deps-27.json"
