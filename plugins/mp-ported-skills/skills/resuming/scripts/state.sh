@@ -100,10 +100,11 @@ $(open_link_blockers "$k" | jq -r '.[]')"
 # open_link_blockers <n>: a JSON array of the open tickets GitHub links as
 # blocking #n, a number for one in this repo and "owner/repo#N" for one in
 # another, so a blocker elsewhere is never read as the local ticket with its
-# number; nothing when the list cannot be read. Reads $repo_url.
+# number; nothing when the list cannot be read. Reads $repo_url and every
+# page, merged here as in next_child.
 open_link_blockers() {
-    gh api "repos/{owner}/{repo}/issues/$1/dependencies/blocked_by" 2>/dev/null |
-        jq -c --arg repo "$repo_url" '[.[] | select(.state == "open")
+    gh api "repos/{owner}/{repo}/issues/$1/dependencies/blocked_by?per_page=100" --paginate 2>/dev/null |
+        jq -cs --arg repo "$repo_url" '[add[] | select(.state == "open")
             | if (.repository_url // $repo) == $repo then .number
               else "\(.repository_url | sub("^.*/repos/"; ""))#\(.number)" end]' 2>/dev/null
 }

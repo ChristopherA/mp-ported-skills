@@ -54,7 +54,9 @@ case "$1 $2" in
         # pages: one array after another.
         case " $* " in *" --paginate "*)
             if [ -f "$FAKE_GH/sub-$n.page2.json" ]; then cat "$FAKE_GH/sub-$n.page2.json"; fi ;; esac ;;
-    "api "*/dependencies/blocked_by*) n=${2%/dependencies*}; n=${n##*/}; cat "$FAKE_GH/deps-$n.json" ;;
+    "api "*/dependencies/blocked_by*) n=${2%/dependencies*}; n=${n##*/}; cat "$FAKE_GH/deps-$n.json"
+        case " $* " in *" --paginate "*)
+            if [ -f "$FAKE_GH/deps-$n.page2.json" ]; then cat "$FAKE_GH/deps-$n.page2.json"; fi ;; esac ;;
     "api "*/events*) n=${2%/events*}; n=${n##*/}
         [ -f "$FAKE_GH/events-$n.fail" ] && exit 1
         if [ -f "$FAKE_GH/events-$n.json" ]; then cat "$FAKE_GH/events-$n.json"; else echo '[]'; fi ;;
@@ -294,6 +296,10 @@ check "in-motion parent: open children all blocked" "1 work in flight: in motion
 # local ticket with the same number (#147).
 printf '[{"number":26,"state":"open","repository_url":"https://api.github.com/repos/other/lib"},{"number":52,"state":"open","repository_url":"https://api.github.com/repos/me/proj"}]' >"$FAKE_GH/deps-27.json"
 check "in-motion parent: a blocker in another repo" "1 work in flight: in motion #24 t24; every open child blocked: #27 by #52 other/lib#26, #28 by #52" "$(next "$(run)")"
+printf '[{"number":9,"state":"closed"}]' >"$FAKE_GH/deps-27.json"
+printf '[{"number":26,"state":"open"}]' >"$FAKE_GH/deps-27.page2.json"
+check "in-motion parent: a blocker on the second page" "1 work in flight: in motion #24 t24; every open child blocked: #27 by #26, #28 by #52" "$(next "$(run)")"
+command rm -f "$FAKE_GH/deps-27.page2.json"
 printf 'not json' >"$FAKE_GH/deps-27.json"
 check "in-motion parent: blocker list unread" "1 work in flight: in motion #24 t24; every open child blocked: #27 by an unread blocker, #28 by #52" "$(next "$(run)")"
 list "$(issue 28 ready-for-agent 0 '## Blocked by
