@@ -210,9 +210,11 @@ if [ -n "$sid" ]; then
                            | .sup = (.text | test("^\\[supervisor answer to "))
                            | select(.sup or (.text | test("^\\s*[<\\[]") | not))
                            | {at, sup})),
-           # Every prompt after the first, slash commands included, by time.
+           # Every prompt after the first, slash commands included, by time;
+           # a background agent'"'"'s report is no prompt.
            asked: ([$rows[] | select(.type == "user" and (.isMeta // false | not))
-                    | select(text != null) | .timestamp // empty] | .[1:]),
+                    | select(text != null) | .timestamp // empty] | .[1:]
+                   - [$rows[] | select(.origin.kind? == "task-notification") | .timestamp // empty]),
            # Prompts and turn ends by time; a turn end is unasked when its
            # last text ends on a statement with no Waiting on: line, the
            # line watch.sh reads (#114), and pending when background agents
@@ -222,13 +224,13 @@ if [ -n "$sid" ]; then
                    ([$r.message.content[]? | objects | select(.type == "text") | .text // empty] | last) as $t
                    | if $t == null then . else .text = $t end
                elif ($r.timestamp // null) == null then .
-               elif $r.type == "user" and ($r.isMeta // false | not) then .list += [{at: $r.timestamp, unasked: false}]
-               elif $r.type == "system" and $r.subtype == "turn_duration" and ($r.pendingBackgroundAgentCount // 0) > 0 then
-                   .list += [{at: $r.timestamp, end: true, pending: true}]
+               elif $r.type == "user" and ($r.isMeta // false | not) and ($r.origin.kind? != "task-notification") then
+                   .list += [{at: $r.timestamp, end: false, pending: false, unasked: false}]
                elif $r.type == "system" and $r.subtype == "turn_duration" then
-                   .list += [{at: $r.timestamp, end: true,
-                              unasked: (.text != "" and (.text | asks | not)
-                                        and (.text | test("(?m)^[`* ]*Waiting on:") | not))}]
+                   (($r.pendingBackgroundAgentCount // 0) > 0) as $pending
+                   | .list += [{at: $r.timestamp, end: true, pending: $pending,
+                                unasked: ($pending | not) and .text != "" and (.text | asks | not)
+                                         and (.text | test("(?m)^[`* ]*Waiting on:") | not)}]
                else . end) | .list),
            answers: [$rows[] | select(.type == "user" and (.isMeta // false | not)) | text // empty
                      | capture("^\\[supervisor answer to \"(?<q>.*)\"\\] (?<a>[^.!?]*[.!?]?)")],
@@ -326,12 +328,12 @@ elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // 
         [.[] | objects | select(.state == "blocked")
          | (.at // "") as $b
          | select($b == "" or ([$p[] | select((.at | epoch) > ($b | epoch))] | min_by(.at | epoch) | .sup // false | not))
-         | select($b == "" or ([$m[] | select((.at | epoch) <= ($b | epoch))] | max_by(.at | epoch) | .unasked // false | not))
          | select($b == "" or (($b | epoch) as $be
-             | ([$m[] | select((.at | epoch) <= $be)] | max_by(.at | epoch) | .pending // false) as $pending
+             | ([$m[] | select((.at | epoch) <= $be)] | max_by(.at | epoch) // {}) as $last
              | ([$m[] | select(.end and (.at | epoch) > $be) | .at | epoch] | min) as $on
-             | ([$p[] | select((.at | epoch) > $be) | .at | epoch] | min) as $asked
-             | ($pending and $on != null and ($asked == null or $asked > $on)) | not))
+             | ([$a[] | epoch | select(. > $be)] | min) as $asked
+             | ($last.unasked // false) or (($last.pending // false) and $on != null and ($asked == null or $asked > $on))
+             | not))
          | select($b == "" or (($b | epoch) as $be
              | [$posts[] | epoch | select(. >= $be) | . as $pe
                 | select([$a[] | epoch | select(. > $be and . <= $pe)] | length == 0)] | length == 0))

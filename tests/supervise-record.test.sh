@@ -514,6 +514,23 @@ check "pending agents: a block their reports end is not a wait" \
 check "pending agents: a block answered by a typed prompt is a wait" \
     "2 waits on a human (awaiting spec review before proceeding; awaiting label change + comment), 1 message typed into the worker" \
     "$(field 'human interventions' "$(record)")"
+{
+    command cat "$work/pending-head"
+    said 2026-09-29T06:04:00.000Z '<command-name>/mattpocock-skills:code-review</command-name>'
+    command cat "$work/pending-tail"
+} >"$cfg/projects/-work-project/$sid.jsonl"
+check "pending agents: a block answered by a typed slash command is a wait" \
+    "2 waits on a human (awaiting spec review before proceeding; awaiting label change + comment)" \
+    "$(field 'human interventions' "$(record)")"
+# An agent's report written before the block's timeline entry is no prompt.
+command cat "$work/pending-head" "$work/pending-tail" >"$cfg/projects/-work-project/$sid.jsonl"
+{
+    blocked 2026-09-29T06:05:01.000Z 'awaiting spec review before proceeding'
+    blocked 2026-09-29T06:10:31.000Z 'awaiting label change + comment'
+} >"$cfg/jobs/c2a368ee/timeline.jsonl"
+check "pending agents: a block stamped after an agent's report is not a wait" \
+    "1 wait on a human (awaiting label change + comment)" \
+    "$(field 'human interventions' "$(record)")"
 command cat "$work/pending-head" >"$cfg/projects/-work-project/$sid.jsonl"
 check "pending agents: a block the worker has not gone on from is a wait" \
     "2 waits on a human (awaiting spec review before proceeding; awaiting label change + comment)" \
