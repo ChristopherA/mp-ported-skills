@@ -480,6 +480,44 @@ check "posted: a prompt to the worker before the post leaves it a human's" \
     "4 waits on a human (push now?; approve Bash: git push; commits ready; gh issue comment 139 (ungranted); awaiting maintainer), 2 messages typed into the worker" \
     "$(field 'human interventions' "$(record)")"
 command rm -f "$posted"
+# A block on a turn that ended with the worker's own review agents still
+# running, which their reports then restarted with no prompt, is no wait on
+# a human; the real block that follows is (#138, shaped like #132's run).
+# The same block answered by a typed prompt is a human's.
+job
+{
+    said 2026-09-29T06:01:25.000Z '<command-message>mattpocock-skills:implement</command-message>'
+    text 2026-09-29T06:02:00.000Z 'Awaiting 2 review agents (standards + spec).'
+    jq -cn '{type: "system", subtype: "turn_duration", timestamp: "2026-09-29T06:02:30.000Z", pendingBackgroundAgentCount: 2}'
+} >"$work/pending-head"
+{
+    jq -cn '{type: "user", timestamp: "2026-09-29T06:05:00.000Z", origin: {kind: "task-notification"},
+        message: {role: "user", content: "<task-notification>\n<task-id>a1</task-id>\n</task-notification>"}}'
+    text 2026-09-29T06:10:00.000Z 'Committed on main.
+
+Waiting on: gh issue edit 56 --add-label ready-for-human'
+    ended 2026-09-29T06:10:30.000Z
+} >"$work/pending-tail"
+command cat "$work/pending-head" "$work/pending-tail" >"$cfg/projects/-work-project/$sid.jsonl"
+{
+    blocked 2026-09-29T06:02:31.000Z 'awaiting spec review before proceeding'
+    blocked 2026-09-29T06:10:31.000Z 'awaiting label change + comment'
+} >"$cfg/jobs/c2a368ee/timeline.jsonl"
+check "pending agents: a block their reports end is not a wait" \
+    "1 wait on a human (awaiting label change + comment)" \
+    "$(field 'human interventions' "$(record)")"
+{
+    command cat "$work/pending-head"
+    said 2026-09-29T06:04:00.000Z 'go on'
+    command cat "$work/pending-tail"
+} >"$cfg/projects/-work-project/$sid.jsonl"
+check "pending agents: a block answered by a typed prompt is a wait" \
+    "2 waits on a human (awaiting spec review before proceeding; awaiting label change + comment), 1 message typed into the worker" \
+    "$(field 'human interventions' "$(record)")"
+command cat "$work/pending-head" >"$cfg/projects/-work-project/$sid.jsonl"
+check "pending agents: a block the worker has not gone on from is a wait" \
+    "2 waits on a human (awaiting spec review before proceeding; awaiting label change + comment)" \
+    "$(field 'human interventions' "$(record)")"
 command rm -rf "$cfg/projects/-work-project"
 # watch.sh confirms a block with the same `asks`; the two copies match.
 asks_in() { sed -n 's/^.*\(def asks: .*;\).*$/\1/p' "$scripts/$1"; }

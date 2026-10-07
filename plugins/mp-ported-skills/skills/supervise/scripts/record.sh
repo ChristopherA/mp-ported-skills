@@ -41,7 +41,11 @@
 #                            supervisor ended by a post.sh post for this
 #                            worker on the maintainer's approval, with no
 #                            prompt to the worker between the block and the
-#                            post (#144)
+#                            post (#144); nor is one that follows a turn
+#                            end with background agents pending, when the
+#                            worker ended another turn after it with no
+#                            prompt between: the agents' reports restarted
+#                            it (#138)
 # * shared actions           actions.sh's lines, or none
 #   outcome                  commits in START..HEAD, the job's PRs and
 #                            issues (*), and the ticket's state from gh
@@ -211,15 +215,18 @@ if [ -n "$sid" ]; then
                     | select(text != null) | .timestamp // empty] | .[1:]),
            # Prompts and turn ends by time; a turn end is unasked when its
            # last text ends on a statement with no Waiting on: line, the
-           # line watch.sh reads (#114).
+           # line watch.sh reads (#114), and pending when background agents
+           # were still running, whose reports start the next turn (#138).
            marks: (reduce $rows[] as $r ({text: "", list: []};
                if $r.type == "assistant" and ($r.isSidechain // false | not) then
                    ([$r.message.content[]? | objects | select(.type == "text") | .text // empty] | last) as $t
                    | if $t == null then . else .text = $t end
                elif ($r.timestamp // null) == null then .
                elif $r.type == "user" and ($r.isMeta // false | not) then .list += [{at: $r.timestamp, unasked: false}]
-               elif $r.type == "system" and $r.subtype == "turn_duration" and ($r.pendingBackgroundAgentCount // 0) == 0 then
-                   .list += [{at: $r.timestamp,
+               elif $r.type == "system" and $r.subtype == "turn_duration" and ($r.pendingBackgroundAgentCount // 0) > 0 then
+                   .list += [{at: $r.timestamp, end: true, pending: true}]
+               elif $r.type == "system" and $r.subtype == "turn_duration" then
+                   .list += [{at: $r.timestamp, end: true,
                               unasked: (.text != "" and (.text | asks | not)
                                         and (.text | test("(?m)^[`* ]*Waiting on:") | not))}]
                else . end) | .list),
@@ -310,12 +317,21 @@ elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // 
         # A wait is the supervisor'"'"'s when the first prompt after it is its answer.
         # It is no wait when the worker'"'"'s last prompt or turn end before it is
         # an unasked turn end: a finished report watch.sh reads as done.
+        # It is no wait when that last mark is a turn end with background
+        # agents pending and the worker went on to end another turn with no
+        # prompt, typed or the supervisor'"'"'s, before it: the agents'"'"' reports
+        # restarted it.
         # It is the supervisor'"'"'s too when post.sh posted for the worker at
         # or after it, with no prompt to the worker in between.
         [.[] | objects | select(.state == "blocked")
          | (.at // "") as $b
          | select($b == "" or ([$p[] | select((.at | epoch) > ($b | epoch))] | min_by(.at | epoch) | .sup // false | not))
          | select($b == "" or ([$m[] | select((.at | epoch) <= ($b | epoch))] | max_by(.at | epoch) | .unasked // false | not))
+         | select($b == "" or (($b | epoch) as $be
+             | ([$m[] | select((.at | epoch) <= $be)] | max_by(.at | epoch) | .pending // false) as $pending
+             | ([$m[] | select(.end and (.at | epoch) > $be) | .at | epoch] | min) as $on
+             | ([$p[] | select((.at | epoch) > $be) | .at | epoch] | min) as $asked
+             | ($pending and $on != null and ($asked == null or $asked > $on)) | not))
          | select($b == "" or (($b | epoch) as $be
              | [$posts[] | epoch | select(. >= $be) | . as $pe
                 | select([$a[] | epoch | select(. > $be and . <= $pe)] | length == 0)] | length == 0))
