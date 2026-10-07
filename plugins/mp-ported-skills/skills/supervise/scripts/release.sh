@@ -12,7 +12,7 @@
 # A Project with a Distribution repo (#125) has a marker there too. DIR's
 # marker names it on a `distribution <path>` line; without one, the repo is
 # read with distribution.sh. Its marker is removed first when it names ID,
-# and left when it names another worker.
+# and left, with an error, when it names another worker, as DIR's is.
 #
 # Usage:
 #   release.sh --dir DIR --id ID
@@ -55,7 +55,10 @@ fi
 [ -n "$dist" ] || dist=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null 2>/dev/null)
 dist_released=""
 if [ -n "$dist" ] && dist_marker=$(git -C "$dist" rev-parse --path-format=absolute --git-path mp-supervise-worker 2>/dev/null) &&
-    [ -f "$dist_marker" ] && [ "$(head -n 1 "$dist_marker")" = "$ID" ]; then
+    [ -f "$dist_marker" ]; then
+    dist_held=$(head -n 1 "$dist_marker")
+    [ "$dist_held" = "$ID" ] ||
+        fail "the marker in Distribution repo $dist names worker $dist_held, not $ID; left in place"
     command rm -f "$dist_marker" || fail "could not remove $dist_marker"
     dist_released=1
 fi

@@ -68,7 +68,9 @@ if ! content=$(git -C "$DIR" show "origin/$default:$FILE" 2>/dev/null); then
     exit 0
 fi
 
-line=$(printf '%s\n' "$content" | sed '/<!--/,/-->/d' | sed -n '/^[[:space:]]*$/d; /^#/d; p' | head -n 1 |
+# A comment on one line is cut first: BSD sed looks for a range's end only
+# on later lines, so the range alone would delete the path after it.
+line=$(printf '%s\n' "$content" | sed -e 's/<!--.*-->//' -e '/<!--/,/-->/d' | sed -n '/^[[:space:]]*$/d; /^#/d; p' | head -n 1 |
     sed 's/^[[:space:]]*[-*][[:space:]]*//; s/^`//; s/`[[:space:]]*$//; s/[[:space:]]*$//')
 [ -n "$line" ] || fail "$FILE on origin/$default names no path"
 

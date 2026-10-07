@@ -166,8 +166,14 @@ while [ "$try" -lt "$TRIES" ]; do
         # The worker is live again, so its checkout is held read-only again
         # (#76), after the Report step's release.sh cleared the marker.
         # A Distribution repo (#125) is held again too, each marker naming
-        # the other repo, as launch.sh writes them.
-        dist=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null 2>/dev/null)
+        # the other repo, as launch.sh writes them. The repo is the one the
+        # launch recorded in DIR's marker, while that is still there, so a
+        # fetch since cannot repoint it; once released, it is read again.
+        marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker 2>/dev/null)
+        dist=""
+        [ -z "$marker" ] || [ ! -f "$marker" ] || [ "$(head -n 1 "$marker")" != "$ID" ] ||
+            dist=$(sed -n 's/^distribution //p' "$marker")
+        [ -n "$dist" ] || dist=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null 2>/dev/null)
         if [ -n "$dist" ]; then
             dist_marker=$(git -C "$dist" rev-parse --path-format=absolute --git-path mp-supervise-worker 2>/dev/null) &&
                 printf '%s\nproject %s\n' "$ID" "$DIR" >"$dist_marker" ||

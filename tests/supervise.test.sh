@@ -1735,6 +1735,10 @@ name_dist '# Distribution repo
 - `../dist`
 '
 check "distribution: a heading, a comment, a bullet and backticks around the path" "$dist" "$(distribution 2>&1)"
+name_dist '<!-- one line -->
+../dist
+'
+check "distribution: a comment on one line leaves the path after it" "$dist" "$(distribution 2>&1)"
 name_dist "$dist/
 "
 check "distribution: an absolute path" "$dist" "$(distribution 2>&1)"
@@ -1777,6 +1781,12 @@ check "launch dist: a repo off its default branch is refused" "1 Error: Distribu
 dgit "$dist" checkout main
 dgit "$dist" branch -D topic
 dgit "$dist" worktree add "$work/dist-linked" -b linked
+name_dist "$work/dist-linked
+"
+out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?
+check "launch dist: a linked worktree is refused, by name" "1 Error: Distribution repo $work/dist-linked is a linked git worktree, not its repo's main checkout; name the main checkout in docs/agents/distribution-repo.md; not launched" "$rc $out"
+name_dist '../dist
+'
 check "launch dist: the marker paths are untouched by a refusal" "no no" \
     "$([ -f "$dist_marker" ] && echo yes || echo no) $([ -f "$dproj_marker" ] && echo yes || echo no)"
 jq --arg d "$dist" '. + [{id: "7a6a0741", cwd: $d, kind: "background", sessionId: "7a6a0741-0000", name: "x", state: "working", pid: 99}]' \
@@ -1842,23 +1852,38 @@ check "release dist: a left Distribution repo marker is cleared" "0 no marker in
 released c2a368ee in $dist no" "$rc $out $([ -f "$dist_marker" ] && echo yes || echo no)"
 printf '7a6a0741\nproject %s\n' "$dproj" >"$dist_marker"
 out=$(sh "$scripts/release.sh" --dir "$dproj" --id c2a368ee </dev/null 2>&1); rc=$?
-check "release dist: another worker's Distribution repo marker stays" "0 no marker in $dproj 7a6a0741" \
+check "release dist: another worker's Distribution repo marker stays, with an error" "1 Error: the marker in Distribution repo $dist names worker 7a6a0741, not c2a368ee; left in place 7a6a0741" \
     "$rc $out $(head -n 1 "$dist_marker")"
 command rm -f "$dist_marker"
 
 # resume.sh holds both repos again on a wake.
-reset_fake
-mkdir -p "$cfg/jobs/c2a368ee"
-command cp "$fixtures/job-state.json" "$cfg/jobs/c2a368ee/state.json"
-echo woke >"$fake/resume-out"
-echo "$fixtures/stopped.json" >"$fake/seq"
-out=$(PATH="$work/bin:$PATH" sh "$scripts/resume.sh" --id c2a368ee --dir "$dproj" \
-    --prompt /mp-ported-skills:capturing --interval 0 --settle 0 </dev/null 2>&1); rc=$?
+resume_dist() {
+    reset_fake
+    mkdir -p "$cfg/jobs/c2a368ee"
+    command cp "$fixtures/job-state.json" "$cfg/jobs/c2a368ee/state.json"
+    echo woke >"$fake/resume-out"
+    echo "$fixtures/stopped.json" >"$fake/seq"
+    PATH="$work/bin:$PATH" sh "$scripts/resume.sh" --id c2a368ee --dir "$dproj" \
+        --prompt /mp-ported-skills:capturing --interval 0 --settle 0 </dev/null 2>&1
+}
+out=$(resume_dist); rc=$?
 check "resume dist: resumed" "0 resumed c2a368ee" "$rc $(printf '%s\n' "$out" | tail -n 1)"
 check "resume dist: both markers written, each naming the other repo" "c2a368ee
 distribution $dist
 c2a368ee
 project $dproj" "$(command cat "$dproj_marker" "$dist_marker")"
+clear_markers
+# While the launch's marker is still there, its repo is the one held, not
+# what origin names now.
+new_repo "$work/dist2"
+dist2_marker=$(git -C "$work/dist2" rev-parse --path-format=absolute --git-path mp-supervise-worker)
+printf 'c2a368ee\ndistribution %s\n' "$work/dist2" >"$dproj_marker"
+out=$(resume_dist); rc=$?
+check "resume dist: the marker's repo wins over a fresh read" "0 c2a368ee
+distribution $work/dist2
+c2a368ee
+project $dproj no" "$rc $(command cat "$dproj_marker" "$dist2_marker") $([ -f "$dist_marker" ] && echo yes || echo no)"
+command rm -f "$dist2_marker"
 clear_markers
 
 # The watch snapshots the Distribution repo, and a branch or worktree made

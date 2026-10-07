@@ -180,7 +180,10 @@ check_repo() {
     # A linked worktree is refused first (#79), whatever branch it holds: a
     # worktree can hold the default branch while the main checkout is
     # elsewhere.
-    linked=$(sh "$SCRIPT_DIR/main-checkout.sh" "$1" </dev/null) || fail "$linked; not launched"
+    if ! linked=$(sh "$SCRIPT_DIR/main-checkout.sh" "$1" </dev/null); then
+        [ -z "$2" ] || fail "$2$1 is a linked git worktree, not its repo's main checkout; name the main checkout in docs/agents/distribution-repo.md; not launched"
+        fail "$linked; not launched"
+    fi
     status=$(git -C "$1" status --porcelain) || fail "git status failed in $2$1, so its tree is unconfirmed; not launched"
     dirty=$(printf '%s' "$status" | grep -c '^')
     if [ "$dirty" -gt 0 ]; then

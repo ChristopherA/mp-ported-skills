@@ -13,8 +13,9 @@
 # docs/agents/distribution-repo.md, which names the Project's Distribution
 # repo (#125), in the checkout the session is working in, or any path under
 # $CLAUDE_CONFIG_DIR, in an unattended, auto-mode session -- a /supervise
-# worker, or any other background session launched the same way. The maintainer's own
-# interactive session, whatever its permission mode, is never in scope.
+# worker, or any other background session launched the same way. The
+# maintainer's own interactive session, whatever its permission mode, is
+# never in scope.
 #
 # Detection is CLAUDE_CODE_SESSION_ATTENDED and permission_mode, the same
 # two signals deny-shared-actions.sh uses (docs/adr/0004): both must hold.
