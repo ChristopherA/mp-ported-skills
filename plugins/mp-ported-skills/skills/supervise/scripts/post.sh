@@ -18,20 +18,22 @@
 # Checks, each printed as `ok <check>: ...` or `fail <check>: ...`:
 #   marker  no worker marker in the checkout (the worker was stopped and
 #           release.sh run)
-#   body    the body file is not empty
+#   body    the body file holds a line that is not blank
 #   sweep   the --sweep command, run in DIR with a file holding the title
 #           (for a new issue) and the body appended, exits 0; on a hit its
 #           output follows, indented. CMD is shell code: give one command,
 #           since the file is appended to its last one
 #
 # Without --check, when every check passes, it runs the command and prints
-# `posted <action> <url>`, and appends `ID <time> <action> <url>` to the
-# checkout's `git rev-parse --git-path mp-supervise-posted`, which
-# actions.sh reads to name the post as the supervisor's, and record.sh to
-# keep the worker's wait for it off the waits on a human; a `note` line
-# follows when that write fails.
-# A post is refused in a background session (CLAUDE_CODE_SESSION_ATTENDED=0):
-# there an issue comment or new issue goes only on a standing grant.
+# `posted <action> <url>` (`no-url` when gh printed none), and appends
+# `ID <time> <action> <url>` to the checkout's
+# `git rev-parse --git-path mp-supervise-posted`, which actions.sh reads to
+# name the post as the supervisor's, and record.sh to keep the worker's wait
+# for it off the waits on a human; a `note` line follows when that write
+# fails.
+# A post is refused in a background session (CLAUDE_CODE_SESSION_ATTENDED=0),
+# as push.sh refuses a push, though --check still runs there: there an issue
+# comment or new issue goes only on a standing grant.
 #
 # Usage:
 #   post.sh --dir DIR --id ID (--comment N | --create --title T [--label L]...)
@@ -101,7 +103,7 @@ fi
 [ -n "$SWEEP" ] || [ "$NO_SWEEP" = 1 ] ||
     fail "--sweep CMD is required, or --no-sweep to post with the text unswept"
 [ -d "$DIR" ] || fail "not a directory: $DIR"
-if [ "${CLAUDE_CODE_SESSION_ATTENDED:-1}" = 0 ]; then
+if [ "$CHECK" = 0 ] && [ "${CLAUDE_CODE_SESSION_ATTENDED:-1}" = 0 ]; then
     fail "post.sh posts for the maintainer's attended session; a background session posts only on a standing grant"
 fi
 DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
@@ -154,8 +156,8 @@ else
 fi
 
 lines=$(grep -c '' "$BODY")
-if [ "$lines" = 0 ]; then
-    bad "body: $BODY is empty"
+if ! grep -q '[^[:space:]]' "$BODY"; then
+    bad "body: $BODY is empty or blank"
 elif [ "$lines" = 1 ]; then
     ok "body: 1 line"
 else
@@ -190,7 +192,7 @@ if ! out=$(cd "$DIR" && gh "$@" </dev/null 2>"$err"); then
 fi
 command rm -f "$err"
 url=$(printf '%s\n' "$out" | grep '^https\{0,1\}://' | tail -n 1)
-[ -n "$url" ] || url="(no URL printed)"
+[ -n "$url" ] || url=no-url
 echo "posted $action $url"
 record=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-posted)
 printf '%s %s %s %s\n' "$ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$action" "$url" >>"$record" ||

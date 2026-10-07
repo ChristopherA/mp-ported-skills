@@ -190,7 +190,20 @@ check "sweep hits: its output is shown" "yes" \
 
 reset
 : >"$work/empty.md"
-refused "empty body" "fail body: $work/empty.md is empty" --comment 139 --body-file "$work/empty.md" --sweep "$sweep"
+refused "empty body" "fail body: $work/empty.md is empty or blank" --comment 139 --body-file "$work/empty.md" --sweep "$sweep"
+printf '\n  \n' >"$work/blank.md"
+refused "blank body" "fail body: $work/blank.md is empty or blank" --comment 139 --body-file "$work/blank.md" --sweep "$sweep"
+
+# --- gh prints no URL: the record still has four fields ----------------------
+reset
+mkdir -p "$work/quiet"
+printf '#!/bin/sh\nexit 0\n' >"$work/quiet/gh"
+chmod +x "$work/quiet/gh"
+out=$(PATH="$work/quiet:$PATH"; post --comment 139 --body-file "$body" --sweep "$sweep")
+check "no url: said" "posted issue-comment no-url" "$(printf '%s\n' "$out" | tail -n 1)"
+check "no url: actions.sh reads it whole" \
+    "issue-comment posted by the supervisor on the maintainer's approval: no-url" \
+    "$(sh "$scripts/actions.sh" --id 2da1baa1 --dir "$project" --start "$start" </dev/null 2>&1 | grep '^issue-')"
 
 # --- gh fails ----------------------------------------------------------------
 reset
@@ -226,6 +239,8 @@ reset
 out=$( (export CLAUDE_CODE_SESSION_ATTENDED=0; post --comment 139 --body-file "$body" --sweep "$sweep") )
 check "background: refused" "Error: post.sh posts for the maintainer's attended session; a background session posts only on a standing grant" "$out"
 check "background: nothing posted" "no" "$([ -f "$work/gh-args" ] && echo yes || echo no)"
+out=$( (export CLAUDE_CODE_SESSION_ATTENDED=0; post --comment 139 --body-file "$body" --sweep "$sweep" --check) )
+check "background: --check still runs" "ok sweep: clean" "$(printf '%s\n' "$out" | tail -n 1)"
 
 echo "supervise-post: $pass passed, $fail failed"
 [ "$fail" = 0 ]
