@@ -80,6 +80,11 @@ out=$(bc 0 push); rc=$?
 check "unattended, granted: exit 0" "0" "$rc"
 check "unattended, granted: cites the action" "granted: push" "$out"
 
+# A push in a Distribution repo (#141) is its own action: the push grant
+# does not cover it.
+out=$(bc 0 distribution-push); rc=$?
+check "unattended, distribution-push beside a push grant: ungranted" "0 ungranted" "$rc $out"
+
 # Unattended, the action has no matching grant.
 out=$(bc 0 issue-close); rc=$?
 check "unattended, ungranted: exit 0" "0" "$rc"

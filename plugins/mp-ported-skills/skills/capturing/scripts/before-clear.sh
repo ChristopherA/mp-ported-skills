@@ -22,7 +22,7 @@
 # nothing in supervision.md for it to match.
 #
 # Usage:
-#   before-clear.sh --action <push|pr-create|pr-merge|issue-close|issue-comment|issue-create|other> [--dir DIR]
+#   before-clear.sh --action <push|distribution-push|pr-create|pr-merge|issue-close|issue-comment|issue-create|other> [--dir DIR]
 #
 # DIR defaults to the working directory, and is read only for the
 # shared actions; `other` needs no git checkout.
@@ -48,7 +48,7 @@ while [ $# -gt 0 ]; do
         --action) need_value "$@"; ACTION="$2"; shift 2 ;;
         --dir)    need_value "$@"; DIR="$2"; shift 2 ;;
         --help)
-            printf 'Usage: before-clear.sh --action <push|pr-create|pr-merge|issue-close|issue-comment|issue-create|other> [--dir DIR]\n'
+            printf 'Usage: before-clear.sh --action <push|distribution-push|pr-create|pr-merge|issue-close|issue-comment|issue-create|other> [--dir DIR]\n'
             printf 'Prints attended, "granted: <citation>", or ungranted.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
@@ -56,9 +56,9 @@ while [ $# -gt 0 ]; do
 done
 fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 case "$ACTION" in
-    push | pr-create | pr-merge | issue-close | issue-comment | issue-create | other) ;;
+    push | distribution-push | pr-create | pr-merge | issue-close | issue-comment | issue-create | other) ;;
     '') fail "--action is required" ;;
-    *) fail "--action must be push, pr-create, pr-merge, issue-close, issue-comment, issue-create or other, not '$ACTION'" ;;
+    *) fail "--action must be push, distribution-push, pr-create, pr-merge, issue-close, issue-comment, issue-create or other, not '$ACTION'" ;;
 esac
 
 if [ "${CLAUDE_CODE_SESSION_ATTENDED:-1}" != 0 ]; then
