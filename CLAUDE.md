@@ -84,6 +84,8 @@ Build a JSON value from a shell string with `jq -n --arg`, as `fixed_nums` in `r
 
 A `gh api` read of a list (sub-issues, comments, labels) passes `--paginate` with `per_page=100`. GitHub returns one page, 30 items by default, with no sign that more exist: #40's first page of sub-issues held only closed children, so a read for its open ones came back empty with exit 0.
 
+A test of a paged read gives each page data that only the merged list answers rightly. Without the merge, jq runs its filter once per page: `last` printed one login per page, and a check that the newest comment was a reply passed with the merge removed (#155).
+
 ## Checking what a hook did
 
 The terminal and a screenshot show a session's title and state, not what set them. To learn whether a `SessionStart` hook ran and what it printed, read the session's transcript, `$CLAUDE_CONFIG_DIR/projects/<cwd with / as ->/<session id>.jsonl`. A session that entered a worktree has its whole transcript moved to the worktree's folder, so a script finds it by session id in any folder, `projects/*/<session id>.jsonl`, as `turn_ended` in `supervise`'s `watch.sh` does. Each hook run is an `attachment` record carrying `hookName` (`SessionStart:<source>`), `command` and `stdout`, and the title in force is the last `custom-title` record. A forked or branched session's transcript opens with copies of its parent's records, timestamps included, so a hook run belongs to the new session only when its timestamp is after the fork.
