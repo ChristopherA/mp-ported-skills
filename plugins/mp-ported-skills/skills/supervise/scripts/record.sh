@@ -37,7 +37,11 @@
 #                            one that follows a turn end whose last text
 #                            ends on a statement, with no `Waiting on:`
 #                            line, is a finished report watch.sh reads as
-#                            done, not a wait (#114)
+#                            done, not a wait (#114); nor is one the
+#                            supervisor ended by a post.sh post for this
+#                            worker on the maintainer's approval, with no
+#                            prompt to the worker between the block and the
+#                            post (#144)
 # * shared actions           actions.sh's lines, or none
 #   outcome                  commits in START..HEAD, the job's PRs and
 #                            issues (*), and the ticket's state from gh
@@ -202,6 +206,9 @@ if [ -n "$sid" ]; then
                            | .sup = (.text | test("^\\[supervisor answer to "))
                            | select(.sup or (.text | test("^\\s*[<\\[]") | not))
                            | {at, sup})),
+           # Every prompt after the first, slash commands included, by time.
+           asked: ([$rows[] | select(.type == "user" and (.isMeta // false | not))
+                    | select(text != null) | .timestamp // empty] | .[1:]),
            # Prompts and turn ends by time; a turn end is unasked when its
            # last text ends on a statement with no Waiting on: line, the
            # line watch.sh reads (#114).
@@ -281,6 +288,15 @@ elif ! supervisor=$(jq -rs --arg l "$launched" "$defs"'
 fi
 
 # --- waits on a human ------------------------------------------------------
+# The times post.sh posted for this worker, one a line, from the checkout's
+# record; with none, or none readable, every wait it would clear stays a
+# human's.
+posts=""
+posted=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-posted 2>/dev/null)
+if [ -n "$ID" ] && [ -f "$posted" ]; then
+    posts=$(awk -v id="$ID" '$1 == id { print $2 }' "$posted" |
+        grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$')
+fi
 waits=""
 if [ -n "$SESSION" ]; then
     :
@@ -288,14 +304,21 @@ elif [ ! -f "$timeline" ]; then
     [ ! -f "$job" ] || note "no timeline for $ID under $CLAUDE_CONFIG_DIR/jobs, so its waits on a human were not read"
     waits="unknown"
 elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // []')" \
-        --argjson m "$(printf '%s' "$worker" | jq -c '.marks // []')" "$defs"'
+        --argjson m "$(printf '%s' "$worker" | jq -c '.marks // []')" \
+        --argjson a "$(printf '%s' "$worker" | jq -c '.asked // []')" \
+        --argjson posts "$(jq -cn --arg t "$posts" '$t | [splits("\n") | select(. != "")]')" "$defs"'
         # A wait is the supervisor'"'"'s when the first prompt after it is its answer.
         # It is no wait when the worker'"'"'s last prompt or turn end before it is
         # an unasked turn end: a finished report watch.sh reads as done.
+        # It is the supervisor'"'"'s too when post.sh posted for the worker at
+        # or after it, with no prompt to the worker in between.
         [.[] | objects | select(.state == "blocked")
          | (.at // "") as $b
          | select($b == "" or ([$p[] | select((.at | epoch) > ($b | epoch))] | min_by(.at | epoch) | .sup // false | not))
          | select($b == "" or ([$m[] | select((.at | epoch) <= ($b | epoch))] | max_by(.at | epoch) | .unasked // false | not))
+         | select($b == "" or (($b | epoch) as $be
+             | [$posts[] | epoch | select(. >= $be) | . as $pe
+                | select([$a[] | epoch | select(. > $be and . <= $pe)] | length == 0)] | length == 0))
          | .detail // ""] as $w
         | if ($w | length) == 0 then ""
           else "\($w | length) wait\(if ($w | length) > 1 then "s" else "" end) on a human"

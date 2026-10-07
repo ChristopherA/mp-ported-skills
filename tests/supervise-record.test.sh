@@ -439,6 +439,47 @@ out=$(record)
 check "record: a block on a finished report is not a wait" \
     "3 waits on a human (push now?; approve Bash: git push; commits ready), 1 message typed into the worker" \
     "$(field 'human interventions' "$out")"
+
+# A capture that ends on `Waiting on: gh issue comment 139`, whose comment
+# post.sh then posted on the maintainer's approval in the supervisor's
+# session, with no prompt to the worker between: its wait is not a human's,
+# and the record names the post as the supervisor's (#144). post.sh's
+# record line, `ID <time> <action> <url>`, is written here directly, at a
+# fixed time.
+{
+    command cat "$cfg/projects/-work-project/$sid.jsonl"
+    said 2026-09-29T06:12:00.000Z '<command-message>mp-ported-skills:capturing</command-message>'
+    text 2026-09-29T06:13:00.000Z 'One finding for #139, not posted: no grant covers it.
+
+Waiting on: gh issue comment 139'
+    ended 2026-09-29T06:13:30.000Z
+} >"$work/t"
+command mv "$work/t" "$cfg/projects/-work-project/$sid.jsonl"
+blocked 2026-09-29T06:14:00.000Z 'gh issue comment 139 (ungranted); awaiting maintainer' >>"$cfg/jobs/c2a368ee/timeline.jsonl"
+posted=$(git -C "$repo" rev-parse --path-format=absolute --git-path mp-supervise-posted)
+waits4="4 waits on a human (push now?; approve Bash: git push; commits ready; gh issue comment 139 (ungranted); awaiting maintainer), 1 message typed into the worker"
+out=$(record)
+check "posted: before the post, the wait is a human's" "$waits4" "$(field 'human interventions' "$out")"
+printf '%s\n' "c2a368ee 2026-09-29T06:15:00Z issue-comment https://github.com/o/r/issues/139#issuecomment-1" >"$posted"
+out=$(record)
+check "posted: the supervisor's post on approval is not a wait" \
+    "3 waits on a human (push now?; approve Bash: git push; commits ready), 1 message typed into the worker" \
+    "$(field 'human interventions' "$out")"
+check "posted: the record names the post as the supervisor's" \
+    "  - issue-comment posted by the supervisor on the maintainer's approval: https://github.com/o/r/issues/139#issuecomment-1" \
+    "$(printf '%s\n' "$out" | grep '^  - issue-')"
+printf '%s\n' "0ther000 2026-09-29T06:15:00Z issue-comment https://github.com/o/r/issues/139#issuecomment-1" >"$posted"
+check "posted: another worker's post leaves the wait a human's" "$waits4" "$(field 'human interventions' "$(record)")"
+printf '%s\n' "c2a368ee garbage issue-comment https://github.com/o/r/issues/139#issuecomment-1" >"$posted"
+check "posted: a line with no time is skipped" "$waits4" "$(field 'human interventions' "$(record)")"
+printf '%s\n' "c2a368ee 2026-09-29T06:13:45Z issue-comment https://github.com/o/r/issues/139#issuecomment-1" >"$posted"
+check "posted: a post before the block leaves it a human's" "$waits4" "$(field 'human interventions' "$(record)")"
+printf '%s\n' "c2a368ee 2026-09-29T06:15:00Z issue-comment https://github.com/o/r/issues/139#issuecomment-1" >"$posted"
+said 2026-09-29T06:14:30.000Z 'post it yourself' >>"$cfg/projects/-work-project/$sid.jsonl"
+check "posted: a prompt to the worker before the post leaves it a human's" \
+    "4 waits on a human (push now?; approve Bash: git push; commits ready; gh issue comment 139 (ungranted); awaiting maintainer), 2 messages typed into the worker" \
+    "$(field 'human interventions' "$(record)")"
+command rm -f "$posted"
 command rm -rf "$cfg/projects/-work-project"
 # watch.sh confirms a block with the same `asks`; the two copies match.
 asks_in() { sed -n 's/^.*\(def asks: .*;\).*$/\1/p' "$scripts/$1"; }

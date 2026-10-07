@@ -65,6 +65,13 @@
 # `git rev-parse --git-path mp-supervise-pushed`, where push.sh records
 # each push by worker id and upstream branch.
 #
+# An issue comment or new issue post.sh posted for this worker, on the
+# maintainer's approval in the supervisor's session (#144), is listed as
+#   <action> posted by the supervisor on the maintainer's approval: <url>
+# read from the checkout's `git rev-parse --git-path mp-supervise-posted`,
+# where post.sh records each post by worker id; <action> is issue-comment
+# or issue-create.
+#
 # The job's state.json and the transcripts are read under
 # $CLAUDE_CONFIG_DIR, the transcript by session id in any project folder,
 # since a worker that entered a worktree has its transcript moved there.
@@ -453,6 +460,12 @@ if commits=$(git -C "$DIR" rev-list "$START..HEAD" 2>/dev/null); then
     done
 else
     note "git rev-list $START..HEAD failed in $DIR, so remote branches were not read"
+fi
+
+posted=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-posted 2>/dev/null)
+if [ -f "$posted" ]; then
+    supervisor_posts=$(awk -v id="$ID" '$1 == id { print $3 " posted by the supervisor on the maintainer'"'"'s approval: " $4 }' "$posted")
+    [ -z "$supervisor_posts" ] || add "$supervisor_posts"
 fi
 
 actions="$actions$commands"
