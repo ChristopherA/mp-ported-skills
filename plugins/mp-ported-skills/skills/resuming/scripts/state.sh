@@ -7,7 +7,9 @@
 # cases that applies and `runner-up: ...` for the second (case 7's suggestions
 # when no other applies). A ticket labelled `parked` is never a step. Prints
 # what each ready ticket unblocks (`unblocks:`), and what the next step's and
-# runner-up's tickets unblock, without changing the step. Writes nothing.
+# runner-up's tickets unblock, without changing the step. When the working
+# tree's docs/agents/distribution-repo.md names a Distribution repo (#142),
+# reads that repo's git too, and its work in flight is case 1. Writes nothing.
 #
 # Usage: sh state.sh [dir]
 #   dir defaults to the current folder. Reports everything; an unreached
@@ -24,8 +26,10 @@ case ${MP_RESUME_BUDGET:-} in
     *) budget=$MP_RESUME_BUDGET ;;
 esac
 
-# supervise's main-checkout.sh, found before the cd below.
-main_checkout="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/../../supervise/scripts/main-checkout.sh"
+# supervise's main-checkout.sh and distribution.sh, found before the cd below.
+supervise_scripts="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/../../supervise/scripts"
+main_checkout="$supervise_scripts/main-checkout.sh"
+distribution="$supervise_scripts/distribution.sh"
 
 cd "$dir" 2>/dev/null || exit 0
 
@@ -110,6 +114,44 @@ open_link_blockers() {
               else "\(.repository_url | sub("^.*/repos/"; ""))#\(.number)" end]' 2>/dev/null
 }
 
+# git_state <dir>: <dir>'s branch, default branch, sync with its upstream,
+# uncommitted paths and unpushed commits, in r_branch, r_default, r_sync,
+# r_dirty and r_unpushed, and the two lines that report them.
+git_state() {
+    r_branch=$(git -C "$1" symbolic-ref --short -q HEAD || echo "(detached)")
+    r_default=$(git -C "$1" symbolic-ref --short -q refs/remotes/origin/HEAD)
+    r_default=${r_default#origin/}
+    if [ -z "$r_default" ]; then
+        for b in main master; do
+            git -C "$1" show-ref -q --verify "refs/heads/$b" && { r_default=$b; break; }
+        done
+    fi
+    r_default=${r_default:-main}
+
+    r_dirty=$(git -C "$1" status --porcelain | wc -l | tr -d ' ')
+    if git -C "$1" remote | grep -q .; then
+        r_unpushed=$(git -C "$1" rev-list --count HEAD --not --remotes 2>/dev/null || echo 0)
+    else
+        r_unpushed=0
+    fi
+    if up=$(git -C "$1" rev-parse --abbrev-ref -q '@{u}' 2>/dev/null); then
+        set -- $(git -C "$1" rev-list --left-right --count "$up...HEAD")
+        if [ "$1" = 0 ] && [ "$2" = 0 ]; then r_sync="in sync with $up"
+        else r_sync="ahead $2, behind $1 of $up"; fi
+    else
+        r_sync="no upstream"
+    fi
+}
+
+# git_inflight [suffix]: git_state's work in flight, each item ending in
+# suffix, as ", item, item".
+git_inflight() {
+    [ "$r_dirty" -gt 0 ] && printf ', %s uncommitted paths%s' "$r_dirty" "${1:-}"
+    [ "$r_unpushed" -gt 0 ] && printf ', %s unpushed commits%s' "$r_unpushed" "${1:-}"
+    [ "$r_branch" != "$r_default" ] && printf ', on %s not %s%s' "$r_branch" "$r_default" "${1:-}"
+    return 0
+}
+
 gather() {
     command -v git >/dev/null && git rev-parse --git-dir >/dev/null 2>&1 || {
         echo "git: not a repository"
@@ -119,45 +161,42 @@ gather() {
     }
 
     # --- git -------------------------------------------------------------
-    branch=$(git symbolic-ref --short -q HEAD || echo "(detached)")
-    default=$(git symbolic-ref --short -q refs/remotes/origin/HEAD)
-    default=${default#origin/}
-    if [ -z "$default" ]; then
-        for b in main master; do
-            git show-ref -q --verify "refs/heads/$b" && { default=$b; break; }
-        done
-    fi
-    default=${default:-main}
+    git_state .
+    branch=$r_branch default=$r_default dirty=$r_dirty unpushed=$r_unpushed
     defref=$default
     git show-ref -q --verify "refs/remotes/origin/$default" && defref=origin/$default
-
-    dirty=$(git status --porcelain | wc -l | tr -d ' ')
-    if git remote | grep -q .; then
-        unpushed=$(git rev-list --count HEAD --not --remotes 2>/dev/null || echo 0)
-    else
-        unpushed=0
-    fi
-    sync=
-    if up=$(git rev-parse --abbrev-ref -q '@{u}' 2>/dev/null); then
-        set -- $(git rev-list --left-right --count "$up...HEAD")
-        if [ "$1" = 0 ] && [ "$2" = 0 ]; then sync="in sync with $up"
-        else sync="ahead $2, behind $1 of $up"; fi
-    else
-        sync="no upstream"
-    fi
-    echo "branch: $branch (default $default), $sync, as of last fetch"
+    echo "branch: $branch (default $default), $r_sync, as of last fetch"
     echo "uncommitted paths: $dirty; unpushed commits: $unpushed"
+    inflight=$(git_inflight)
+
+    # The Distribution repo, from the working tree's copy of
+    # docs/agents/distribution-repo.md: read, not trusted, so not origin's
+    # as launch.sh reads it. One that cannot be read is never clean: its
+    # reason goes in dist_unread, which keeps the /supervise offer back.
+    dist= dist_inflight= dist_unread=
+    if ! dist=$(sh "$distribution" --dir . --working-tree </dev/null 2>"$tmp/dist-err"); then
+        dist_unread="not read: $(cat "$tmp/dist-err")"
+    elif [ -z "$dist" ]; then
+        :
+    elif [ ! -d "$dist" ]; then
+        dist_unread="$dist not read: no such folder"
+    elif ! git -C "$dist" rev-parse --git-dir >/dev/null 2>&1; then
+        dist_unread="$dist not read: not a git checkout"
+    else
+        git_state "$dist"
+        echo "distribution repo: $dist"
+        echo "distribution repo branch: $r_branch (default $r_default), $r_sync, as of last fetch"
+        echo "distribution repo uncommitted paths: $r_dirty; unpushed commits: $r_unpushed"
+        dist_inflight=$(git_inflight " in distribution repo $dist")
+        inflight="$inflight$dist_inflight"
+    fi
+    [ -z "$dist_unread" ] || echo "distribution repo: $dist_unread"
 
     # Issue numbers the default branch's commit messages close.
     close_re='(close[sd]?|fix(e[sd])?|resolve[sd]?):? +#'
     fixed=$(git log "$defref" --format=%B 2>/dev/null |
         grep -oiE "$close_re[0-9]+" |
         grep -oE '[0-9]+' | sort -un | tr '\n' ' ')
-
-    inflight=
-    [ "$dirty" -gt 0 ] && inflight="$inflight, $dirty uncommitted paths"
-    [ "$unpushed" -gt 0 ] && inflight="$inflight, $unpushed unpushed commits"
-    [ "$branch" != "$default" ] && inflight="$inflight, on $branch not $default"
 
     # --- tracker ---------------------------------------------------------
     tracker=none
@@ -419,7 +458,8 @@ gather() {
     # step.sh takes it only with nothing else in flight (its patterns are
     # copied here), and launch.sh only in the main checkout, not a linked
     # worktree (#79), on the default branch, with a clean tree and no other
-    # live background session in the folder.
+    # live background session in the folder, and the Distribution repo, when
+    # there is one, read and clean.
     first=$(printf '%s' "$cases" | sed -n 1p)
     impl=$(printf '%s\n' "$first" | sed -n \
         -e 's/^2 \/implement #\([0-9][0-9]*\) .*/\1/p' \
@@ -434,6 +474,8 @@ gather() {
     elif [ "$branch" != "$default" ]; then refusal="on $branch, not the default branch $default"
     elif [ "$unpushed" -gt 0 ]; then refusal="$unpushed unpushed commits; push them first"
     elif [ -n "${own:-}" ]; then refusal="open PR $own; settle it first"
+    elif [ -n "$dist_inflight" ]; then refusal="work in flight in distribution repo $dist: ${dist_inflight#, }"
+    elif [ -n "$dist_unread" ]; then refusal="distribution repo $dist_unread"
     elif [ -z "$step_n" ]; then refusal="other work in flight: ${inflight#, }"
     else
         here=$(pwd -P)

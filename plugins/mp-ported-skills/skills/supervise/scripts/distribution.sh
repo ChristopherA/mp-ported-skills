@@ -15,12 +15,16 @@
 # names no Distribution repo. When the working tree holds the file and the
 # committed ref does not, prints a note on stderr naming it as ignored.
 #
+# With --working-tree, reads the working tree's copy instead, and prints no
+# note: for resuming's state.sh (#142), which only reads, and whose readout
+# names the repo a Project is working with now, committed or not.
+#
 # The path line is the first line that is not blank, not a heading (`#`),
 # and not inside an HTML comment; a leading `- ` or `* ` and backticks
 # around it are dropped.
 #
 # Usage:
-#   distribution.sh --dir DIR
+#   distribution.sh --dir DIR [--working-tree]
 #
 # Prints the repo's absolute path (resolved when it exists, joined to the
 # repo's top when it does not, so a caller can name it as missing) and exits
@@ -30,14 +34,17 @@
 set -u
 
 DIR=""
+WORKING_TREE=0
 
 need_value() { [ $# -ge 2 ] || { printf 'Error: %s needs a value\n' "$1" >&2; exit 1; }; }
 while [ $# -gt 0 ]; do
     case "$1" in
         --dir) need_value "$@"; DIR="$2"; shift 2 ;;
+        --working-tree) WORKING_TREE=1; shift ;;
         --help)
-            printf 'Usage: distribution.sh --dir DIR\n'
+            printf 'Usage: distribution.sh --dir DIR [--working-tree]\n'
             printf 'Prints the Distribution repo named in docs/agents/distribution-repo.md on origin, or nothing.\n'
+            printf 'With --working-tree, reads the working tree copy instead.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
@@ -62,7 +69,12 @@ default=${default:-main}
 # The file sits at the repo's top, as supervision.md does, and a relative
 # path is read from there.
 top=$(git -C "$DIR" rev-parse --show-toplevel)
-if ! content=$(git -C "$DIR" show "origin/$default:$FILE" 2>/dev/null); then
+where="on origin/$default"
+if [ "$WORKING_TREE" = 1 ]; then
+    where="in the working tree"
+    [ -f "$top/$FILE" ] || exit 0
+    content=$(cat "$top/$FILE")
+elif ! content=$(git -C "$DIR" show "origin/$default:$FILE" 2>/dev/null); then
     [ ! -f "$top/$FILE" ] ||
         printf 'note: %s is in the working tree or current branch, not on the committed origin/%s; ignored\n' "$FILE" "$default" >&2
     exit 0
@@ -72,7 +84,7 @@ fi
 # on later lines, so the range alone would delete the path after it.
 line=$(printf '%s\n' "$content" | sed -e 's/<!--.*-->//' -e '/<!--/,/-->/d' | sed -n '/^[[:space:]]*$/d; /^#/d; p' | head -n 1 |
     sed 's/^[[:space:]]*[-*][[:space:]]*//; s/^`//; s/`[[:space:]]*$//; s/[[:space:]]*$//')
-[ -n "$line" ] || fail "$FILE on origin/$default names no path"
+[ -n "$line" ] || fail "$FILE $where names no path"
 
 case $line in
     /*) path=$line ;;

@@ -7,7 +7,8 @@
 # of the seven weighing cases, a ticket labelled in-motion or parked, the next
 # child of an in-motion parent, the /supervise offer beside /implement (with a
 # fake `claude` serving `claude agents`), what each ready ticket unblocks,
-# and label strings read from triage-labels.md. Also checks that no plugin
+# a Distribution repo's git work and one that cannot be read, and label
+# strings read from triage-labels.md. Also checks that no plugin
 # hook runs state.sh. Touches nothing outside its own mktemp directory.
 #
 # Usage: sh tests/resuming.test.sh
@@ -559,6 +560,92 @@ check "supervise: no offer for triage" "" "$(sup "$(run)")"
 issues '[]'
 check "supervise: no offer when nothing is in motion" "" "$(sup "$(run)")"
 check "supervise: no offer when the tracker is unreached" "" "$(sup "$(FAKE_GH_FAIL=1 run)")"
+issues "$saved_issues"
+
+# --- a Distribution repo (#142) ---------------------------------------------
+# A Project naming a Distribution repo in docs/agents/distribution-repo.md has
+# that repo's git read too, and its work in flight is case 1. An in-motion
+# parent's ready child is the step, so the /supervise line shows.
+issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)")"
+list "$(issue 52 ready-for-agent)" >"$FAKE_GH/sub-24.json"
+child="in motion #24 t24; next child #52 (ready-for-agent, /implement #52, you type it; user-invoked): t52"
+before=$(run)
+git init -q --bare "$work/dist.git"
+dist="$work/dist"
+git init -q -b main "$dist"
+dg() { git -C "$dist" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
+dg commit -q --allow-empty -m init
+dg remote add origin "$work/dist.git"
+dg push -qu origin main
+dg remote set-head origin main
+dist=$(CDPATH= cd -- "$dist" && pwd -P)
+printf '# Distribution repo\n\n../dist\n' >"$proj/docs/agents/distribution-repo.md"
+g add docs
+g commit -qm 'Name the Distribution repo'
+g push -q
+out=$(run)
+check "dist: lines beside the Project's" "branch: main (default main), in sync with origin/main, as of last fetch
+uncommitted paths: 0; unpushed commits: 0
+distribution repo: $dist
+distribution repo branch: main (default main), in sync with origin/main, as of last fetch
+distribution repo uncommitted paths: 0; unpushed commits: 0" "$(printf '%s\n' "$out" | sed -n '1,5p')"
+check "dist: clean, next is the child" "1 work in flight: $child" "$(next "$out")"
+check "dist: clean, supervise offered" "$offer" "$(sup "$out")"
+
+echo x >"$dist/scratch"
+out=$(run)
+check "dist: uncommitted is case 1" "1 work in flight: 1 uncommitted paths in distribution repo $dist, $child" "$(next "$out")"
+check "dist: uncommitted counted" "1; unpushed commits: 0" "$(line_of "$out" 'distribution repo uncommitted paths')"
+check "dist: uncommitted, supervise not offered" "not offered: work in flight in distribution repo $dist: 1 uncommitted paths in distribution repo $dist" "$(sup "$out")"
+command rm -f "$dist/scratch"
+
+dg commit -q --allow-empty -m wip
+out=$(run)
+check "dist: unpushed is case 1" "1 work in flight: 1 unpushed commits in distribution repo $dist, $child" "$(next "$out")"
+check "dist: unpushed, supervise not offered" "not offered: work in flight in distribution repo $dist: 1 unpushed commits in distribution repo $dist" "$(sup "$out")"
+dg push -q
+
+dg checkout -q -b feature
+out=$(run)
+check "dist: off its default branch is case 1" "1 work in flight: on feature not main in distribution repo $dist, $child" "$(next "$out")"
+check "dist: off its default branch, supervise not offered" "not offered: work in flight in distribution repo $dist: on feature not main in distribution repo $dist" "$(sup "$out")"
+dg checkout -q main
+
+# The Project's own work comes first, then the Distribution repo's.
+echo x >"$dist/scratch"
+echo x >"$proj/scratch"
+check "dist: the Project's items first" "1 work in flight: 1 uncommitted paths, 1 uncommitted paths in distribution repo $dist, $child" "$(next "$(run)")"
+command rm -f "$dist/scratch" "$proj/scratch"
+
+# The working tree's copy is read, as the other docs/agents files are.
+printf '../gone\n' >"$proj/docs/agents/distribution-repo.md"
+out=$(run)
+check "dist: a missing path is not read" "$real/../gone not read: no such folder" "$(line_of "$out" 'distribution repo')"
+check "dist: a missing path has no branch line" "" "$(line_of "$out" 'distribution repo branch')"
+check "dist: a missing path, supervise not offered" "not offered: 1 uncommitted paths; commit or clear them first" "$(sup "$out")"
+g stash -q
+mkdir "$work/plain"
+printf '../plain\n' >"$proj/docs/agents/distribution-repo.md"
+g add docs
+g commit -qm 'Point at a plain folder'
+g push -q
+plain=$(CDPATH= cd -- "$work/plain" && pwd -P)
+out=$(run)
+check "dist: not a git checkout is not read" "$plain not read: not a git checkout" "$(line_of "$out" 'distribution repo')"
+check "dist: not read, next unchanged" "1 work in flight: $child" "$(next "$out")"
+check "dist: not read is never clean" "not offered: distribution repo $plain not read: not a git checkout" "$(sup "$out")"
+printf '# Distribution repo\n' >"$proj/docs/agents/distribution-repo.md"
+g commit -qam 'No path'
+g push -q
+out=$(run)
+check "dist: no path line is not read" "not read: Error: docs/agents/distribution-repo.md in the working tree names no path" "$(line_of "$out" 'distribution repo')"
+check "dist: no path line, supervise not offered" "not offered: distribution repo not read: Error: docs/agents/distribution-repo.md in the working tree names no path" "$(sup "$out")"
+
+g rm -q docs/agents/distribution-repo.md
+g commit -qm 'No Distribution repo'
+g push -q
+check "dist: none named, output byte-identical" "$before" "$(run)"
+command rm -f "$FAKE_GH/sub-24.json"
 issues "$saved_issues"
 
 # --- label strings from triage-labels.md ------------------------------------

@@ -60,6 +60,8 @@ check "step: child under a custom agent label" "implement #28" \
     "$(step "next: 1 work in flight: in motion #24 t24; next child #28 (agent-ok, /implement #28, $you): t28")"
 line="next: 1 work in flight: 2 uncommitted paths, in motion #24 t24; next child #28 (ready-for-agent, /implement #28, $you): t28"
 check "step: git work in flight comes first" "stop: $line" "$(step "$line")"
+line="next: 1 work in flight: 1 unpushed commits in distribution repo /d, in motion #24 t24; next child #28 (ready-for-agent, /implement #28, $you): t28"
+check "step: Distribution repo work in flight comes first" "stop: $line" "$(step "$line")"
 line="next: 1 work in flight: on topic not main"
 check "step: another branch" "stop: $line" "$(step "$line")"
 line="next: 1 work in flight: in motion #24 t24; next child #26 (ready-for-human, by hand): t26"
@@ -1787,6 +1789,20 @@ out=$(distribution 2>&1); rc=$?
 check "distribution: a file with no path line is an error" "1 Error: docs/agents/distribution-repo.md on origin/main names no path" "$rc $out"
 name_dist '../dist
 '
+# --working-tree reads the working tree's copy instead, for resuming's
+# read-only readout (#142).
+wt_distribution() { sh "$scripts/distribution.sh" --dir "$dproj" --working-tree </dev/null; }
+check "distribution --working-tree: the committed copy" "$dist" "$(wt_distribution 2>&1)"
+printf '../gone\n' >"$dproj/docs/agents/distribution-repo.md"
+check "distribution --working-tree: an uncommitted edit wins" "$dproj/../gone" "$(wt_distribution 2>&1)"
+printf '# Distribution repo\n' >"$dproj/docs/agents/distribution-repo.md"
+out=$(wt_distribution 2>&1); rc=$?
+check "distribution --working-tree: no path line is an error" "1 Error: docs/agents/distribution-repo.md in the working tree names no path" "$rc $out"
+command rm -f "$dproj/docs/agents/distribution-repo.md"
+out=$(wt_distribution 2>&1); rc=$?
+check "distribution --working-tree: no file prints nothing, with no note" "0 " "$rc $out"
+dgit "$dproj" checkout -- docs
+check "distribution: origin read unchanged after the working-tree checks" "$dist" "$(distribution 2>&1)"
 
 # launch.sh checks the Distribution repo as it checks the Project.
 dist_marker=$(git -C "$dist" rev-parse --path-format=absolute --git-path mp-supervise-worker)
