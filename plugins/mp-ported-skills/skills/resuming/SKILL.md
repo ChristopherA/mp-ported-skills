@@ -16,7 +16,7 @@ It reads git (no fetch) and, when `docs/agents/issue-tracker.md` names GitHub, t
 1. **Work in flight**: uncommitted changes, unpushed commits, a branch other than the default, an open PR from this repo, or a ticket labelled `in-motion`, the `ready-for-human` ticket `capturing` marks as the one a session was working on, which git cannot see. Finish it. When that ticket has open sub-issues, its work is its **next child**: the first open one in the parent's order with every blocker closed, the blocker test of the frontier rule in `docs/agents/issue-tracker.md`, and not `parked`.
 2. **A `ready-for-agent` ticket with every blocker closed**: `/implement #N`, lowest number first.
 3. **Incoming work**: unlabelled issues, `needs-triage`, or `needs-info` with a reply since the last triage notes. `/triage`.
-4. **Tracker and repo disagree**: an open ticket a commit on the default branch already closes. Fix the tracker, since every later session starts from it.
+4. **Tracker and repo disagree**: an open ticket a commit on the default branch already closes, unless GitHub shows it reopened after that commit (reopened on purpose, such as to wait for a live check). Fix the tracker, since every later session starts from it.
 5. **An open `wayfinder:map`**: continue `/wayfinder`.
 6. **Hand work**: a `ready-for-human` ticket, not `in-motion`, with every blocker closed. Do it by hand. The highest priority line wins (High, Medium, none, Low), then the lowest number. When this case wins, the second such ticket, if any, is the runner-up.
 7. **Nothing in motion**: say so plainly. Runner-ups: `/grill-with-docs` on a new idea, or `/improve-codebase-architecture`.

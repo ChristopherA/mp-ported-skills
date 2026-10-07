@@ -141,8 +141,9 @@ gather() {
     echo "uncommitted paths: $dirty; unpushed commits: $unpushed"
 
     # Issue numbers the default branch's commit messages close.
+    close_re='(close[sd]?|fix(e[sd])?|resolve[sd]?):? +#'
     fixed=$(git log "$defref" --format=%B 2>/dev/null |
-        grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?):? +#[0-9]+' |
+        grep -oiE "$close_re[0-9]+" |
         grep -oE '[0-9]+' | sort -un | tr '\n' ' ')
 
     inflight=
@@ -225,6 +226,19 @@ gather() {
         # -n, not -R on stdin: with no closing commits the input is empty, -R
         # emits nothing, and every --argjson fx below fails.
         fixed_nums=$(jq -nc --arg f "$fixed" '$f | split(" ") | map(select(. != "") | tonumber)')
+        # An open ticket reopened on GitHub after its newest closing commit was
+        # reopened on purpose (to wait for a live check, say): open work, not
+        # fixed. A ticket whose events cannot be read stays fixed. Each read
+        # spends the time budget, but only open tickets a commit closes are read.
+        for n in $(printf '%s' "$rows" | jq -r --argjson fx "$fixed_nums" '.[] | select(.n as $n | $fx | index($n)) | .n'); do
+            at=$(git log "$defref" -1 --format=%ct -i -E \
+                --grep="$close_re$n([^0-9]|\$)" 2>/dev/null)
+            [ -n "$at" ] || continue
+            ev=$(gh api "repos/{owner}/{repo}/issues/$n/events?per_page=100" --paginate 2>/dev/null) || continue
+            printf '%s' "$ev" | jq -se --argjson at "$at" \
+                'add | any(.[]; .event == "reopened" and (.created_at | fromdateiso8601) > $at)' >/dev/null 2>&1 &&
+                fixed_nums=$(printf '%s' "$fixed_nums" | jq -c --argjson n "$n" 'map(select(. != $n))')
+        done
         count() { printf '%s' "$rows" | jq --arg r "$1" '[.[] | select(.role == $r)] | length'; }
 
         # Open tickets the default branch already closes.

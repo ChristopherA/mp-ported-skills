@@ -34,6 +34,7 @@ has() { # <name> <needle> <haystack>
 }
 next() { printf '%s\n' "$1" | sed -n 's/^next: //p'; }
 runner() { printf '%s\n' "$1" | sed -n 's/^runner-up: //p'; }
+line_of() { printf '%s\n' "$1" | sed -n "s/^$2: //p"; }
 ideas="/grill-with-docs on a new idea, or /improve-codebase-architecture (you type these; they are user-invoked)"
 case7_later="7 nothing else in motion: $ideas"
 
@@ -54,6 +55,9 @@ case "$1 $2" in
         case " $* " in *" --paginate "*)
             if [ -f "$FAKE_GH/sub-$n.page2.json" ]; then cat "$FAKE_GH/sub-$n.page2.json"; fi ;; esac ;;
     "api "*/dependencies/blocked_by*) n=${2%/dependencies*}; n=${n##*/}; cat "$FAKE_GH/deps-$n.json" ;;
+    "api "*/events*) n=${2%/events*}; n=${n##*/}
+        [ -f "$FAKE_GH/events-$n.fail" ] && exit 1
+        if [ -f "$FAKE_GH/events-$n.json" ]; then cat "$FAKE_GH/events-$n.json"; else echo '[]'; fi ;;
     "api "*/issues*) cat "$FAKE_GH/issues.json" ;;
     "pr list") cat "$FAKE_GH/prs.json" ;;
     *) exit 1 ;;
@@ -148,6 +152,25 @@ out=$(run)
 check "case 4: open but closed on main" "4 tracker and repo disagree: close #30 t30 (as of the last read: confirm with gh issue view first)" "$(next "$out")"
 check "case 4: runner-up is case 5" "5 /wayfinder (you type it; user-invoked): #20 t20" "$(runner "$out")"
 has "case 4: not offered as ready" "ready, blockers closed: none" "$out"
+
+# A ticket reopened after its closing commit was reopened on purpose (to wait
+# for a live check): not a disagreement, and it counts as open work again.
+printf '[{"event":"closed","created_at":"2999-01-01T00:00:00Z"},{"event":"reopened","created_at":"2999-01-01T00:05:00Z"}]' >"$FAKE_GH/events-30.json"
+out=$(run)
+check "case 4: reopened after the commit not listed" "none" "$(line_of "$out" "open but closed by a commit on main")"
+check "case 4: reopened ticket is a step again" "2 /implement #30 (you type it; user-invoked): #30 t30" "$(next "$out")"
+check "case 4: reopened ticket is ready again" "#30 t30" "$(line_of "$out" "ready, blockers closed")"
+# Reopened as ready-for-human to wait for a live check: hand work again.
+issues "$(list "$(issue 30 ready-for-human)")"
+check "case 4: reopened hand ticket is case 6" "6 by hand: #30 t30" "$(next "$(run)")"
+issues "$(list "$(issue 20 wayfinder:map)" "$(issue 30 ready-for-agent)")"
+# Reopened before the closing commit: that commit's close never reached GitHub.
+printf '[{"event":"closed","created_at":"2000-01-01T00:00:00Z"},{"event":"reopened","created_at":"2000-01-01T00:05:00Z"}]' >"$FAKE_GH/events-30.json"
+check "case 4: reopened before the commit still listed" "#30 t30" "$(line_of "$(run)" "open but closed by a commit on main")"
+# Events unread: kept in the list, which already says to confirm first.
+command rm -f "$FAKE_GH/events-30.json"; : >"$FAKE_GH/events-30.fail"
+check "case 4: events unread still listed" "#30 t30" "$(line_of "$(run)" "open but closed by a commit on main")"
+command rm -f "$FAKE_GH/events-30.fail"
 
 issues "$(list "$(issue 30 enhancement)" "$(issue 31 needs-triage)")"
 out=$(run)
@@ -299,7 +322,6 @@ issues "$saved_issues"
 # blocker is a GitHub link, a Blocked by: line or a bullet under a heading.
 # Parked, wontfix and already-fixed tickets are never listed, and a ticket
 # with two open links has them left unread (#99's fixture would list it).
-line_of() { printf '%s\n' "$1" | sed -n "s/^$2: //p"; }
 issues "$(list "$(issue 30 needs-info 0 'Blocked by: #90')" "$(issue 88 wontfix 0 'Blocked by: #90')" \
     "$(issue 89 needs-info,parked 0 'Blocked by: #90')" "$(issue 99 ready-for-agent 2)" \
     "$(issue 90 ready-for-agent)" \
