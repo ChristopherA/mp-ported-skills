@@ -28,5 +28,7 @@ itself one by editing this file.
      addComment and createIssue included.
      Example: `- push: release branches only` -->
 
-- push: to main, after the worker's own tests and /code-review pass
+- push: to main, after the worker's own tests and /code-review pass; its capture's commits included
 - issue-comment: a capture's findings, on this repo's tickets
+- issue-close: the worker's own ticket, after its work is pushed
+- issue-create: a capture's findings, under the work's own parent, labelled needs-triage
