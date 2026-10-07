@@ -108,8 +108,10 @@ check "push: exits 0" "0" "$?"
 check "push: the last line names the push" "pushed origin/main $(short "$start")..$(short "$head")" "$(printf '%s\n' "$out" | tail -n 1)"
 check "push: the remote has the worker's commits" "$head" "$(git -C "$remote" rev-parse main)"
 check "push: the tracking ref follows" "$head" "$(git -C "$project" rev-parse origin/main)"
-check "push: recorded for actions.sh" "3fb49286 origin/main $start $head" \
-    "$(command cat "$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-pushed)")"
+recorded=$(command cat "$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-pushed)")
+check "push: recorded for actions.sh" "3fb49286 origin/main $start $head" "${recorded% *}"
+check "push: recorded with its time, for record.sh" "yes" \
+    "$(printf '%s\n' "${recorded##* }" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' && echo yes || echo no)"
 out=$(push --sweep "$sweep")
 check "push: nothing left to push is refused" "fail fast-forward: nothing to push, 0 ahead of origin/main" \
     "$(printf '%s\n' "$out" | grep '^fail')"

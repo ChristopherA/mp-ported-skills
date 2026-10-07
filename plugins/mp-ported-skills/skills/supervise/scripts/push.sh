@@ -26,9 +26,10 @@
 # `commit <sha> <subject>` line for each commit in the range.
 #
 # Without --check, when every check passes, it pushes and prints `pushed
-# <upstream> UP..HEAD`, and appends `ID <upstream> UP HEAD` to the
+# <upstream> UP..HEAD`, and appends `ID <upstream> UP HEAD <time>` to the
 # checkout's `git rev-parse --git-path mp-supervise-pushed`, which
-# actions.sh reads to name the push as the supervisor's, not the worker's;
+# actions.sh reads to name the push as the supervisor's, not the worker's,
+# and record.sh to keep the worker's wait for it off the waits on a human;
 # a `note` line follows when that write fails.
 # A push is refused in a background session (CLAUDE_CODE_SESSION_ATTENDED=0):
 # there a push goes only on a standing grant.
@@ -197,5 +198,5 @@ if ! err=$(git -C "$DIR" push -q "$remote" "$tip:$merge" 2>&1); then
 fi
 echo "pushed $upname $range"
 record=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-pushed)
-printf '%s %s %s %s\n' "$ID" "$upname" "$up" "$tip" >>"$record" ||
+printf '%s %s %s %s %s\n' "$ID" "$upname" "$up" "$tip" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$record" ||
     echo "note the push was not recorded in $record, so actions.sh will read $upname as the worker's ungranted push"

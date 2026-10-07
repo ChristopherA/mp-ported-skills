@@ -474,6 +474,31 @@ printf '%s\n' "c2a368ee garbage issue-comment https://github.com/o/r/issues/139#
 check "posted: a line with no time is skipped" "$waits4" "$(field 'human interventions' "$(record)")"
 printf '%s\n' "c2a368ee 2026-09-29T06:13:45Z issue-comment https://github.com/o/r/issues/139#issuecomment-1" >"$posted"
 check "posted: a post before the block leaves it a human's" "$waits4" "$(field 'human interventions' "$(record)")"
+# The same wait answered by a push push.sh made on the maintainer's approval,
+# with no prompt to the worker between, is not a human's either (#156).
+# push.sh's record line, `ID <upstream> <up> <head> <time>`, is written here
+# directly, at a fixed time; a line from before push.sh wrote a time is read
+# as no push.
+command rm -f "$posted"
+pushed=$(git -C "$repo" rev-parse --path-format=absolute --git-path mp-supervise-pushed)
+printf '%s\n' "c2a368ee origin/main $start $start 2026-09-29T06:15:00Z" >"$pushed"
+check "pushed: the supervisor's push on approval is not a wait" \
+    "3 waits on a human (push now?; approve Bash: git push; commits ready), 1 message typed into the worker" \
+    "$(field 'human interventions' "$(record)")"
+printf '%s\n' "0ther000 origin/main $start $start 2026-09-29T06:15:00Z" >"$pushed"
+check "pushed: another worker's push leaves the wait a human's" "$waits4" "$(field 'human interventions' "$(record)")"
+printf '%s\n' "c2a368ee origin/main $start $start" >"$pushed"
+check "pushed: a line with no time is skipped" "$waits4" "$(field 'human interventions' "$(record)")"
+printf '%s\n' "c2a368ee origin/main $start $start 2026-09-29T06:13:45Z" >"$pushed"
+check "pushed: a push before the block leaves it a human's" "$waits4" "$(field 'human interventions' "$(record)")"
+printf '%s\n' "c2a368ee origin/main $start $start 2026-09-29T06:15:00Z" >"$pushed"
+command cp "$cfg/projects/-work-project/$sid.jsonl" "$work/t.bak"
+said 2026-09-29T06:14:30.000Z 'push it yourself' >>"$cfg/projects/-work-project/$sid.jsonl"
+check "pushed: a prompt to the worker before the push leaves it a human's" \
+    "4 waits on a human (push now?; approve Bash: git push; commits ready; gh issue comment 139 (ungranted); awaiting maintainer), 2 messages typed into the worker" \
+    "$(field 'human interventions' "$(record)")"
+command mv "$work/t.bak" "$cfg/projects/-work-project/$sid.jsonl"
+command rm -f "$pushed"
 printf '%s\n' "c2a368ee 2026-09-29T06:15:00Z issue-comment https://github.com/o/r/issues/139#issuecomment-1" >"$posted"
 said 2026-09-29T06:14:30.000Z 'post it yourself' >>"$cfg/projects/-work-project/$sid.jsonl"
 check "posted: a prompt to the worker before the post leaves it a human's" \

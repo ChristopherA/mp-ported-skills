@@ -38,10 +38,10 @@
 #                            ends on a statement, with no `Waiting on:`
 #                            line, is a finished report watch.sh reads as
 #                            done, not a wait (#114); nor is one the
-#                            supervisor ended by a post.sh post for this
-#                            worker on the maintainer's approval, with no
-#                            prompt to the worker between the block and the
-#                            post (#144); nor is one that follows a turn
+#                            supervisor ended by a post.sh post (#144) or a
+#                            push.sh push (#156) for this worker on the
+#                            maintainer's approval, with no prompt to the
+#                            worker between the block and it; nor is one that follows a turn
 #                            end with background agents pending, when the
 #                            worker ended another turn after it with no
 #                            prompt between: the agents' reports restarted
@@ -297,14 +297,18 @@ elif ! supervisor=$(jq -rs --arg l "$launched" "$defs"'
 fi
 
 # --- waits on a human ------------------------------------------------------
-# The times post.sh posted for this worker, one a line, from the checkout's
-# record; with none, or none readable, every wait it would clear stays a
-# human's.
+# The times post.sh posted and push.sh pushed for this worker, one a line,
+# from the checkout's records; with none, or none readable, every wait they
+# would clear stays a human's. A push.sh line from before it wrote a time
+# has none, and is skipped.
 posts=""
 posted=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-posted 2>/dev/null)
-if [ -n "$ID" ] && [ -f "$posted" ]; then
-    posts=$(awk -v id="$ID" '$1 == id { print $2 }' "$posted" |
-        grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$')
+pushed=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-pushed 2>/dev/null)
+if [ -n "$ID" ]; then
+    posts=$({
+        [ ! -f "$posted" ] || awk -v id="$ID" '$1 == id { print $2 }' "$posted"
+        [ ! -f "$pushed" ] || awk -v id="$ID" '$1 == id { print $5 }' "$pushed"
+    } | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$')
 fi
 waits=""
 if [ -n "$SESSION" ]; then
@@ -323,8 +327,9 @@ elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // 
         # agents pending and the worker went on to end another turn with no
         # prompt, typed or the supervisor'"'"'s, before it: the agents'"'"' reports
         # restarted it.
-        # It is the supervisor'"'"'s too when post.sh posted for the worker at
-        # or after it, with no prompt to the worker in between.
+        # It is the supervisor'"'"'s too when post.sh posted or push.sh pushed
+        # for the worker at or after it, with no prompt to the worker in
+        # between.
         [.[] | objects | select(.state == "blocked")
          | (.at // "") as $b
          | select($b == "" or ([$p[] | select((.at | epoch) > ($b | epoch))] | min_by(.at | epoch) | .sup // false | not))
