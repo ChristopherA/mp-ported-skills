@@ -41,11 +41,11 @@
 #                            supervisor ended by a post.sh post (#144) or a
 #                            push.sh push (#156) for this worker on the
 #                            maintainer's approval, with no prompt to the
-#                            worker between the block and it; nor is one that follows a turn
-#                            end with background agents pending, when the
-#                            worker ended another turn after it with no
-#                            prompt between: the agents' reports restarted
-#                            it (#138)
+#                            worker between the block and it; nor is one
+#                            that follows a turn end with background agents
+#                            pending, when the worker ended another turn
+#                            after it with no prompt between: the agents'
+#                            reports restarted it (#138)
 # * shared actions           actions.sh's lines, or none
 #   outcome                  commits in START..HEAD, the job's PRs and
 #                            issues (*), and the ticket's state from gh
@@ -301,11 +301,11 @@ fi
 # from the checkout's records; with none, or none readable, every wait they
 # would clear stays a human's. A push.sh line from before it wrote a time
 # has none, and is skipped.
-posts=""
+approvals=""
 posted=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-posted 2>/dev/null)
 pushed=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-pushed 2>/dev/null)
 if [ -n "$ID" ]; then
-    posts=$({
+    approvals=$({
         [ ! -f "$posted" ] || awk -v id="$ID" '$1 == id { print $2 }' "$posted"
         [ ! -f "$pushed" ] || awk -v id="$ID" '$1 == id { print $5 }' "$pushed"
     } | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$')
@@ -319,7 +319,7 @@ elif [ ! -f "$timeline" ]; then
 elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // []')" \
         --argjson m "$(printf '%s' "$worker" | jq -c '.marks // []')" \
         --argjson a "$(printf '%s' "$worker" | jq -c '.asked // []')" \
-        --argjson posts "$(jq -cn --arg t "$posts" '$t | [splits("\n") | select(. != "")]')" "$defs"'
+        --argjson approvals "$(jq -cn --arg t "$approvals" '$t | [splits("\n") | select(. != "")]')" "$defs"'
         # A wait is the supervisor'"'"'s when the first prompt after it is its answer.
         # It is no wait when the worker'"'"'s last prompt or turn end before it is
         # an unasked turn end: a finished report watch.sh reads as done.
@@ -340,7 +340,7 @@ elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // 
              | ($last.unasked // false) or (($last.pending // false) and $on != null and ($asked == null or $asked > $on))
              | not))
          | select($b == "" or (($b | epoch) as $be
-             | [$posts[] | epoch | select(. >= $be) | . as $pe
+             | [$approvals[] | epoch | select(. >= $be) | . as $pe
                 | select([$a[] | epoch | select(. > $be and . <= $pe)] | length == 0)] | length == 0))
          | .detail // ""] as $w
         | if ($w | length) == 0 then ""
