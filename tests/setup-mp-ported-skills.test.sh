@@ -297,6 +297,7 @@ p="$work/fresh"
 dist="$work/dist"; mkdir -p "$dist"
 mkrepo() { mkdir -p "$1" && git -C "$1" init -q; }
 dist_file() { printf '%s' "$1/docs/agents/distribution-repo.md"; }
+exists() { [ -e "$1" ] && echo yes || echo no; }
 mkrepo "$dist/app-dev"; mkrepo "$dist/app"
 real_dist=$(cd "$dist" && pwd -P)
 
@@ -306,7 +307,7 @@ check "distribution-repo: not a checkout reads absent" "absent" "$(feature distr
 setup "$v1" "$p" --project-dir "$dist/app-dev" report
 check "distribution-repo: absent in a -dev project" "absent" "$(feature distribution-repo)"
 has "distribution-repo: suggests the -dev folder's sibling" "suggested: ../app  (a git checkout beside this -dev folder)" "$out"
-check "distribution-repo: report writes nothing" "no" "$([ -e "$(dist_file "$dist/app-dev")" ] && echo yes || echo no)"
+check "distribution-repo: report writes nothing" "no" "$(exists "$(dist_file "$dist/app-dev")")"
 
 # A -dev folder whose sibling is a plain folder, not a checkout, gets no suggestion.
 mkrepo "$dist/plain-dev"; mkdir -p "$dist/plain"
@@ -338,16 +339,16 @@ has "distribution-repo write: path line is relative" "
 ../app" "$(cat "$(dist_file "$dist/app-dev")")"
 setup "$v1" "$p" --project-dir "$dist/app-dev" report
 check "distribution-repo: present after writing" "present" "$(feature distribution-repo)"
-has "distribution-repo: report names the path" "names ../app" "$out"
+check "distribution-repo: report names the path" "    names ../app" "$(printf '%s\n' "$out" | grep '^    names ')"
 
 # Rerun with the same answer, absolute or relative: the file is left as it is.
 before=$(cat "$(dist_file "$dist/app-dev")")
-touch -t 202001010000 "$(dist_file "$dist/app-dev")"
+touch -t 202001010000 "$(dist_file "$dist/app-dev")"; touch -t 202001010001 "$work/stamp"
 setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write "$dist/app"
 check "distribution-repo write same: exit 0" "0" "$rc"
-has "distribution-repo write same: already" "already names ../app" "$out"
+check "distribution-repo write same: already" "distribution-repo: already names ../app" "$out"
 check "distribution-repo write same: untouched" "$before" "$(cat "$(dist_file "$dist/app-dev")")"
-check "distribution-repo write same: not rewritten" "202001010000" "$(date -r "$(stat -f %m "$(dist_file "$dist/app-dev")")" +%Y%m%d%H%M)"
+check "distribution-repo write same: not rewritten" "no" "$([ "$(dist_file "$dist/app-dev")" -nt "$work/stamp" ] && echo yes || echo no)"
 
 # A path that is not a git checkout is refused, and nothing is written.
 setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write ../plain
@@ -364,7 +365,7 @@ has "distribution-repo write the Project itself: says why" "this Project's own r
 check "distribution-repo refusals: file unchanged" "$before" "$(cat "$(dist_file "$dist/app-dev")")"
 mkrepo "$dist/fresh-dev"
 setup "$v1" "$p" --project-dir "$dist/fresh-dev" distribution-repo write ../plain
-check "distribution-repo write refused: no file written" "no" "$([ -e "$(dist_file "$dist/fresh-dev")" ] && echo yes || echo no)"
+check "distribution-repo write refused: no file written" "no" "$(exists "$(dist_file "$dist/fresh-dev")")"
 
 # A changed answer rewrites it; a path outside the parent is kept absolute.
 mkrepo "$dist/elsewhere/other"
@@ -376,7 +377,7 @@ check "distribution-repo write changed: supervise reads the new path" "$real_dis
 # Changing the answer to no removes it; with no file, remove writes nothing.
 setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo remove
 check "distribution-repo remove: exit 0" "0" "$rc"
-check "distribution-repo remove: file gone" "no" "$([ -e "$(dist_file "$dist/app-dev")" ] && echo yes || echo no)"
+check "distribution-repo remove: file gone" "no" "$(exists "$(dist_file "$dist/app-dev")")"
 has "distribution-repo remove: says the code lives here" "code lives in this repo" "$out"
 setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo remove
 check "distribution-repo remove again: exit 0" "0" "$rc"

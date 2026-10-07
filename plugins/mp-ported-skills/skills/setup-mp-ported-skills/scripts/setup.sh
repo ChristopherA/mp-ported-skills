@@ -137,6 +137,8 @@ dist_top=$(git -C "$proj" rev-parse --show-toplevel 2>/dev/null) || dist_top=""
 dist_doc="$dist_top/docs/agents/distribution-repo.md"
 dist_read="$plugin_root/skills/supervise/scripts/distribution.sh"
 distribution_repo_state() { [ -n "$dist_top" ] && [ -f "$dist_doc" ] && echo present || echo absent; }
+# dist_named: the path the working tree's file names, resolved, or nothing.
+dist_named() { sh "$dist_read" --dir "$dist_top" --working-tree 2>/dev/null || true; }
 
 # dist_resolve <path>: the path, relative to the Project's top or absolute,
 # resolved, when it is a git checkout of its own; else prints nothing. A
@@ -173,10 +175,11 @@ dist_suggest() {
             [ -z "$_r" ] || { echo "$(dist_relative "$_r")  (a git checkout beside this -dev folder)"; return 0; } ;;
     esac
     [ -f "$dist_top/CLAUDE.md" ] || return 0
-    for _c in $(grep -i -e 'cloned' -e 'distribution repo' "$dist_top/CLAUDE.md" | grep -o '`\.\./[^` ]*`' | tr -d '`'); do
-        _r=$(dist_resolve "$_c")
-        [ -z "$_r" ] || { echo "$(dist_relative "$_r")  (named in CLAUDE.md)"; return 0; }
-    done
+    grep -i -e 'cloned' -e 'distribution repo' "$dist_top/CLAUDE.md" | grep -o '`\.\./[^` ]*`' | tr -d '`' |
+        while IFS= read -r _c; do
+            _r=$(dist_resolve "$_c")
+            [ -z "$_r" ] || { echo "$(dist_relative "$_r")  (named in CLAUDE.md)"; break; }
+        done
 }
 
 # The status line's state, and what the report says beneath it. Sets
@@ -246,7 +249,7 @@ report() {
     if [ -z "$dist_top" ]; then
         echo "    project $proj is not a git checkout"
     elif [ -f "$dist_doc" ]; then
-        _named=$(sh "$dist_read" --dir "$dist_top" --working-tree 2>/dev/null) || _named=""
+        _named=$(dist_named)
         if [ -z "$_named" ]; then echo "    docs/agents/distribution-repo.md  names no path"
         elif [ -z "$(dist_resolve "$_named")" ]; then echo "    names $_named, which is not a git checkout"
         else echo "    names $(dist_relative "$_named")"; fi
@@ -406,7 +409,7 @@ distribution-repo)
     [ "$target" != "$(CDPATH= cd -- "$dist_top" && pwd -P)" ] || refuse "  ! $dist_arg  is this Project's own repo; with no file, the code lives here
 "
     rel=$(dist_relative "$target")
-    if [ -f "$dist_doc" ] && [ "$(sh "$dist_read" --dir "$dist_top" --working-tree 2>/dev/null)" = "$target" ]; then
+    if [ -f "$dist_doc" ] && [ "$(dist_named)" = "$target" ]; then
         echo "distribution-repo: already names $rel"; exit 0
     fi
     mkdir -p "$(dirname "$dist_doc")"
@@ -422,6 +425,6 @@ distribution-repo)
 
 $rel
 DOC
-    echo "  + docs/agents/distribution-repo.md  names $rel, in project $dist_top"
+    echo "  + docs/agents/distribution-repo.md  names $rel, a git checkout, in project $dist_top"
     echo "distribution-repo: written. /supervise reads it only once it is committed and pushed to the default branch." ;;
 esac
