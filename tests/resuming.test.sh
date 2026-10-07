@@ -287,8 +287,12 @@ issues "$(list "$(issue 26 needs-triage)" "$(issue 31 needs-triage)" \
 - other/lib#31')" \
     "$(issue 64 ready-for-agent 0 'Blocked by: Me/Proj#31')" \
     "$(issue 65 ready-for-agent 0 'Blocked by: gone/away#5')" \
-    "$(issue 66 ready-for-agent 0 'Blocked by: other/lib#26, #31')")"
-check "other-repo body blockers: read in their repo, own repo local, unread blocks" "#62 t62; #63 t63" "$(run | sed -n 's/^ready, blockers closed: //p')"
+    "$(issue 66 ready-for-agent 0 'Blocked by: other/lib#26, #31')" \
+    "$(issue 67 ready-for-agent 0 'Blocked by: other/lib#26x')")"
+check "other-repo body blockers: read in their repo, unread blocks" "#62 t62; #63 t63; #67 t67" "$(run | sed -n 's/^ready, blockers closed: //p')"
+# With local #31 closed, this repo's own name reads as local, not as unread.
+issues "$(list "$(issue 64 ready-for-agent 0 'Blocked by: Me/Proj#31')")"
+check "other-repo body blockers: own repo is local" "#64 t64" "$(run | sed -n 's/^ready, blockers closed: //p')"
 kid61=$(issue 61 ready-for-agent 0 'Blocked by: other/lib#26')
 kid66=$(issue 66 ready-for-agent 0 'Blocked by: other/lib#26, #26')
 list "$kid61" "$kid66" >"$FAKE_GH/sub-24.json"

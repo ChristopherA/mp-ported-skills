@@ -54,8 +54,9 @@ ideas="/grill-with-docs on a new idea, or /improve-codebase-architecture (you ty
 # test of the frontier rule in docs/agents/issue-tracker.md) and not parked,
 # and its command; "; every open child blocked: ..." with the blockers, or
 # "parked", when none qualifies; nothing when #n has no open sub-issues.
-# Reads $open_nums, $repo_slug, $body_blockers and the label strings. The weigh step reads
-# the child's number back from "; next child #N", so keep that wording.
+# Reads $open_nums, $repo_slug, $body_blockers and the label strings. The
+# weigh step reads the child's number back from "; next child #N", so keep
+# that wording.
 # Reads every page: gh prints one array per page, merged here into one, and
 # the first page can hold only closed children.
 next_child() {
@@ -206,7 +207,7 @@ gather() {
         # A blocker in another repo (other/lib#26) is "other/lib#26", never the
         # local #26; one naming this repo ($repo, any case) is local.
         body_blockers="$body_blockers"'
-            def refs: [scan("(?<![\\w./-])(?:([\\w.-]+/[\\w.-]+))?#([0-9]+)")
+            def refs: [scan("(?<![\\w./-])(?:([\\w.-]+/[\\w.-]+))?#([0-9]+)(?!\\w)")
                 | if .[0] == null or (.[0] | ascii_downcase) == $repo then .[1] | tonumber
                   else "\(.[0])#\(.[1])" end];
             def body_blockers: reduce ((.body // "") | splits("\r?\n")) as $line
