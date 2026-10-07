@@ -84,6 +84,10 @@ A `claude` option that takes a list (`--allowedTools`, `--disallowedTools`, and 
 
 Build a JSON value from a shell string with `jq -n --arg`, as `fixed_nums` in `resuming`'s `state.sh` does. `jq -R` on empty stdin prints nothing, so a later `--argjson` of that value fails, and a script that goes on after the failure reports empty results as if they were real.
 
+## Checking a path is a repo
+
+To check that a path a file names is a repo of its own, compare `git -C <path> rev-parse --show-toplevel` with the path, resolved. `rev-parse --git-dir` succeeds in any folder inside a repo, so a plain folder there passes and the checks after it read the repo around it: `launch.sh` accepts such a folder as a Distribution repo (#167), and `state.sh` read the Project's own git as its Distribution repo's until #142's review.
+
 ## gh api lists
 
 A `gh api` read of a list (sub-issues, comments, labels) passes `--paginate` with `per_page=100`. GitHub returns one page, 30 items by default, with no sign that more exist: #40's first page of sub-issues held only closed children, so a read for its open ones came back empty with exit 0.
