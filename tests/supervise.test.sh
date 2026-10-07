@@ -780,7 +780,7 @@ check "launch: no id exits 1" "1" "$rc"
 check "launch: no id shows claude's output" "Error: claude --bg printed no session id:
 Error: something broke" "$out"
 
-# Each launch-time containment check stops the session and exits 2.
+# Each other launch-time check stops the session and exits 2.
 mismatch() { # <name> <jq filter> <expected message>
     out=$( (export FAKE_STATE_FILTER="$2"; launch --ticket 56 2>&1) )
     rc=$?
@@ -817,7 +817,7 @@ mismatch "another folder" '| .cwd = "/elsewhere"' \
 mismatch "a worktree" '| .worktreePath = "/w/.claude/worktrees/x"' \
     "Error: session c2a368ee was placed in worktree /w/.claude/worktrees/x, not $project; stopped it"
 
-# The name is a label, not a containment check (#107): a name the job did
+# The name is a label, not a check (#107): a name the job did
 # not record is noted on stderr, and the launch goes on.
 marker=$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-worker)
 renamed() { # <name> <jq filter> <recorded name>
@@ -841,7 +841,6 @@ check "launch: no job state stops the session" "stop c2a368ee" "$(command cat "$
 check "launch: no job state says why" "Error: no job state for session c2a368ee under $cfg/jobs after 1s, so its profile is unconfirmed; stopped it" "$out"
 
 # The worker's marker, which the read-only hook reads (#76).
-marker=$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-worker)
 command rm -f "$marker"
 launch --ticket 56 >/dev/null 2>&1
 check "launch: writes the worker's marker" "c2a368ee" "$(command cat "$marker" 2>/dev/null)"
