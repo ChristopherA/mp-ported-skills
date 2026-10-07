@@ -54,7 +54,7 @@ ideas="/grill-with-docs on a new idea, or /improve-codebase-architecture (you ty
 # test of the frontier rule in docs/agents/issue-tracker.md) and not parked,
 # and its command; "; every open child blocked: ..." with the blockers, or
 # "parked", when none qualifies; nothing when #n has no open sub-issues.
-# Reads $open_nums, $body_blockers and the label strings. The weigh step reads
+# Reads $open_nums, $repo_slug, $body_blockers and the label strings. The weigh step reads
 # the child's number back from "; next child #N", so keep that wording.
 # Reads every page: gh prints one array per page, merged here into one, and
 # the first page can hold only closed children.
@@ -63,7 +63,7 @@ next_child() {
         subs=$(printf '%s' "$subs" | jq -cs 'add' 2>/dev/null) &&
         printf '%s' "$subs" | jq -e 'type == "array"' >/dev/null 2>&1 ||
         { printf '; sub-issues not read'; return; }
-    kids=$(printf '%s' "$subs" | jq -c --argjson open "$open_nums" "$body_blockers"'
+    kids=$(printf '%s' "$subs" | jq -c --arg repo "$repo_slug" --argjson open "$open_nums" "$body_blockers"'
         [.[] | select(.state == "open")
          | {n: .number, t: .title, l: [.labels[].name],
             dep: (.issue_dependencies_summary.blocked_by // 0),
@@ -203,20 +203,31 @@ gather() {
         # bullets under a `Blocked by` heading (any level or case) up to the
         # next heading, the form tickets split from a spec use. Lines in a code
         # fence, closed only by its own marker, are examples, not blockers.
-        body_blockers="$body_blockers"'def body_blockers: reduce ((.body // "") | splits("\r?\n")) as $line
+        # A blocker in another repo (other/lib#26) is "other/lib#26", never the
+        # local #26; one naming this repo ($repo, any case) is local.
+        body_blockers="$body_blockers"'
+            def refs: [scan("(?<![\\w./-])(?:([\\w.-]+/[\\w.-]+))?#([0-9]+)")
+                | if .[0] == null or (.[0] | ascii_downcase) == $repo then .[1] | tonumber
+                  else "\(.[0])#\(.[1])" end];
+            def body_blockers: reduce ((.body // "") | splits("\r?\n")) as $line
             ({fence: null, under: false, nums: []};
              ($line | capture("^\\s*(?<m>```|~~~)").m // null) as $m
              | if .fence then (if $m == .fence then .fence = null else . end)
              elif $m then .fence = $m
              elif ($line | test("^\\s*#+\\s")) then
                  .under = ($line | test("^\\s*#+\\s*blocked by\\s*(:.*)?$"; "i"))
-                 | if .under then .nums += [$line | scan("#([0-9]+)") | .[0] | tonumber] else . end
+                 | if .under then .nums += ($line | refs) else . end
              elif ($line | test("^\\s*blocked by:"; "i")) or (.under and ($line | test("^\\s*[-*+]\\s")))
-             then .nums += [$line | scan("#([0-9]+)") | .[0] | tonumber]
+             then .nums += ($line | refs)
              else . end) | .nums;'
 
+        # This repo's API URL, which a linked blocker's repository_url matches
+        # when the blocker is in this repo, and its owner/repo, lower case.
+        repo_url=$(printf '%s' "$issues" | jq -r 'first(.[].repository_url // empty) // ""')
+        repo_slug=$(printf '%s' "$repo_url" | sed 's|^.*/repos/||' | tr '[:upper:]' '[:lower:]')
+
         # Open issues only (the endpoint also lists PRs), with what the cases need.
-        rows=$(printf '%s' "$issues" | jq -c --arg tr "$t_triage" --arg ti "$t_info" \
+        rows=$(printf '%s' "$issues" | jq -c --arg repo "$repo_slug" --arg tr "$t_triage" --arg ti "$t_info" \
             --arg ta "$t_agent" --arg th "$t_human" --arg tw "$t_wont" "$body_blockers"'
             [.[] | select(.pull_request | not)
              | {n: .number, t: .title, c: .comments, l: [.labels[].name],
@@ -232,9 +243,14 @@ gather() {
                         else "unlabelled" end)]
             | sort_by(.n)')
         open_nums=$(printf '%s' "$rows" | jq -c '[.[].n]')
-        # This repo's API URL, which a linked blocker's repository_url matches
-        # when the blocker is in this repo.
-        repo_url=$(printf '%s' "$issues" | jq -r 'first(.[].repository_url // empty) // ""')
+        # Open blockers a body can name: this repo's open tickets, then each
+        # other repo's ticket a body names that is open there, read once. One
+        # whose state cannot be read counts as open, as an unknown blocker.
+        for r in $(printf '%s' "$rows" | jq -r '[.[].line[] | strings] | unique | .[]'); do
+            st=$(gh api "repos/${r%%#*}/issues/${r##*#}" 2>/dev/null | jq -r '.state // empty' 2>/dev/null)
+            [ "$st" = closed ] ||
+                open_nums=$(printf '%s' "$open_nums" | jq -c --arg r "$r" '. + [$r]')
+        done
         # -n, not -R on stdin: with no closing commits the input is empty, -R
         # emits nothing, and every --argjson fx below fails.
         fixed_nums=$(jq -nc --arg f "$fixed" '$f | split(" ") | map(select(. != "") | tonumber)')
