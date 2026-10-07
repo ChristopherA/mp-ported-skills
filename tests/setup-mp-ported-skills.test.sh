@@ -1,7 +1,8 @@
 #!/bin/sh
 # setup-mp-ported-skills.test.sh -- tests for /setup-mp-ported-skills' script, which reports
 # and turns on or off each profile feature: Remote Control, the status line
-# and session titles.
+# and session titles, and writes a Project's supervision doc and Distribution
+# repo file.
 #
 # Runs setup.sh against scratch profile directories: the report for a fresh
 # profile, each feature on and off, and an existing settings.json kept and
@@ -27,6 +28,8 @@ export CLAUDE_CONFIG_DIR="$work/.claude-running"
 mkdir -p "$CLAUDE_CONFIG_DIR"
 # The status line reads these; a session that sets them must not change what renders.
 unset MP_SMART_ZONE_K MP_SESSION_TITLE CLAUDE_AUTOCOMPACT_PCT_OVERRIDE 2>/dev/null || true
+# The distribution-repo cases run git in scratch repos.
+unset CLAUDE_CODE_SESSION_ATTENDED GIT_DIR GIT_WORK_TREE 2>/dev/null || true
 
 pass=0 fail=0
 check() { # <name> <expected> <actual>
@@ -288,6 +291,105 @@ check "supervision-doc write again: untouched" "$content_before" "$(cat "$proj/d
 
 setup "$v1" "$p" --project-dir "$work/nonexistent-project" supervision-doc write
 check "supervision-doc write: no project dir exits 2" "2" "$rc"
+
+# --- distribution-repo (#143) -----------------------------------------------
+p="$work/fresh"
+dist="$work/dist"; mkdir -p "$dist"
+mkrepo() { mkdir -p "$1" && git -C "$1" init -q; }
+dist_file() { printf '%s' "$1/docs/agents/distribution-repo.md"; }
+mkrepo "$dist/app-dev"; mkrepo "$dist/app"
+real_dist=$(cd "$dist" && pwd -P)
+
+setup "$v1" "$p" --project-dir "$proj" report
+check "distribution-repo: not a checkout reads absent" "absent" "$(feature distribution-repo)"
+
+setup "$v1" "$p" --project-dir "$dist/app-dev" report
+check "distribution-repo: absent in a -dev project" "absent" "$(feature distribution-repo)"
+has "distribution-repo: suggests the -dev folder's sibling" "suggested: ../app  (a git checkout beside this -dev folder)" "$out"
+check "distribution-repo: report writes nothing" "no" "$([ -e "$(dist_file "$dist/app-dev")" ] && echo yes || echo no)"
+
+# A -dev folder whose sibling is a plain folder, not a checkout, gets no suggestion.
+mkrepo "$dist/plain-dev"; mkdir -p "$dist/plain"
+setup "$v1" "$p" --project-dir "$dist/plain-dev" report
+check "distribution-repo: plain sibling, no suggestion" "" "$(printf '%s\n' "$out" | grep 'suggested:')"
+# Nor one that sits inside another repo: a folder in a checkout is not a repo of its own.
+mkrepo "$dist/outer"; mkrepo "$dist/outer/in-dev"; mkdir -p "$dist/outer/in"
+setup "$v1" "$p" --project-dir "$dist/outer/in-dev" report
+check "distribution-repo: sibling inside another repo, no suggestion" "" "$(printf '%s\n' "$out" | grep 'suggested:')"
+
+# A Project not named -dev gets its suggestion from a CLAUDE.md line.
+mkrepo "$dist/planning"; mkrepo "$dist/code"
+printf '# Planning\n\nCode lives in the public repo, cloned at `../code`; this repo holds planning.\n' > "$dist/planning/CLAUDE.md"
+setup "$v1" "$p" --project-dir "$dist/planning" report
+has "distribution-repo: suggests from CLAUDE.md" "suggested: ../code  (named in CLAUDE.md)" "$out"
+# A CLAUDE.md path that is not a checkout is no suggestion.
+printf 'Cloned at `../nowhere`.\n' > "$dist/planning/CLAUDE.md"
+setup "$v1" "$p" --project-dir "$dist/planning" report
+check "distribution-repo: CLAUDE.md path not a checkout, no suggestion" "" "$(printf '%s\n' "$out" | grep 'suggested:')"
+
+# On yes: write the suggested sibling, relative to the Project.
+setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write ../app
+check "distribution-repo write: exit 0" "0" "$rc"
+has "distribution-repo write: says what it wrote" "names ../app" "$out"
+has "distribution-repo write: says it needs a push" "committed and pushed" "$out"
+check "distribution-repo write: supervise reads the path" "$real_dist/app" \
+    "$(sh "$plugin/skills/supervise/scripts/distribution.sh" --dir "$dist/app-dev" --working-tree)"
+has "distribution-repo write: path line is relative" "
+../app" "$(cat "$(dist_file "$dist/app-dev")")"
+setup "$v1" "$p" --project-dir "$dist/app-dev" report
+check "distribution-repo: present after writing" "present" "$(feature distribution-repo)"
+has "distribution-repo: report names the path" "names ../app" "$out"
+
+# Rerun with the same answer, absolute or relative: the file is left as it is.
+before=$(cat "$(dist_file "$dist/app-dev")")
+touch -t 202001010000 "$(dist_file "$dist/app-dev")"
+setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write "$dist/app"
+check "distribution-repo write same: exit 0" "0" "$rc"
+has "distribution-repo write same: already" "already names ../app" "$out"
+check "distribution-repo write same: untouched" "$before" "$(cat "$(dist_file "$dist/app-dev")")"
+check "distribution-repo write same: not rewritten" "202001010000" "$(date -r "$(stat -f %m "$(dist_file "$dist/app-dev")")" +%Y%m%d%H%M)"
+
+# A path that is not a git checkout is refused, and nothing is written.
+setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write ../plain
+check "distribution-repo write plain folder: exit 1" "1" "$rc"
+has "distribution-repo write plain folder: says why" "not a git checkout" "$out"
+check "distribution-repo write plain folder: file unchanged" "$before" "$(cat "$(dist_file "$dist/app-dev")")"
+setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write ../outer/in
+check "distribution-repo write folder inside a repo: exit 1" "1" "$rc"
+setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write ../missing
+check "distribution-repo write missing: exit 1" "1" "$rc"
+setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write .
+check "distribution-repo write the Project itself: exit 1" "1" "$rc"
+has "distribution-repo write the Project itself: says why" "this Project's own repo" "$out"
+check "distribution-repo refusals: file unchanged" "$before" "$(cat "$(dist_file "$dist/app-dev")")"
+mkrepo "$dist/fresh-dev"
+setup "$v1" "$p" --project-dir "$dist/fresh-dev" distribution-repo write ../plain
+check "distribution-repo write refused: no file written" "no" "$([ -e "$(dist_file "$dist/fresh-dev")" ] && echo yes || echo no)"
+
+# A changed answer rewrites it; a path outside the parent is kept absolute.
+mkrepo "$dist/elsewhere/other"
+setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write ../elsewhere/other
+check "distribution-repo write changed: exit 0" "0" "$rc"
+check "distribution-repo write changed: supervise reads the new path" "$real_dist/elsewhere/other" \
+    "$(sh "$plugin/skills/supervise/scripts/distribution.sh" --dir "$dist/app-dev" --working-tree)"
+
+# Changing the answer to no removes it; with no file, remove writes nothing.
+setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo remove
+check "distribution-repo remove: exit 0" "0" "$rc"
+check "distribution-repo remove: file gone" "no" "$([ -e "$(dist_file "$dist/app-dev")" ] && echo yes || echo no)"
+has "distribution-repo remove: says the code lives here" "code lives in this repo" "$out"
+setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo remove
+check "distribution-repo remove again: exit 0" "0" "$rc"
+has "distribution-repo remove again: already absent" "already absent" "$out"
+
+setup "$v1" "$p" --project-dir "$proj" distribution-repo write ../app
+check "distribution-repo write: project not a checkout exits 2" "2" "$rc"
+setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write
+check "distribution-repo write with no path: exit 2" "2" "$rc"
+setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo on
+check "distribution-repo on: exit 2" "2" "$rc"
+setup "$v1" "$p" --project-dir "$dist/app-dev" supervision-doc write ../app
+check "supervision-doc write with a path: exit 2" "2" "$rc"
 
 # --- errors -------------------------------------------------------------------
 p="$work/badjson"; mkdir -p "$p"; printf '{not json\n' > "$p/settings.json"

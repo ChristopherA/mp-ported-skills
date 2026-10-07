@@ -2,8 +2,10 @@
 # setup.sh -- report, and turn on or off, each profile feature this plugin
 # offers: Remote Control at startup, the status line, and session titles.
 #
-# Usage: setup.sh [--config-dir DIR] report
+# Usage: setup.sh [--config-dir DIR] [--project-dir DIR] report
 #        setup.sh [--config-dir DIR] <feature> on|off [--force] [--replace-statusline]
+#        setup.sh [--project-dir DIR] supervision-doc write
+#        setup.sh [--project-dir DIR] distribution-repo write PATH | remove
 #   <feature>  remote-control  remoteControlAtStartup in settings.json
 #              status-line     statusLine in settings.json, plus the profile's
 #                              copy of the status line and its install stamp
@@ -14,6 +16,13 @@
 #                         release that cannot be ordered against this
 #                         plugin's (a pre-release, say)
 #   --replace-statusline  replace a statusLine that runs another command
+#
+# Two more write files in the Project (--project-dir, else the current
+# directory), not the profile: supervision-doc writes docs/agents/
+# supervision.md, and distribution-repo writes or removes docs/agents/
+# distribution-repo.md at the Project repo's top, naming the separate repo
+# its code is committed to (#143). PATH is relative to that top or
+# absolute, and must be a git checkout of its own.
 #
 # The profile is --config-dir, else $CLAUDE_CONFIG_DIR, else ~/.claude. The
 # report prints one line per feature, "on", "off" or "modified" (the status
@@ -38,26 +47,29 @@ usage() {
     echo "usage: setup.sh [--config-dir DIR] [--project-dir DIR] report" >&2
     echo "       setup.sh [--config-dir DIR] <remote-control|status-line|titles> <on|off> [--force] [--replace-statusline]" >&2
     echo "       setup.sh [--project-dir DIR] supervision-doc write" >&2
+    echo "       setup.sh [--project-dir DIR] distribution-repo write PATH | remove" >&2
     exit 2
 }
 
-force=0 replace=0 cfg="" proj="" feature="" want=""
+force=0 replace=0 cfg="" proj="" feature="" want="" dist_arg=""
 while [ $# -gt 0 ]; do
     case $1 in
         --config-dir) [ $# -ge 2 ] || usage; cfg=$2; shift ;;
         --project-dir) [ $# -ge 2 ] || usage; proj=$2; shift ;;
         --force) force=1 ;;
         --replace-statusline) replace=1 ;;
-        report | remote-control | status-line | titles | supervision-doc) [ -z "$feature" ] || usage; feature=$1 ;;
-        on | off) [ -n "$feature" ] && [ -z "$want" ] && [ "$feature" != supervision-doc ] || usage; want=$1 ;;
-        write) [ "$feature" = supervision-doc ] && [ -z "$want" ] || usage; want=$1 ;;
-        *) usage ;;
+        report | remote-control | status-line | titles | supervision-doc | distribution-repo) [ -z "$feature" ] || usage; feature=$1 ;;
+        on | off) case $feature in remote-control | status-line | titles) [ -z "$want" ] || usage ;; *) usage ;; esac; want=$1 ;;
+        write) case $feature in supervision-doc | distribution-repo) [ -z "$want" ] || usage ;; *) usage ;; esac; want=$1 ;;
+        remove) [ "$feature" = distribution-repo ] && [ -z "$want" ] || usage; want=$1 ;;
+        *) [ "$feature" = distribution-repo ] && [ "$want" = write ] && [ -z "$dist_arg" ] || usage; dist_arg=$1 ;;
     esac
     shift
 done
 case $feature in
     report) [ -z "$want" ] || usage ;;
     supervision-doc) [ "$want" = write ] || usage ;;
+    distribution-repo) [ "$want" = remove ] || [ -n "$dist_arg" ] || usage ;;
     '') usage ;;
     *) [ -n "$want" ] || usage ;;
 esac
@@ -116,6 +128,56 @@ titles_state() { [ "$(get .env.MP_SESSION_TITLE)" = 1 ] && echo on || echo off; 
 # or remove by hand, and an empty one already grants nothing.
 supervision_doc="$proj/docs/agents/supervision.md"
 supervision_doc_state() { [ -f "$supervision_doc" ] && echo present || echo absent; }
+
+# distribution-repo (#143): docs/agents/distribution-repo.md at the Project
+# repo's top, which /supervise's distribution.sh reads from origin/<default>
+# (#125). Empty dist_top when the Project is not a git checkout: the file is
+# read only through git, so there is nothing to write.
+dist_top=$(git -C "$proj" rev-parse --show-toplevel 2>/dev/null) || dist_top=""
+dist_doc="$dist_top/docs/agents/distribution-repo.md"
+dist_read="$plugin_root/skills/supervise/scripts/distribution.sh"
+distribution_repo_state() { [ -n "$dist_top" ] && [ -f "$dist_doc" ] && echo present || echo absent; }
+
+# dist_resolve <path>: the path, relative to the Project's top or absolute,
+# resolved, when it is a git checkout of its own; else prints nothing. A
+# folder inside another repo passes `rev-parse --git-dir`, so compare tops.
+dist_resolve() {
+    case $1 in /*) _p=$1 ;; *) _p="$dist_top/$1" ;; esac
+    [ -d "$_p" ] || return 0
+    _p=$(CDPATH= cd -- "$_p" && pwd -P)
+    [ "$(git -C "$_p" rev-parse --show-toplevel 2>/dev/null)" = "$_p" ] && printf '%s\n' "$_p"
+    return 0
+}
+
+# dist_relative <resolved path>: as the file writes it, relative to the
+# Project's top when it is beside or below it, else absolute.
+dist_relative() {
+    _parent=$(dirname -- "$dist_top")
+    case $1 in
+        "$dist_top"/*) printf '%s\n' "${1#"$dist_top"/}" ;;
+        "$_parent"/*) printf '../%s\n' "${1#"$_parent"/}" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
+# dist_suggest: the Distribution repo the layout suggests, as
+# "<relative path>  (<why>)", or nothing. A -dev folder's sibling without
+# the suffix comes first, then the first `../name` on a CLAUDE.md line that
+# says the code is cloned there or names a distribution repo. Either must be
+# a git checkout of its own.
+dist_suggest() {
+    _base=$(basename -- "$dist_top")
+    case $_base in
+        ?*-dev)
+            _r=$(dist_resolve "../${_base%-dev}")
+            [ -z "$_r" ] || { echo "$(dist_relative "$_r")  (a git checkout beside this -dev folder)"; return 0; } ;;
+    esac
+    [ -f "$dist_top/CLAUDE.md" ] || return 0
+    for _c in $(grep -i -e 'cloned' -e 'distribution repo' "$dist_top/CLAUDE.md" | grep -o '`\.\./[^` ]*`' | tr -d '`'); do
+        _r=$(dist_resolve "$_c")
+        [ -z "$_r" ] || { echo "$(dist_relative "$_r")  (named in CLAUDE.md)"; return 0; }
+    done
+}
 
 # The status line's state, and what the report says beneath it. Sets
 #   sl_status    on | off | modified
@@ -179,6 +241,18 @@ report() {
     printf '  %-15s %s\n' supervision-doc "$(supervision_doc_state)"
     if [ "$(supervision_doc_state)" = absent ]; then
         echo "    docs/agents/supervision.md  missing, in project $proj; a /supervise worker stops for approval on every shared action until one is written"
+    fi
+    printf '  %-15s %s\n' distribution-repo "$(distribution_repo_state)"
+    if [ -z "$dist_top" ]; then
+        echo "    project $proj is not a git checkout"
+    elif [ -f "$dist_doc" ]; then
+        _named=$(sh "$dist_read" --dir "$dist_top" --working-tree 2>/dev/null) || _named=""
+        if [ -z "$_named" ]; then echo "    docs/agents/distribution-repo.md  names no path"
+        elif [ -z "$(dist_resolve "$_named")" ]; then echo "    names $_named, which is not a git checkout"
+        else echo "    names $(dist_relative "$_named")"; fi
+    else
+        _s=$(dist_suggest)
+        [ -z "$_s" ] || echo "    suggested: $_s"
     fi
 }
 
@@ -317,4 +391,37 @@ itself one by editing this file.
 DOC
     echo "  + docs/agents/supervision.md  written, in project $proj"
     echo "supervision-doc: written. It grants nothing until a line is added under \"## Grants\" and pushed." ;;
+distribution-repo)
+    [ -n "$dist_top" ] || { echo "ERROR: project $proj is not a git checkout" >&2; exit 2; }
+    if [ "$want" = remove ]; then
+        if [ ! -f "$dist_doc" ]; then echo "distribution-repo: already absent; with no file, this Project's code lives in this repo"; exit 0; fi
+        command rm -f "$dist_doc"
+        echo "  - docs/agents/distribution-repo.md  removed, in project $dist_top"
+        echo "distribution-repo: removed. With no file, this Project's code lives in this repo, once the removal is committed and pushed."
+        exit 0
+    fi
+    target=$(dist_resolve "$dist_arg")
+    [ -n "$target" ] || refuse "  ! $dist_arg  is not a git checkout of its own, relative to $dist_top
+"
+    [ "$target" != "$(CDPATH= cd -- "$dist_top" && pwd -P)" ] || refuse "  ! $dist_arg  is this Project's own repo; with no file, the code lives here
+"
+    rel=$(dist_relative "$target")
+    if [ -f "$dist_doc" ] && [ "$(sh "$dist_read" --dir "$dist_top" --working-tree 2>/dev/null)" = "$target" ]; then
+        echo "distribution-repo: already names $rel"; exit 0
+    fi
+    mkdir -p "$(dirname "$dist_doc")"
+    cat >"$dist_doc" <<DOC
+# Distribution repo
+
+<!-- This Project's code is committed to the repo at the path below,
+     relative to this repo's top or absolute; its tracker and planning
+     stay here. /supervise reads this file only from the default branch
+     as committed on its remote (origin/<default>), so a change takes
+     effect once committed and pushed. With no file, the code lives in
+     this repo. -->
+
+$rel
+DOC
+    echo "  + docs/agents/distribution-repo.md  names $rel, in project $dist_top"
+    echo "distribution-repo: written. /supervise reads it only once it is committed and pushed to the default branch." ;;
 esac
