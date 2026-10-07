@@ -287,8 +287,10 @@ jq -e '.respawnFlags as $f | [range(0; ($f | length) - 1)]
 jq -e --arg g "$GRANTS" '.respawnFlags as $f | [range(0; ($f | length) - 1)]
         | any(. as $i | $f[$i] == "--append-system-prompt" and $f[$i + 1] == $g)' "$job" >/dev/null ||
     reject "was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
+# The name is a label for telling workers apart, not a containment check, so
+# a name the job did not record is noted and the launch goes on (#107).
 got=$(jq -r '.name // "(none recorded)"' "$job")
-[ "$got" = "$NAME" ] || reject "is named '$got', not '$NAME'"
+[ "$got" = "$NAME" ] || printf "note: session %s is named '%s', not '%s'\n" "$id" "$got" "$NAME" >&2
 if [ -n "$EFFORT" ]; then
     jq -e --arg e "$EFFORT" '.respawnFlags as $f | [range(0; ($f | length) - 1)]
             | any(. as $i | $f[$i] == "--effort" and $f[$i + 1] == $e)' "$job" >/dev/null ||

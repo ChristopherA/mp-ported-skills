@@ -780,7 +780,7 @@ check "launch: no id exits 1" "1" "$rc"
 check "launch: no id shows claude's output" "Error: claude --bg printed no session id:
 Error: something broke" "$out"
 
-# Each launch-time check stops the session and exits 2.
+# Each launch-time containment check stops the session and exits 2.
 mismatch() { # <name> <jq filter> <expected message>
     out=$( (export FAKE_STATE_FILTER="$2"; launch --ticket 56 2>&1) )
     rc=$?
@@ -816,10 +816,23 @@ mismatch "another folder" '| .cwd = "/elsewhere"' \
     "Error: session c2a368ee runs in /elsewhere, not $project; stopped it"
 mismatch "a worktree" '| .worktreePath = "/w/.claude/worktrees/x"' \
     "Error: session c2a368ee was placed in worktree /w/.claude/worktrees/x, not $project; stopped it"
-mismatch "name not recorded" '| .name = "mattpocock skills implementation"' \
-    "Error: session c2a368ee is named 'mattpocock skills implementation', not 'worker project #56: Add the thing'; stopped it"
-mismatch "no name recorded" '| del(.name)' \
-    "Error: session c2a368ee is named '(none recorded)', not 'worker project #56: Add the thing'; stopped it"
+
+# The name is a label, not a containment check (#107): a name the job did
+# not record is noted on stderr, and the launch goes on.
+marker=$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-worker)
+renamed() { # <name> <jq filter> <recorded name>
+    command rm -f "$marker"
+    err=$( (export FAKE_STATE_FILTER="$2"; launch --ticket 56 2>&1 >"$work/launch-out") )
+    rc=$?
+    check "launch: $1 exits 0" "0" "$rc"
+    check "launch: $1 prints the id" "c2a368ee" "$(command cat "$work/launch-out")"
+    check "launch: $1 stops nothing" "" "$(command cat "$fake/calls" 2>/dev/null)"
+    check "launch: $1 writes the marker" "c2a368ee" "$(command cat "$marker" 2>/dev/null)"
+    check "launch: $1 notes it" "note: session c2a368ee is named '$3', not 'worker project #56: Add the thing'" "$err"
+}
+renamed "name not recorded" '| .name = "mattpocock skills implementation"' "mattpocock skills implementation"
+renamed "no name recorded" '| del(.name)' "(none recorded)"
+command rm -f "$marker"
 
 out=$( (export FAKE_NO_STATE=1 MP_SUPERVISE_WAIT=1; launch --ticket 56 2>&1) )
 rc=$?
