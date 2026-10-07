@@ -9,10 +9,11 @@
 # edit the committed copy heading into its next commit, or edit the
 # profile's own files under $CLAUDE_CONFIG_DIR (rules, settings, hooks)
 # that this session, or a future one, reads. This hook refuses an Edit,
-# Write or NotebookEdit whose target is docs/agents/supervision.md in the
-# checkout the session is working in, or any path under $CLAUDE_CONFIG_DIR,
-# in an unattended, auto-mode session -- a /supervise worker, or any other
-# background session launched the same way. The maintainer's own
+# Write or NotebookEdit whose target is docs/agents/supervision.md, or
+# docs/agents/distribution-repo.md, which names the Project's Distribution
+# repo (#125), in the checkout the session is working in, or any path under
+# $CLAUDE_CONFIG_DIR, in an unattended, auto-mode session -- a /supervise
+# worker, or any other background session launched the same way. The maintainer's own
 # interactive session, whatever its permission mode, is never in scope.
 #
 # Detection is CLAUDE_CODE_SESSION_ATTENDED and permission_mode, the same
@@ -73,6 +74,8 @@ while [ ! -d "$dir" ] && [ "$dir" != / ]; do dir=$(dirname -- "$dir"); done
 if toplevel=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null); then
     [ "$abs" = "$toplevel/docs/agents/supervision.md" ] &&
         refuse "A background session in auto mode cannot edit docs/agents/supervision.md on its own (#58): a worker that could grant itself a standing grant would make the grant meaningless. Leave this to the maintainer's own interactive session."
+    [ "$abs" = "$toplevel/docs/agents/distribution-repo.md" ] &&
+        refuse "A background session in auto mode cannot edit docs/agents/distribution-repo.md on its own (#125): it names the repo /supervise checks and holds read-only for the worker, and a worker that could repoint it could move its work out of that hold. Leave this to the maintainer's own interactive session."
 fi
 
 # The profile directory, resolved the same way CLAUDE_CONFIG_DIR names it,

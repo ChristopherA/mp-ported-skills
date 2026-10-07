@@ -2,7 +2,7 @@
 # launch.sh -- start /implement #N as a background session in a Project, and
 # confirm the session got what it was launched with.
 #
-# Runs `claude --bg --model MODEL [--effort LEVEL] --disallowedTools DENY
+# Runs `claude --bg --model MODEL [--effort LEVEL] [--add-dir DIST] --disallowedTools DENY
 # --no-chrome --settings '{"worktree":{"bgIsolation":"none"}}' --append-system-prompt
 # GRANTS --name NAME --permission-mode auto '/mattpocock-skills:implement #N'` in DIR with
 # CLAUDE_CONFIG_DIR set explicitly, so the session runs under this profile
@@ -103,6 +103,21 @@
 # attended session read-only in the checkout (scripts/supervise-read-only.sh)
 # until release.sh removes it.
 #
+# A Project that names a Distribution repo in docs/agents/distribution-repo.md
+# on origin (distribution.sh, #125) has it checked the same way, each error
+# naming it, and refused when it is missing or is the Project's own repo.
+# The worker still runs in DIR, so `gh` reads the Project's tracker; it is
+# told the repo's path in its --append-system-prompt and given --add-dir
+# with it, which the job's respawnFlags must record. Checked live with
+# Claude Code 2.1.292: a `claude --bg --add-dir <repo> --settings
+# '{"worktree":{"bgIsolation":"none"}}' --permission-mode auto` session in
+# another folder wrote a file in <repo> and committed it there, and its
+# job's respawnFlags began ["--add-dir","<repo>", ...]. The same session
+# without --add-dir also committed in a repo under /tmp, so the flag is the
+# access the launch declares and checks, not one auto mode was seen to
+# require. The marker is written in both repos, each naming the other on
+# its second line, so the read-only hook holds the supervisor out of both.
+#
 # Exits 0 launched and confirmed; 1 not launched; 2 launched, failed a check
 # and stopped.
 
@@ -156,42 +171,72 @@ set -- "$CONFIG"/plugins/cache/*/mattpocock-skills/*/skills/*/implement/SKILL.md
 # The entry check (#76): the checkout is on its default branch, its tree is
 # clean, and no other background session is live in it, so the worker
 # starts where its commits belong and alone. The default branch is found as
-# resuming's state.sh finds it.
-git -C "$DIR" rev-parse --git-dir >/dev/null 2>&1 || fail "$DIR is not a git checkout; not launched"
-# A linked worktree is refused first (#79), whatever branch it holds: a
-# worktree can hold the default branch while the main checkout is elsewhere.
+# resuming's state.sh finds it. check_repo <dir> <label> runs it on one
+# repo, its errors naming the repo as <label><dir>; the Distribution repo
+# takes the same checks (#125).
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-linked=$(sh "$SCRIPT_DIR/main-checkout.sh" "$DIR" </dev/null) || fail "$linked; not launched"
-status=$(git -C "$DIR" status --porcelain) || fail "git status failed in $DIR, so its tree is unconfirmed; not launched"
-dirty=$(printf '%s' "$status" | grep -c '^')
-if [ "$dirty" -gt 0 ]; then
-    [ "$dirty" = 1 ] && paths=path || paths=paths
-    fail "$DIR has uncommitted changes ($dirty $paths); commit or clear them before launching a worker there; not launched"
+check_repo() {
+    git -C "$1" rev-parse --git-dir >/dev/null 2>&1 || fail "$2$1 is not a git checkout; not launched"
+    # A linked worktree is refused first (#79), whatever branch it holds: a
+    # worktree can hold the default branch while the main checkout is
+    # elsewhere.
+    linked=$(sh "$SCRIPT_DIR/main-checkout.sh" "$1" </dev/null) || fail "$linked; not launched"
+    status=$(git -C "$1" status --porcelain) || fail "git status failed in $2$1, so its tree is unconfirmed; not launched"
+    dirty=$(printf '%s' "$status" | grep -c '^')
+    if [ "$dirty" -gt 0 ]; then
+        [ "$dirty" = 1 ] && paths=path || paths=paths
+        fail "$2$1 has uncommitted changes ($dirty $paths); commit or clear them before launching a worker there; not launched"
+    fi
+    branch=$(git -C "$1" symbolic-ref --short -q HEAD || echo "(detached)")
+    default=$(git -C "$1" symbolic-ref --short -q refs/remotes/origin/HEAD)
+    default=${default#origin/}
+    if [ -z "$default" ]; then
+        for b in main master; do
+            git -C "$1" show-ref -q --verify "refs/heads/$b" && { default=$b; break; }
+        done
+    fi
+    default=${default:-main}
+    [ "$branch" = "$default" ] || fail "$2$1 is on $branch, not the default branch $default; not launched"
+}
+check_repo "$DIR" ""
+project_default=$default
+
+# The Distribution repo (#125), named on origin's default branch, read once
+# here and kept for the run. distribution.sh passes its own notes (a copy
+# only in the working tree) and errors to stderr.
+DIST=$(sh "$SCRIPT_DIR/distribution.sh" --dir "$DIR" </dev/null) ||
+    fail "distribution.sh failed, so the Distribution repo is unknown; not launched"
+if [ -n "$DIST" ]; then
+    [ -d "$DIST" ] || fail "Distribution repo $DIST, named in docs/agents/distribution-repo.md, is missing; not launched"
+    check_repo "$DIST" "Distribution repo "
+    [ "$(git -C "$DIST" rev-parse --show-toplevel)" != "$(git -C "$DIR" rev-parse --show-toplevel)" ] ||
+        fail "Distribution repo $DIST is the Project's own repo; name another repo in docs/agents/distribution-repo.md, or remove it; not launched"
 fi
-branch=$(git -C "$DIR" symbolic-ref --short -q HEAD || echo "(detached)")
-default=$(git -C "$DIR" symbolic-ref --short -q refs/remotes/origin/HEAD)
-default=${default#origin/}
-if [ -z "$default" ]; then
-    for b in main master; do
-        git -C "$DIR" show-ref -q --verify "refs/heads/$b" && { default=$b; break; }
-    done
-fi
-default=${default:-main}
-[ "$branch" = "$default" ] || fail "$DIR is on $branch, not the default branch $default; not launched"
+default=$project_default
+
 list=$(CLAUDE_CONFIG_DIR="$CONFIG" claude agents --json --all </dev/null 2>/dev/null) ||
     fail "claude agents --json --all failed, so other sessions in $DIR are unknown; not launched"
 # A row is live unless it is stopped, or done with no pid: a finished worker
 # shows done with no pid before and after claude stop. Any other state,
 # unknown or missing included, counts as live. resume.sh uses the same rule.
-others=$(printf '%s' "$list" | jq -er --arg d "$DIR" '
-    [.[] | select(.kind == "background" and .cwd == $d and .state != "stopped"
-                  and (.state != "done" or .pid != null))
-     | "\(.id) (\(.state // "unknown"))"] | join(", ")' 2>/dev/null) ||
+# others_in <dir>: the live background sessions there.
+others_in() {
+    printf '%s' "$list" | jq -er --arg d "$1" '
+        [.[] | select(.kind == "background" and .cwd == $d and .state != "stopped"
+                      and (.state != "done" or .pid != null))
+         | "\(.id) (\(.state // "unknown"))"] | join(", ")' 2>/dev/null
+}
+others=$(others_in "$DIR") ||
     fail "claude agents --json --all printed no list jq could read, so other sessions in $DIR are unknown; not launched"
 [ -z "$others" ] || fail "another live background session in $DIR: $others; not launched"
+if [ -n "$DIST" ]; then
+    others=$(others_in "$DIST")
+    [ -z "$others" ] || fail "another live background session in Distribution repo $DIST: $others; not launched"
+fi
 # The marker the read-only hook reads. One left by a worker that is no
 # longer live (the check above found none) is stale and is replaced below.
 marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker)
+[ -z "$DIST" ] || dist_marker=$(git -C "$DIST" rev-parse --path-format=absolute --git-path mp-supervise-worker)
 
 # The standing grants, each as grant.sh cites it, from its source alone.
 # grant.sh exits 1 both for "not granted" and for an error, so its stderr
@@ -219,6 +264,8 @@ else
 fi
 GRANTS="$GRANTS
 A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin $default\`."
+[ -z "$DIST" ] || GRANTS="$GRANTS
+This Project's code lives in its Distribution repo, $DIST, named in docs/agents/distribution-repo.md. Make the ticket's code changes and commits there, by path (\`git -C $DIST\`), on its current branch, with no new branch or worktree; read the ticket and the Project's docs from this folder."
 
 # The worker's name (#103), in characters, not bytes, whatever the locale.
 top=$(git -C "$DIR" rev-parse --show-toplevel)
@@ -236,6 +283,8 @@ fi
 
 set -- --model "$MODEL"
 [ -z "$EFFORT" ] || set -- "$@" --effort "$EFFORT"
+# --add-dir takes a list, so another option follows it.
+[ -z "$DIST" ] || set -- "$@" --add-dir "$DIST"
 out=$(cd "$DIR" && CLAUDE_CONFIG_DIR="$CONFIG" claude --bg "$@" \
     --disallowedTools "$DENY" --no-chrome --settings "$GUARD_OFF" \
     --append-system-prompt "$GRANTS" --name "$NAME" --permission-mode auto \
@@ -306,5 +355,23 @@ kept=$(jq -r --arg u "$UNUSED" '.respawnFlags as $f
 jq -e '.respawnFlags | index("--no-chrome") != null' "$job" >/dev/null ||
     reject "has Claude in Chrome on: --no-chrome is not in its flags (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
 
-echo "$id" >"$marker" || reject "could not write the marker $marker, so this checkout is not held read-only"
+if [ -n "$DIST" ]; then
+    jq -e --arg d "$DIST" '.respawnFlags as $f | [range(0; ($f | length) - 1)]
+            | any(. as $i | $f[$i] == "--add-dir" and $f[$i + 1] == $d)' "$job" >/dev/null ||
+        reject "cannot write in Distribution repo $DIST: --add-dir $DIST is not in its flags (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
+fi
+
+# Each marker names the other repo on its second line, so release.sh clears
+# both from the Project and the read-only hook's refusal in the Distribution
+# repo names the Project folder to release.
+if [ -n "$DIST" ]; then
+    printf '%s\nproject %s\n' "$id" "$DIR" >"$dist_marker" ||
+        reject "could not write the marker $dist_marker, so Distribution repo $DIST is not held read-only"
+    printf '%s\ndistribution %s\n' "$id" "$DIST" >"$marker" || {
+        command rm -f "$dist_marker"
+        reject "could not write the marker $marker, so this checkout is not held read-only"
+    }
+else
+    echo "$id" >"$marker" || reject "could not write the marker $marker, so this checkout is not held read-only"
+fi
 echo "$id"

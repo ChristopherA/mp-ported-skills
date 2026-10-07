@@ -1,7 +1,7 @@
 #!/bin/sh
 # deny-worker-grant-edits.test.sh -- tests for the PreToolUse hook that
-# refuses a background worker's own edit to docs/agents/supervision.md or
-# the profile directory (#58).
+# refuses a background worker's own edit to docs/agents/supervision.md,
+# docs/agents/distribution-repo.md (#125) or the profile directory (#58).
 #
 # Runs the command string from hooks.json, as Claude Code does, with a
 # PreToolUse payload on stdin and CLAUDE_CODE_SESSION_ATTENDED set the way
@@ -64,6 +64,18 @@ check "the same file via a session run inside a subfolder: deny" "deny" \
 check "refusal names #58 and the maintainer's own session" \
     "A background session in auto mode cannot edit docs/agents/supervision.md on its own (#58): a worker that could grant itself a standing grant would make the grant meaningless. Leave this to the maintainer's own interactive session." \
     "$(reason 0 auto Edit "$repo/docs/agents/supervision.md" "$repo" "$cfg")"
+
+# distribution-repo.md names the Distribution repo /supervise holds for the
+# worker (#125), so a worker cannot repoint it either.
+check "Write to distribution-repo.md: deny" "deny" \
+    "$(decision 0 auto Write "$repo/docs/agents/distribution-repo.md" "$repo" "$cfg")"
+check "Edit of distribution-repo.md from a subfolder: deny" "deny" \
+    "$(decision 0 auto Edit "$repo/docs/agents/distribution-repo.md" "$repo/sub" "$cfg")"
+check "distribution-repo.md: the reason names the file and the hold" \
+    "A background session in auto mode cannot edit docs/agents/distribution-repo.md on its own (#125): it names the repo /supervise checks and holds read-only for the worker, and a worker that could repoint it could move its work out of that hold. Leave this to the maintainer's own interactive session." \
+    "$(reason 0 auto Edit "$repo/docs/agents/distribution-repo.md" "$repo" "$cfg")"
+check "distribution-repo.md in an interactive session is not refused" "" \
+    "$(decision 1 auto Edit "$repo/docs/agents/distribution-repo.md" "$repo" "$cfg")"
 
 # A different file in the same folder, or a similarly named file elsewhere,
 # is not the grant file.

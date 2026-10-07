@@ -521,9 +521,10 @@ case "$1" in
         if [ -n "${FAKE_BG_OUT+x}" ]; then printf '%s\n' "$FAKE_BG_OUT"; exit 0; fi
         # A named session's line ends with its name, and with FORCE_COLOR
         # set the id is colored, as 2.1.288 printed for `claude --bg --name`.
-        asp=""; effort=""; name=""; prev=""
+        asp=""; effort=""; name=""; add=""; prev=""
         for a in "$@"; do
             [ "$prev" = --append-system-prompt ] && asp=$a
+            [ "$prev" = --add-dir ] && add=$a
             [ "$prev" = --effort ] && effort=$a
             [ "$prev" = --name ] && name=$a
             prev=$a
@@ -538,11 +539,14 @@ case "$1" in
             # medium` job did on 2.1.286, and --name, with the name in
             # .name, as a live `claude --bg --name` job did on 2.1.288.
             mkdir -p "$CLAUDE_CONFIG_DIR/jobs/c2a368ee"
-            jq --arg cfg "$CLAUDE_CONFIG_DIR" --arg cwd "$(pwd -P)" --arg asp "$asp" --arg effort "$effort" --arg name "$name" \
+            # It records --add-dir, as a live `claude --bg --add-dir` job
+            # did on 2.1.292 (#125).
+            jq --arg cfg "$CLAUDE_CONFIG_DIR" --arg cwd "$(pwd -P)" --arg asp "$asp" --arg effort "$effort" --arg name "$name" --arg add "$add" \
                 ".cwd = \$cwd | .providerEnv.CLAUDE_CONFIG_DIR = \$cfg
                  | if \$asp != \"\" then .respawnFlags = [\"--append-system-prompt\", \$asp] + .respawnFlags else . end
                  | if \$effort != \"\" then .respawnFlags += [\"--effort\", \$effort] else . end
                  | if \$name != \"\" then .respawnFlags += [\"--name\", \$name] | .name = \$name | .nameSource = \"user\" else . end
+                 | if \$add != \"\" then .respawnFlags += [\"--add-dir\", \$add] else . end
                  ${FAKE_STATE_FILTER:-}" \
                 "$FAKE_JOB" >"$CLAUDE_CONFIG_DIR/jobs/c2a368ee/state.json"
         fi ;;
@@ -1681,6 +1685,248 @@ command succeeded granted (issue-comment): sudo gh issue comment 5 --body \"will
 command succeeded ungranted: sudo gh issue comment 5 --edit-last --body x -- pr 5 created
 command succeeded granted (push): echo git push origin main | sh -- pr 5 created" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo7" --start "$gstart" </dev/null | grep '^command')"
+
+# --- Distribution repo (#125) ----------------------------------------------
+# A Project whose code is committed to a separate repo beside it names that
+# repo in docs/agents/distribution-repo.md, read from origin's default
+# branch. Builds a Project and a Distribution repo, each with a bare remote.
+dgit() { # <folder> <git args...> -- git there, unsigned, quiet
+    dg_dir=$1; shift
+    git -C "$dg_dir" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@" >/dev/null 2>&1
+}
+new_repo() { # <folder> -- a repo on main, one commit, pushed to <folder>.git
+    git init -q --bare "$1.git"
+    git init -q -b main "$1"
+    dgit "$1" commit --allow-empty -m seed
+    dgit "$1" remote add origin "$1.git"
+    dgit "$1" push origin main
+    dgit "$1" remote set-head origin main
+}
+dproj="$work/dproj"
+dist="$work/dist"
+new_repo "$dproj"
+new_repo "$dist"
+distribution() { sh "$scripts/distribution.sh" --dir "$dproj" </dev/null; }
+name_dist() { # <file content> -- commit it as distribution-repo.md and push it
+    mkdir -p "$dproj/docs/agents"
+    printf '%s' "$1" >"$dproj/docs/agents/distribution-repo.md"
+    dgit "$dproj" add docs
+    dgit "$dproj" commit -m "Name the Distribution repo"
+    dgit "$dproj" push origin main
+}
+
+out=$(distribution 2>&1); rc=$?
+check "distribution: none named prints nothing" "0 " "$rc $out"
+mkdir -p "$dproj/docs/agents"
+printf '../dist\n' >"$dproj/docs/agents/distribution-repo.md"
+check "distribution: a copy only in the working tree is ignored, with a note" "0 
+note: docs/agents/distribution-repo.md is in the working tree or current branch, not on the committed origin/main; ignored" \
+    "$(out=$(distribution 2>"$work/derr"); echo "$? $out"; command cat "$work/derr")"
+dgit "$dproj" add docs
+dgit "$dproj" commit -m "Name it locally"
+check "distribution: a copy committed but not pushed is ignored too" "note: docs/agents/distribution-repo.md is in the working tree or current branch, not on the committed origin/main; ignored" \
+    "$(distribution 2>&1 >/dev/null)"
+dgit "$dproj" reset --hard origin/main
+name_dist '# Distribution repo
+
+<!-- The repo this Project'"'"'s code is committed to,
+     relative to this repo'"'"'s top. -->
+
+- `../dist`
+'
+check "distribution: a heading, a comment, a bullet and backticks around the path" "$dist" "$(distribution 2>&1)"
+name_dist "$dist/
+"
+check "distribution: an absolute path" "$dist" "$(distribution 2>&1)"
+name_dist '../gone
+'
+check "distribution: a missing repo is named by its joined path" "$dproj/../gone" "$(distribution 2>&1)"
+name_dist '# Distribution repo
+'
+out=$(distribution 2>&1); rc=$?
+check "distribution: a file with no path line is an error" "1 Error: docs/agents/distribution-repo.md on origin/main names no path" "$rc $out"
+name_dist '../dist
+'
+
+# launch.sh checks the Distribution repo as it checks the Project.
+dist_marker=$(git -C "$dist" rev-parse --path-format=absolute --git-path mp-supervise-worker)
+dproj_marker=$(git -C "$dproj" rev-parse --path-format=absolute --git-path mp-supervise-worker)
+clear_markers() { command rm -f "$dist_marker" "$dproj_marker"; }
+out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?
+check "launch dist: exit 0" "0 c2a368ee" "$rc $out"
+check "launch dist: --add-dir with the repo, before another option" "--add-dir
+$dist
+--disallowedTools" "$(sed -n '/^--add-dir$/,/^--disallowedTools$/p' "$fake/args")"
+check "launch dist: runs in the Project folder" "$dproj" "$(command cat "$fake/cwd")"
+check "launch dist: the worker is told the repo" "This Project's code lives in its Distribution repo, $dist, named in docs/agents/distribution-repo.md. Make the ticket's code changes and commits there, by path (\`git -C $dist\`), on its current branch, with no new branch or worktree; read the ticket and the Project's docs from this folder." \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 1)"
+check "launch dist: the Project's marker names the repo" "c2a368ee
+distribution $dist" "$(command cat "$dproj_marker")"
+check "launch dist: the repo's marker names the Project" "c2a368ee
+project $dproj" "$(command cat "$dist_marker")"
+clear_markers
+
+echo dirty >"$dist/x"
+out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?
+check "launch dist: a dirty repo is refused, by name" "1 Error: Distribution repo $dist has uncommitted changes (1 path); commit or clear them before launching a worker there; not launched" "$rc $out"
+check "launch dist: a refusal launches nothing" "no" "$([ -f "$fake/args" ] && echo yes || echo no)"
+command rm -f "$dist/x"
+dgit "$dist" checkout -b topic
+out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?
+check "launch dist: a repo off its default branch is refused" "1 Error: Distribution repo $dist is on topic, not the default branch main; not launched" "$rc $out"
+dgit "$dist" checkout main
+dgit "$dist" branch -D topic
+dgit "$dist" worktree add "$work/dist-linked" -b linked
+check "launch dist: the marker paths are untouched by a refusal" "no no" \
+    "$([ -f "$dist_marker" ] && echo yes || echo no) $([ -f "$dproj_marker" ] && echo yes || echo no)"
+jq --arg d "$dist" '. + [{id: "7a6a0741", cwd: $d, kind: "background", sessionId: "7a6a0741-0000", name: "x", state: "working", pid: 99}]' \
+    "$fixtures/stopped.json" >"$work/dist-live.json"
+out=$(LAUNCH_AGENTS="$work/dist-live.json" launch_dir "$dproj" --ticket 56 2>&1); rc=$?
+check "launch dist: another live session in the repo is refused" "1 Error: another live background session in Distribution repo $dist: 7a6a0741 (working); not launched" "$rc $out"
+dgit "$dist" worktree remove --force "$work/dist-linked"
+dgit "$dist" branch -D linked
+name_dist '../gone
+'
+out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?
+check "launch dist: a missing repo is refused" "1 Error: Distribution repo $dproj/../gone, named in docs/agents/distribution-repo.md, is missing; not launched" "$rc $out"
+mkdir -p "$work/plain"
+name_dist '../plain
+'
+out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?
+check "launch dist: a folder that is not a repo is refused" "1 Error: Distribution repo $work/plain is not a git checkout; not launched" "$rc $out"
+name_dist '.
+'
+out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?
+check "launch dist: the Project's own repo is refused" "1 Error: Distribution repo $dproj is the Project's own repo; name another repo in docs/agents/distribution-repo.md, or remove it; not launched" "$rc $out"
+name_dist '../dist
+'
+# A job that did not record --add-dir is stopped, with no marker written.
+out=$(FAKE_STATE_FILTER='| .respawnFlags |= (. as $f | [range(0; length) | select($f[.] != "--add-dir" and (. == 0 or $f[. - 1] != "--add-dir")) | $f[.]])' \
+    launch_dir "$dproj" --ticket 56 2>&1); rc=$?
+check "launch dist: a job without --add-dir exits 2" "2" "$rc"
+check "launch dist: a job without --add-dir is stopped, and says why" "stop c2a368ee
+Error: session c2a368ee cannot write in Distribution repo $dist: --add-dir $dist is not in its flags" \
+    "$(command cat "$fake/calls")
+$(printf '%s\n' "$out" | head -n 1 | sed 's/ (its flags: .*//')"
+check "launch dist: a stopped job leaves no marker" "no no" \
+    "$([ -f "$dist_marker" ] && echo yes || echo no) $([ -f "$dproj_marker" ] && echo yes || echo no)"
+
+# The read-only hook holds the supervisor out of the Distribution repo while
+# the worker runs, and lets it commit once the marker is released.
+launch_dir "$dproj" --ticket 56 >/dev/null 2>&1
+hook="$root/plugins/mp-ported-skills/scripts/supervise-read-only.sh"
+supervisor_commit() { # <cwd>: the hook's reason for an attended `git commit` there, or empty
+    jq -cn --arg cwd "$1" '{tool_name:"Bash",cwd:$cwd,tool_input:{command:"git commit -m x"}}' |
+        (CLAUDE_CODE_SESSION_ATTENDED=1; export CLAUDE_CODE_SESSION_ATTENDED; CLAUDE_PLUGIN_ROOT=/plugin sh "$hook") |
+        jq -r '.hookSpecificOutput.permissionDecisionReason // empty'
+}
+check "read-only dist: a supervisor commit in the repo is refused, naming the worker and the Project to release" \
+    "Background worker c2a368ee holds the checkout $dist, so this session stays read-only there until it stops (#76): no file edits and no git commit, merge, rebase, checkout, switch, reset or stash. Open the worker with \`claude attach c2a368ee\`. If it has stopped, clear its marker: sh '/plugin/skills/supervise/scripts/release.sh' --dir '$dproj' --id c2a368ee" \
+    "$(supervisor_commit "$dist")"
+
+# release.sh clears both markers from the Project folder.
+out=$(sh "$scripts/release.sh" --dir "$dproj" --id 7a6a0741 </dev/null 2>&1); rc=$?
+check "release dist: another worker's id leaves both markers" "1 yes yes" \
+    "$rc $([ -f "$dist_marker" ] && echo yes || echo no) $([ -f "$dproj_marker" ] && echo yes || echo no)"
+out=$(sh "$scripts/release.sh" --dir "$dproj" --id c2a368ee </dev/null 2>&1); rc=$?
+check "release dist: clears both" "0 released c2a368ee
+released c2a368ee in $dist" "$rc $out"
+check "release dist: neither marker is left" "no no" \
+    "$([ -f "$dist_marker" ] && echo yes || echo no) $([ -f "$dproj_marker" ] && echo yes || echo no)"
+check "read-only dist: after release a supervisor commit is let through" "" "$(supervisor_commit "$dist")"
+# A Distribution repo marker left without the Project's is still cleared,
+# the repo read from distribution-repo.md; one naming another worker stays.
+printf 'c2a368ee\nproject %s\n' "$dproj" >"$dist_marker"
+out=$(sh "$scripts/release.sh" --dir "$dproj" --id c2a368ee </dev/null 2>&1); rc=$?
+check "release dist: a left Distribution repo marker is cleared" "0 no marker in $dproj
+released c2a368ee in $dist no" "$rc $out $([ -f "$dist_marker" ] && echo yes || echo no)"
+printf '7a6a0741\nproject %s\n' "$dproj" >"$dist_marker"
+out=$(sh "$scripts/release.sh" --dir "$dproj" --id c2a368ee </dev/null 2>&1); rc=$?
+check "release dist: another worker's Distribution repo marker stays" "0 no marker in $dproj 7a6a0741" \
+    "$rc $out $(head -n 1 "$dist_marker")"
+command rm -f "$dist_marker"
+
+# resume.sh holds both repos again on a wake.
+reset_fake
+mkdir -p "$cfg/jobs/c2a368ee"
+command cp "$fixtures/job-state.json" "$cfg/jobs/c2a368ee/state.json"
+echo woke >"$fake/resume-out"
+echo "$fixtures/stopped.json" >"$fake/seq"
+out=$(PATH="$work/bin:$PATH" sh "$scripts/resume.sh" --id c2a368ee --dir "$dproj" \
+    --prompt /mp-ported-skills:capturing --interval 0 --settle 0 </dev/null 2>&1); rc=$?
+check "resume dist: resumed" "0 resumed c2a368ee" "$rc $(printf '%s\n' "$out" | tail -n 1)"
+check "resume dist: both markers written, each naming the other repo" "c2a368ee
+distribution $dist
+c2a368ee
+project $dproj" "$(command cat "$dproj_marker" "$dist_marker")"
+clear_markers
+
+# The watch snapshots the Distribution repo, and a branch or worktree made
+# there since makes the worker moved. Commits on its branch do not.
+sh "$scripts/watch.sh" --dir "$dproj" --snapshot </dev/null >"$work/dsince"
+dhead=$(git -C "$dproj" rev-parse HEAD)
+xhead=$(git -C "$dist" rev-parse HEAD)
+check "snapshot dist: the Project's lines, then the repo's" "head $dhead
+branch main
+worktree $dproj
+ref main $dhead
+distribution $dist
+dist head $xhead
+dist branch main
+dist worktree $dist
+dist ref main $xhead" "$(command cat "$work/dsince")"
+sed "s#/work/project#$dproj#g" "$fixtures/working-busy.json" >"$work/dworking.json"
+watch_dist() { sh "$scripts/watch.sh" --id c2a368ee --dir "$dproj" --since "$work/dsince" --file "$work/dworking.json" </dev/null; }
+dgit "$dist" commit --allow-empty -m "On main"
+check "watch dist: commits on the repo's branch are working" "working
+cwd $dproj" "$(watch_dist)"
+dgit "$dist" branch side
+dgit "$dist" checkout side
+dgit "$dist" commit --allow-empty -m "On side"
+dgit "$dist" checkout main
+check "watch dist: a branch made in the repo is moved, after its name" "moved
+cwd $dproj
+distribution $dist
+branch side
+commit $(git -C "$dist" rev-parse --short side) On side" "$(watch_dist)"
+dgit "$dist" branch -D side
+dgit "$dist" worktree add "$work/dist-wt" -b wt
+check "watch dist: a worktree made in the repo is moved" "moved
+cwd $dproj
+distribution $dist
+worktree $work/dist-wt
+branch wt" "$(watch_dist)"
+dgit "$dist" worktree remove --force "$work/dist-wt"
+dgit "$dist" branch -D wt
+check "watch dist: the Project's lines come first" "moved
+cwd $dproj
+branch p
+distribution $dist
+branch q" "$(dgit "$dproj" branch p; dgit "$dist" branch q; watch_dist)"
+dgit "$dproj" branch -D p
+dgit "$dist" branch -D q
+# A copy only in the working tree is ignored by the snapshot too.
+dgit "$dproj" rm -q docs/agents/distribution-repo.md
+dgit "$dproj" commit -m "Unname it"
+dgit "$dproj" push origin main
+mkdir -p "$dproj/docs/agents"
+printf '../dist\n' >"$dproj/docs/agents/distribution-repo.md"
+out=$(sh "$scripts/watch.sh" --dir "$dproj" --snapshot </dev/null 2>&1)
+check "snapshot dist: a working-tree copy is ignored, with a note" "note: docs/agents/distribution-repo.md is in the working tree or current branch, not on the committed origin/main; ignored
+no" "$(printf '%s\n' "$out" | grep '^note')
+$(printf '%s\n' "$out" | grep -q '^distribution' && echo yes || echo no)"
+# One committed but not pushed leaves the tree clean, and the launch goes
+# on with no Distribution repo.
+dgit "$dproj" add docs
+dgit "$dproj" commit -m "Name it locally"
+out=$(launch_dir "$dproj" --ticket 56 2>"$work/derr"); rc=$?
+check "launch dist: a copy not on origin launches with no Distribution repo, with a note" "0 c2a368ee no
+note: docs/agents/distribution-repo.md is in the working tree or current branch, not on the committed origin/main; ignored" \
+    "$rc $out $(grep -q '^--add-dir$' "$fake/args" && echo yes || echo no)
+$(command cat "$work/derr")"
+check "launch dist: a copy not on origin writes the Project's marker alone" "c2a368ee" "$(command cat "$dproj_marker")"
+clear_markers
+dgit "$dproj" reset --hard origin/main
 
 echo "supervise: $pass passed, $fail failed"
 [ "$fail" = 0 ]

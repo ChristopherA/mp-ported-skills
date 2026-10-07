@@ -13,6 +13,10 @@
 # Project, and from a parent folder the supervisor could still edit it.
 # Reads, gh and the supervise scripts still run.
 #
+# A Project's Distribution repo (#125) carries the same marker while its
+# worker runs, so the hook holds it too; that marker's `project <path>` line
+# names the folder the refusal tells the session to release.
+#
 # The checkout is the one git finds from the edited file's nearest existing
 # folder, or, for Bash, from the session's cwd as changed by `cd` and
 # `git -C` in the command. A linked worktree is a checkout of its own, with
@@ -61,11 +65,15 @@ held() {
     [ -s "$marker" ] || return 1
     worker=$(head -n 1 "$marker")
     checkout=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) || checkout=$1
+    # A Distribution repo's marker names its Project folder, which is where
+    # release.sh clears both (#125).
+    release_dir=$(sed -n 's/^project //p' "$marker")
+    [ -n "$release_dir" ] || release_dir=$checkout
     return 0
 }
 
 refuse() {
-    jq -cn --arg reason "Background worker $worker holds the checkout $checkout, so this session stays read-only there until it stops (#76): no file edits and no git commit, merge, rebase, checkout, switch, reset or stash. Open the worker with \`claude attach $worker\`. If it has stopped, clear its marker: sh '${CLAUDE_PLUGIN_ROOT:-<plugin>}/skills/supervise/scripts/release.sh' --dir '$checkout' --id $worker" \
+    jq -cn --arg reason "Background worker $worker holds the checkout $checkout, so this session stays read-only there until it stops (#76): no file edits and no git commit, merge, rebase, checkout, switch, reset or stash. Open the worker with \`claude attach $worker\`. If it has stopped, clear its marker: sh '${CLAUDE_PLUGIN_ROOT:-<plugin>}/skills/supervise/scripts/release.sh' --dir '$release_dir' --id $worker" \
         '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
     exit 0
 }

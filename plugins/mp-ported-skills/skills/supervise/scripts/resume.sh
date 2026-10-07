@@ -29,8 +29,9 @@
 # `after` is the time, in epoch seconds, taken just before the resume that
 # woke the worker: pass it to the next watch.sh as --after, or that watch
 # reads the turn that ended before the stop as the resumed turn's end (#122).
-# On a wake it writes the worker's marker in DIR, as launch.sh does (#76),
-# with a `note` line before `after` when it could not.
+# On a wake it writes the worker's marker in DIR, and in the Project's
+# Distribution repo when it names one, as launch.sh does (#76, #125), with
+# a `note` line before `after` for each it could not write.
 #
 # Usage:
 #   resume.sh --id ID --dir DIR --prompt TEXT [--settle S] [--interval S]
@@ -164,8 +165,20 @@ while [ "$try" -lt "$TRIES" ]; do
     if printf '%s\n' "$out" | grep -Eq "woke session $ID([^0-9a-f]|$)"; then
         # The worker is live again, so its checkout is held read-only again
         # (#76), after the Report step's release.sh cleared the marker.
+        # A Distribution repo (#125) is held again too, each marker naming
+        # the other repo, as launch.sh writes them.
+        dist=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null 2>/dev/null)
+        if [ -n "$dist" ]; then
+            dist_marker=$(git -C "$dist" rev-parse --path-format=absolute --git-path mp-supervise-worker 2>/dev/null) &&
+                printf '%s\nproject %s\n' "$ID" "$DIR" >"$dist_marker" ||
+                echo "note the marker for $ID was not written in Distribution repo $dist, so it is not held read-only"
+            line="distribution $dist"
+        else
+            line=""
+        fi
         marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker 2>/dev/null) &&
-            echo "$ID" >"$marker" ||
+            printf '%s\n%s' "$ID" "${line:+$line
+}" >"$marker" ||
             echo "note the marker for $ID was not written in $DIR, so the checkout is not held read-only"
         echo "after $resumed_at"
         echo "resumed $ID"

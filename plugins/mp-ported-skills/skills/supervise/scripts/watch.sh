@@ -32,7 +32,9 @@
 # `branch <name>` for each branch other than the snapshot's current one that
 # was made or moved since, each followed by a `commit <sha> <subject>` line
 # for each of its commits that neither the snapshot's HEAD nor that current
-# branch holds. Any such line turns working or done into moved.
+# branch holds. Any such line turns working or done into moved. A Project
+# with a Distribution repo (#125) has it in the snapshot too; what it gained
+# follows a `distribution <path>` line, in the same lines.
 # A worker denied EnterWorktree made its worktree with `git worktree add`
 # from Bash and kept its cwd in DIR, so its cwd alone does not show it (#83).
 # A worktree locked with a reason starting `claude agent bridge-` is a
@@ -116,18 +118,29 @@ if [ -n "$DIR" ]; then
     DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
 fi
 
-# snapshot: DIR's HEAD, current branch, worktrees and branch tips, one per
-# line, or exit 1 when DIR is not in a repo with a commit.
+# snapshot <repo>: its HEAD, current branch, worktrees and branch tips, one
+# per line, or exit 1 when it is not in a repo with a commit.
 snapshot() {
-    head=$(git -C "$DIR" rev-parse --verify -q HEAD) || return 1
-    printf 'head %s\nbranch %s\n' "$head" "$(git -C "$DIR" branch --show-current)"
-    git -C "$DIR" worktree list --porcelain | sed -n '/^worktree /p'
-    git -C "$DIR" for-each-ref refs/heads --format='ref %(refname:short) %(objectname)'
+    head=$(git -C "$1" rev-parse --verify -q HEAD) || return 1
+    printf 'head %s\nbranch %s\n' "$head" "$(git -C "$1" branch --show-current)"
+    git -C "$1" worktree list --porcelain | sed -n '/^worktree /p'
+    git -C "$1" for-each-ref refs/heads --format='ref %(refname:short) %(objectname)'
 }
 
+# The Project's Distribution repo (#125), as launch.sh reads it, follows
+# DIR's lines in the snapshot: a `distribution <path>` line, then its own
+# lines, each starting `dist `. A --since watch reads the path from there,
+# so it watches the repo the launch checked for the whole run.
 if [ -n "$SNAPSHOT" ]; then
     [ -n "$DIR" ] || fail "--snapshot needs --dir"
-    snapshot || fail "no commit to snapshot in $DIR"
+    snap=$(snapshot "$DIR") || fail "no commit to snapshot in $DIR"
+    dist=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null) ||
+        fail "distribution.sh failed, so the Distribution repo is unknown"
+    if [ -n "$dist" ]; then
+        dist_snap=$(snapshot "$dist") || fail "no commit to snapshot in Distribution repo $dist"
+        snap=$(printf '%s\ndistribution %s\n%s' "$snap" "$dist" "$(printf '%s\n' "$dist_snap" | sed 's/^/dist /')")
+    fi
+    printf '%s\n' "$snap"
     exit 0
 fi
 
@@ -277,26 +290,28 @@ transcript_size() {
     [ -n "$found" ] && echo "$total" || echo ""
 }
 
-# lock_reason <worktree path>: its "locked" reason in DIR's repo, or empty
-# when it is not locked.
+# lock_reason <worktree path>: its "locked" reason in $repo, or empty when
+# it is not locked.
 lock_reason() {
-    git -C "$DIR" worktree list --porcelain | awk -v target="$1" '
+    git -C "$repo" worktree list --porcelain | awk -v target="$1" '
         /^worktree / { path = substr($0, 10); next }
         path == target && /^locked / { print substr($0, 8); exit }
     '
 }
 
-# made_since: the worktree, branch, other and commit lines for what DIR's
-# repo gained since the --since snapshot, or a note when the repo was not
-# read.
+# made_since <repo> <snapshot lines>: the worktree, branch, other and
+# commit lines for what the repo gained since its snapshot, or a note when
+# the repo was not read.
 made_since() {
-    now=$(snapshot) || { printf 'note the repo in %s was not read\n' "$DIR"; return 0; }
-    base=$(sed -n 's/^head //p' "$SINCE")
-    current=$(sed -n 's/^branch //p' "$SINCE")
+    repo=$1
+    snap=$2
+    now=$(snapshot "$repo") || { printf 'note the repo in %s was not read\n' "$repo"; return 0; }
+    base=$(printf '%s\n' "$snap" | sed -n 's/^head //p')
+    current=$(printf '%s\n' "$snap" | sed -n 's/^branch //p')
     # Commits listed are those neither the snapshot's HEAD nor the folder's
     # branch holds.
     set -- "$base"
-    if [ -n "$current" ] && git -C "$DIR" rev-parse -q --verify "refs/heads/$current" >/dev/null; then
+    if [ -n "$current" ] && git -C "$repo" rev-parse -q --verify "refs/heads/$current" >/dev/null; then
         set -- "$base" "refs/heads/$current"
     fi
     new_worktrees=$(printf '%s\n' "$now" | sed -n 's/^worktree //p')
@@ -306,7 +321,7 @@ made_since() {
 '
     for w in $new_worktrees; do
         IFS=$old_ifs
-        grep -Fqx "worktree $w" "$SINCE" && continue
+        printf '%s\n' "$snap" | grep -Fqx "worktree $w" && continue
         reason=$(lock_reason "$w")
         case $reason in
             "claude agent bridge-"*)
@@ -325,7 +340,7 @@ $br"
     printf '%s\n' "$now" | sed -n 's/^ref //p' | while read -r name tip; do
         [ "$name" != "$current" ] || continue
         printf '%s\n' "$bridge_branches" | grep -Fqx "$name" && continue
-        grep -Fqx "ref $name $tip" "$SINCE" && continue
+        printf '%s\n' "$snap" | grep -Fqx "ref $name $tip" && continue
         printf 'branch %s\n' "$name"
         commits "$tip" "$@"
     done
@@ -335,7 +350,7 @@ $br"
 # on any excluded one, or a note when git could not list them.
 commits() {
     tip=$1; shift
-    git -C "$DIR" log --format='commit %h %s' "$tip" --not "$@" ||
+    git -C "$repo" log --format='commit %h %s' "$tip" --not "$@" ||
         printf 'note the commits on %s were not read\n' "$tip"
 }
 
@@ -354,7 +369,8 @@ commits() {
 # for a moment after a resume (#126). So is a blocked question from the list
 # whose transcript holds no assistant text at or after it (#127).
 # With --since, a worktree or branch made in the repo since the snapshot is
-# listed, and makes a working or done session moved.
+# listed, and makes a working or done session moved. So is one made in the
+# Distribution repo the snapshot names, after a `distribution <path>` line.
 report() {
     out=$(classify "$1") || return 1
     case $out in
@@ -404,7 +420,13 @@ report() {
         esac
     fi
     if [ -n "$SINCE" ]; then
-        made=$(made_since)
+        made=$(made_since "$DIR" "$(command cat "$SINCE")")
+        dist=$(sed -n 's/^distribution //p' "$SINCE")
+        if [ -n "$dist" ]; then
+            dist_made=$(made_since "$dist" "$(sed -n 's/^dist //p' "$SINCE")")
+            [ -z "$dist_made" ] || made=$(printf '%s\n%s' "${made:+$made
+}distribution $dist" "$dist_made")
+        fi
         if [ -n "$made" ]; then
             if printf '%s\n' "$made" | grep -Eq '^(worktree|branch) '; then
                 case $out in

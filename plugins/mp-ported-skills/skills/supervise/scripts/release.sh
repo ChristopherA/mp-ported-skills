@@ -9,10 +9,16 @@
 # removes the marker when it names ID, and leaves one naming another worker
 # in place.
 #
+# A Project with a Distribution repo (#125) has a marker there too. DIR's
+# marker names it on a `distribution <path>` line; without one, the repo is
+# read with distribution.sh. Its marker is removed first when it names ID,
+# and left when it names another worker.
+#
 # Usage:
 #   release.sh --dir DIR --id ID
 #
-# Prints `released ID`, or `no marker in DIR`. Exits 0 released or no
+# Prints `released ID`, or `no marker in DIR`, then `released ID in DIST`
+# when the Distribution repo's marker was removed. Exits 0 released or no
 # marker; 1 not released.
 
 set -u
@@ -40,11 +46,23 @@ DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
 
 marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker 2>/dev/null) ||
     fail "$DIR is not a git checkout"
-if [ ! -f "$marker" ]; then
-    echo "no marker in $DIR"
-    exit 0
+dist=""
+if [ -f "$marker" ]; then
+    held=$(head -n 1 "$marker")
+    [ "$held" = "$ID" ] || fail "the marker in $DIR names worker $held, not $ID; left in place"
+    dist=$(sed -n 's/^distribution //p' "$marker")
 fi
-held=$(head -n 1 "$marker")
-[ "$held" = "$ID" ] || fail "the marker in $DIR names worker $held, not $ID; left in place"
-command rm -f "$marker" || fail "could not remove $marker"
-echo "released $ID"
+[ -n "$dist" ] || dist=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null 2>/dev/null)
+dist_released=""
+if [ -n "$dist" ] && dist_marker=$(git -C "$dist" rev-parse --path-format=absolute --git-path mp-supervise-worker 2>/dev/null) &&
+    [ -f "$dist_marker" ] && [ "$(head -n 1 "$dist_marker")" = "$ID" ]; then
+    command rm -f "$dist_marker" || fail "could not remove $dist_marker"
+    dist_released=1
+fi
+if [ -f "$marker" ]; then
+    command rm -f "$marker" || fail "could not remove $marker"
+    echo "released $ID"
+else
+    echo "no marker in $DIR"
+fi
+[ -z "$dist_released" ] || echo "released $ID in $dist"
