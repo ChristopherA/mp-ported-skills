@@ -9,7 +9,7 @@ One Claude Code config home (its settings, memory and installed plugins), named 
 _Avoid_: config, account
 
 **Session title**:
-The name a session shows in the terminal, claude.ai/code and the Claude app, as `<project> · <profile> · <host>`.
+The name a session shows in the terminal, claude.ai/code and the Claude app. The title hook sets it as `<project> · <profile> · <host>`, except in a session a shell wrapper already titled with `-n`, which keeps the wrapper's.
 _Avoid_: session name, Remote Control name
 
 **Smart zone**:
