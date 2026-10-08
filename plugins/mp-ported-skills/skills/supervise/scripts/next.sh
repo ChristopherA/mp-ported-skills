@@ -16,6 +16,9 @@
 #   count-reached --max N was given and N tickets of --ran ran: the count
 #                 --loop N asked for (#149). Checked after the landing
 #                 checks above, so a ticket that did not land still says so
+#   zone          --session was given and that supervisor session's zone
+#                 reading is at or past ZONE_STOP (#78), so the loop wraps
+#                 up while the session is still in its zone
 #   nothing-left  state.sh's next step is case 7, nothing in motion
 #   other-step    any other step than /implement of a ready-for-agent
 #                 ticket, as step.sh reads it
@@ -34,17 +37,38 @@
 # use it for the rest of the loop)`. Outside a cache it prints no such line.
 #
 # Usage:
-#   next.sh --dir DIR [--ran "N M ..."] [--max N] [--from FILE]
+#   next.sh --dir DIR [--ran "N M ..."] [--max N]
+#           [--session ID [--session-dir DIR]] [--from FILE]
 #   next.sh --max N     only check the count, before the loop's first launch:
 #                       prints `count N`, or refuses one that is not a
 #                       positive integer
+#
+# --session ID names the supervisor's own session, and --session-dir the
+# folder it started in (default: the working directory), for its zone
+# reading, read as glance.sh reads it, through this plugin's status-line.sh.
+# An empty ID falls back to CLAUDE_CODE_SESSION_ID. With no reading, a
+# `note:` line on stderr says so and the loop goes on. A ZONE_STOP at or
+# above the session's auto-compact point (CLAUDE_AUTOCOMPACT_PCT_OVERRIDE,
+# default 80, a share of the window), read in zone units from the same
+# record, is an error: the session would compact before the stop was read.
 #
 # --from reads a saved state.sh report instead of running state.sh (tests).
 # Exits 0 for next (or a checked count), 2 for stop, 1 on an error.
 
 set -u
 
+# The supervisor's zone reading, in % of zone, at which the loop starts no
+# more tickets. Below 100 so the wrap-up (loop summary, capture) runs inside
+# the zone: in the #141 to #143 loop each ticket added 6 to 10 points. It
+# must stay below the auto-compact point of the smallest window, 106% of
+# zone for 200k tokens at 80% (tests/supervise-next.test.sh).
+ZONE_STOP=90
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
 DIR=""
+SESSION=""
+HAS_SESSION=""
+SESSION_DIR=""
 RAN=""
 MAX=""
 HAS_MAX=""
@@ -57,8 +81,11 @@ while [ $# -gt 0 ]; do
         --ran)  need_value "$@"; RAN="$2"; shift 2 ;;
         --max)  need_value "$@"; MAX="$2"; HAS_MAX=1; shift 2 ;;
         --from) need_value "$@"; FROM="$2"; shift 2 ;;
+        --session) need_value "$@"; SESSION="$2"; HAS_SESSION=1; shift 2 ;;
+        --session-dir) need_value "$@"; SESSION_DIR="$2"; shift 2 ;;
         --help)
-            printf 'Usage: next.sh --dir DIR [--ran "N M ..."] [--max N] [--from FILE]\n'
+            printf 'Usage: next.sh --dir DIR [--ran "N M ..."] [--max N]\n'
+            printf '               [--session ID [--session-dir DIR]] [--from FILE]\n'
             printf '       next.sh --max N   (only checks the count)\n'
             printf 'Prints "next implement #N", or "stop <kind>: <detail>".\n'
             exit 0 ;;
@@ -114,7 +141,35 @@ if [ -n "$HAS_MAX" ]; then
     [ "$ran" -lt "$MAX" ] || halt "count-reached: $(plural "$ran" ticket) ran, the most --loop $MAX allows"
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -n "$HAS_SESSION" ]; then
+    sid=${SESSION:-${CLAUDE_CODE_SESSION_ID:-}}
+    sdir=${SESSION_DIR:-$PWD}
+    # "context: 138k tokens, 92% of a 150k smart zone, 86% of window remaining"
+    context=""
+    [ -z "$sid" ] || context=$(sh "$HERE/../../../scripts/status-line.sh" --context "$sdir" "$sid" </dev/null 2>/dev/null)
+    pct=$(printf '%s\n' "$context" | sed -n 's/.* \([0-9][0-9]*\)% of a .*/\1/p')
+    left=$(printf '%s\n' "$context" | sed -n 's/.* \([0-9][0-9]*\)% of window remaining.*/\1/p')
+    if [ -z "$sid" ]; then
+        printf 'note: no session id, so the loop goes on without its zone stop\n' >&2
+    elif [ -z "$pct" ] || [ -z "$left" ]; then
+        printf 'note: no zone reading for session %s in %s, so the loop goes on without its zone stop\n' "$sid" "$sdir" >&2
+    else
+        compact=${CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:-80}
+        case $compact in '' | *[!0-9]*) compact=80 ;; esac
+        # Both shares are whole numbers rounded down, so the window is known
+        # only to a range; refuse only when the stop is at or above the
+        # highest auto-compact point the reading allows. Early in a session
+        # the range is too wide to refuse on.
+        if [ "$left" -lt 99 ] &&
+            [ $((ZONE_STOP * (99 - left))) -ge $(((pct + 1) * compact)) ]; then
+            fail "the loop's zone stop, $ZONE_STOP% of zone, is at or above this session's auto-compact point, about $((pct * compact / (100 - left)))% of zone ($compact% of its window), so it would compact before the loop stopped"
+        fi
+        [ "$pct" -lt "$ZONE_STOP" ] ||
+            halt "zone: the supervisor's reading is $pct% of zone, at or past the $ZONE_STOP% the loop stops at, so it starts no more tickets"
+    fi
+fi
+
+SCRIPT_DIR=$HERE
 # The newest installed version beside this one, by number, when this script
 # runs from a version folder of the plugin cache. A folder the cache marked
 # .orphaned_at is no longer installed, so it counts only when it is this one.

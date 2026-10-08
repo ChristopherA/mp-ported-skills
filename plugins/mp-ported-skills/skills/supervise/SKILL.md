@@ -130,7 +130,7 @@ sh "${CLAUDE_SKILL_DIR}/scripts/view.sh" --close --pane '<session> <window> <tab
 
 It prints `closed pane <session>`, or `pane <session> already closed` when iTerm2 closed it with the viewer. It closes the pane whatever runs there, so never call it while the worker runs. While the worker is left running (`blocked`, `hang`), leave its viewer open, in either mode: it is where the maintainer answers.
 
-At each worker's report, whatever the outcome (for a settled run, after the capture and any push, with the record below), run the glance for this supervisor session and put the line it prints in that worker's report. It is how a maintainer on a remote client, with no status line, sees the supervisor approach its zone, which is not yet a stop condition (Loop, below):
+At each worker's report, whatever the outcome (for a settled run, after the capture and any push, with the record below), run the glance for this supervisor session and put the line it prints in that worker's report. It is how a maintainer on a remote client, with no status line, sees the supervisor approach its zone, which with `--loop` stops the loop (Zone stop, below):
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/../glance/scripts/glance.sh" "$PWD" "${CLAUDE_SESSION_ID}" </dev/null
@@ -250,10 +250,10 @@ A finished worker is stopped, not removed: `record.sh` reads its job after the s
 Between tickets, read what comes next, passing every ticket this loop ran:
 
 ```sh
-sh "${CLAUDE_SKILL_DIR}/scripts/next.sh" --dir "<project folder>" --ran "<N M ...>" </dev/null
+sh "${CLAUDE_SKILL_DIR}/scripts/next.sh" --dir "<project folder>" --ran "<N M ...>" --session "${CLAUDE_SESSION_ID}" --session-dir "$PWD" </dev/null
 ```
 
-With `--loop N`, add `--max N`.
+With `--loop N`, add `--max N`. `--session` and `--session-dir` name this supervisor session and its own folder, as the glance does, so `next.sh` reads its zone reading. With no reading it prints a `note:` line on stderr and goes on; report that line, since the loop then runs without its zone stop.
 
 It fetches, then prints `next implement #M` (exit 0), after a `scripts <version> <dir>` line when the scripts run from the plugin cache: go back to step 1 for #M, reading its body and comments, recording its start and taking a fresh snapshot, then Launch, which runs the one-session-per-checkout check again, so a session from the previous ticket still live refuses the launch (#57). Or it prints `stop <kind>: <detail>` (exit 2), and the loop ends there:
 
@@ -261,17 +261,26 @@ It fetches, then prints `next implement #M` (exit 0), after a `scripts <version>
 - `not-landed`: uncommitted paths, no upstream, or commits the upstream lacks. The next ticket starts from the default branch as pushed, so the loop waits for the maintainer rather than stacking work.
 - `behind`: the upstream moved on, so the next worker would start from an old commit.
 - `count-reached`: the loop ran the N tickets `--loop N` asked for. It is read after the three above, so a last ticket whose work did not land is still reported as `held`, `not-landed` or `behind`.
+- `zone`: this session's zone reading is at or past the point the loop stops at (90% of zone), so it starts no more tickets and wraps up (Zone stop, below). It is read after the four above.
 - `nothing-left`: `state.sh`'s next step is nothing in motion.
 - `other-step`: any other step than `/implement` of a `ready-for-agent` ticket.
 - `repeat`: `state.sh` still recommends a ticket this loop already ran, which happens when its work went in without `Closes #N`; running it again would rebuild it.
 
-Exit 1: report the error, and end the loop.
+Exit 1: report the error, and end the loop. One such error is a zone stop at or above this session's auto-compact point, read from the same reading in zone units: the session would compact before the loop stopped, so `next.sh` refuses rather than go on.
 
 The `scripts` line names the newest installed version of this plugin (a cache folder marked `.orphaned_at` does not count) and its `supervise/scripts` folder, which `next.sh` already read the next step with (#169). A worker that pushes a plugin bump installs the new version, but this session goes on naming the folder it loaded, and `/reload-plugins` does not change that mid-loop; in the #141 to #143 loop, the next worker would have launched without the grants text the previous one added. So run every script for the rest of the loop, step 1 to the next `next.sh`, from that folder in place of `${CLAUDE_SKILL_DIR}/scripts`. When the line ends `(newer than the loaded <version>; ...)`, say in the report that the loop switched, from which version to which. Each ticket's script version is the one the `scripts` line before it named; for the first ticket, the loaded one, `basename "$(cd "${CLAUDE_SKILL_DIR}/../.." && pwd)"`, which outside the cache is a folder name, not a version.
 
-Leaving the supervisor's zone is not yet a stop condition (#78), so expect a two-ticket loop to end past it; say so in the report when the session's peak zone reading passed 100%.
+### Zone stop
 
-The final report lists every ticket the loop ran, in order: its number, the worker's id, the script version it was launched with, its outcome, the supervisor's glance line at its end, its commits, the shared actions, the capture's report and the run record's comment; then the condition that ended the loop, with the worker's id and the ticket it stopped on. A stop from `next.sh` comes after the last ticket, so name that ticket and its worker's id with its `stop` line.
+A loop that runs past this session's zone makes its stop-or-continue calls, and its wrap-up, from where sessions stop working well (#78). So `next.sh` stops the loop at 90% of zone, below 100% so the wrap-up runs inside the zone: in the #141 to #143 loop each ticket added 6 to 10 points. The check comes between tickets, so the running worker has already finished, been captured, landed and been stopped. On `stop zone`:
+
+1. **Evaluate.** Post a loop summary on the tickets' parent, read with `gh api "repos/{owner}/{repo}/issues/<N>/parent" --jq .number` in the Project folder for the first ticket the loop ran (for tickets with different parents, post it on each). With no parent, post it on the last ticket run. Write it to `<scratchpad>/loop-summary.md`, then post it with `gh issue comment <parent> --body-file "<scratchpad>/loop-summary.md"`. It holds the `stop zone` line, and for each ticket the loop ran, in order: its number, the worker's id, its outcome, the URL of its run record's comment, and any gate it hit (a routine answer, a push or post on approval, a refusal).
+2. **List what waits on the human.** In the final report, list each push, merge or issue close the loop reached that no grant covered and that was not taken on the maintainer's yes, from each ticket's `actions.sh` `ungranted` lines and its capture's report, each with the command that takes it, in a fenced code block. Take none of them: each still needs the maintainer's yes, asked as Push on approval or Post on approval says.
+3. **Capture.** After the final report, run `/mp-ported-skills:capturing` in this session, last, so the maintainer can `/clear` and start the next supervisor session from the tracker alone.
+
+The final report says the loop stopped because the supervisor reached its zone stop, with the reading `next.sh` printed.
+
+The final report lists every ticket the loop ran, in order: its number, the worker's id, the script version it was launched with, its outcome, the supervisor's glance line at its end, its commits, the shared actions, the capture's report and the run record's comment; then the condition that ended the loop, with the worker's id and the ticket it stopped on, and for a `zone` stop the loop summary's URL and the actions waiting on the maintainer. A stop from `next.sh` comes after the last ticket, so name that ticket and its worker's id with its `stop` line.
 
 ## Routine answers
 
@@ -328,4 +337,4 @@ Tell the maintainer, with the watch command (`tmux attach -t mp-supervise`, or `
 - the viewer is live: what they type there reaches the worker as a prompt, and answering a permission prompt there is fine;
 - attaching to the worker by hand (`claude attach ID`, or a viewer of their own) between a stop and a resume splits the worker. Leaving the tmux session (`Ctrl+B d`) is always safe; with `--watch iterm`, leave the pane for the supervisor to close.
 
-Done when the report names the ticket (with `--loop`, each ticket the loop ran, and the condition that ended it), the outcome, each question the supervisor answered with its answer, the shared actions (or `none`), each post on approval with its URL or the finding as unposted, either its commits or the id with `claude attach`, the capture's report for a settled run, and the run record's comment.
+Done when the report names the ticket (with `--loop`, each ticket the loop ran, and the condition that ended it), the outcome, each question the supervisor answered with its answer, the shared actions (or `none`), each post on approval with its URL or the finding as unposted, either its commits or the id with `claude attach`, the capture's report for a settled run, and the run record's comment; and for a loop's `zone` stop, the loop summary's URL, the actions waiting on the maintainer, and this session's own capture after the report.

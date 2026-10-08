@@ -29,7 +29,10 @@ check() { # <name> <expected> <actual>
 
 # Every variable the scripts read, set or unset here, so the result does not
 # depend on the session running the test.
-unset CLAUDE_CODE_SESSION_ATTENDED CLAUDE_PROJECT_DIR
+unset CLAUDE_CODE_SESSION_ATTENDED CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID MP_SMART_ZONE_K \
+    CLAUDE_AUTOCOMPACT_PCT_OVERRIDE 2>/dev/null || true
+export WORKSTREAM_KIT_CONTEXT_DIR="$work/ctx"
+mkdir -p "$WORKSTREAM_KIT_CONTEXT_DIR"
 
 g() { d=$1; shift; git -C "$d" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@" >/dev/null 2>&1; }
 
@@ -187,6 +190,63 @@ touch "$cache/0.8.64/.orphaned_at"
 check "next: no newer version, the loaded scripts, orphaned or not" "scripts 0.8.64 $cache/0.8.64/skills/supervise/scripts
 next implement #61
 exit 0" "$(from_cache 0.8.64)"
+
+# The supervisor's own zone reading stops the loop before its next ticket
+# (#78), read from the status line's record for its session and folder.
+sup="$work/sup"; mkdir -p "$sup"
+zrec() { # <session> <tokens> <window % remaining>
+    printf '{"session_id":"%s","project_dir":"%s","tokens":%s,"remaining_pct":%s,"updated":"2026-01-01T00:00:00Z"}\n' \
+        "$1" "$sup" "$2" "$3" >"$WORKSTREAM_KIT_CONTEXT_DIR/claude-$1-zone.json"
+}
+repo=$(new_repo zone)
+state "2 /implement #61 ($you): #61 t61"
+zrec z92 138000 86
+check "next: the supervisor at 92% of zone stops the loop" "stop zone: the supervisor's reading is 92% of zone, at or past the 90% the loop stops at, so it starts no more tickets
+exit 2" "$(next "$repo" --session z92 --session-dir "$sup")"
+zrec z89 133500 86
+check "next: the supervisor below the zone stop goes on" "next implement #61
+exit 0" "$(next "$repo" --session z89 --session-dir "$sup")"
+check "next: the session's id from the environment when --session is empty" "stop zone: the supervisor's reading is 92% of zone, at or past the 90% the loop stops at, so it starts no more tickets
+exit 2" "$(CLAUDE_CODE_SESSION_ID=z92 next "$repo" --session "" --session-dir "$sup")"
+check "next: no reading for the session goes on, with a note" "note: no zone reading for session z00 in $sup, so the loop goes on without its zone stop
+next implement #61
+exit 0" "$(next "$repo" --session z00 --session-dir "$sup")"
+check "next: no session id goes on, with a note" "note: no session id, so the loop goes on without its zone stop
+next implement #61
+exit 0" "$(next "$repo" --session "" --session-dir "$sup")"
+check "next: without --session, no zone check" "next implement #61
+exit 0" "$(next "$repo")"
+zrec z95 142500 85
+echo x >"$repo/x.txt"
+check "next: a landing stop comes before the zone" "stop not-landed: 1 uncommitted path in $repo
+exit 2" "$(next "$repo" --session z95 --session-dir "$sup")"
+command rm -f "$repo/x.txt"
+check "next: a reached count comes before the zone" "stop count-reached: 1 ticket ran, the most --loop 1 allows
+exit 2" "$(next "$repo" --ran 59 --max 1 --session z95 --session-dir "$sup")"
+
+# The zone stop must sit below the session's auto-compact point, or the
+# session compacts, and loses the loop, before the stop is read. The point
+# is a share of the window, so it is read in zone units from the record.
+# A 200k window at 60% of zone has 45% of it used: compacting at 60% of the
+# window is 80% of zone, below the stop.
+zrec w200 90000 55
+check "next: a stop at or above the auto-compact point is refused" "Error: the loop's zone stop, 90% of zone, is at or above this session's auto-compact point, about 80% of zone (60% of its window), so it would compact before the loop stopped
+exit 1" "$(CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60 next "$repo" --session w200 --session-dir "$sup")"
+check "next: a 200k window compacting at 80% is above the stop" "next implement #61
+exit 0" "$(CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80 next "$repo" --session w200 --session-dir "$sup")"
+check "next: no override reads Claude Code's 80%" "next implement #61
+exit 0" "$(next "$repo" --session w200 --session-dir "$sup")"
+# A reading early in a session gives too coarse a window to refuse on.
+zrec early 3000 98
+check "next: an early reading is not refused" "next implement #61
+exit 0" "$(CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60 next "$repo" --session early --session-dir "$sup")"
+
+# The stop itself sits below the auto-compact point of the smallest window a
+# supervisor runs on, 200k tokens, at the 80% this profile and Claude Code's
+# status line read by default, against the default 150k zone: 106% of zone.
+stop=$(sed -n 's/^ZONE_STOP=\([0-9][0-9]*\).*/\1/p' "$scripts/next.sh")
+if [ -n "$stop" ] && [ $((stop * 150)) -lt $((80 * 200)) ]; then below=yes; else below="no (ZONE_STOP=$stop)"; fi
+check "next: the zone stop is below a 200k window's auto-compact point" yes "$below"
 
 mkdir -p "$work/plain"
 check "next: not a checkout" "Error: $work/plain is not a git checkout
