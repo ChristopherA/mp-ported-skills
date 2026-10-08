@@ -755,7 +755,7 @@ cstart=$(git -C "$project" rev-parse HEAD)
 out=$(launch --ticket 56 --continue "$cstart" 2>&1)
 rc=$?
 check "launch --continue: exit 0" "0 c2a368ee" "$rc $out"
-check "launch --continue: the prompt says where the work stands" "/mattpocock-skills:implement #56 continues: an earlier worker on #56 reached its zone stop, ran /mp-ported-skills:capturing and was stopped. Its commits since $(git -C "$project" rev-parse --short "$cstart") and its capture's notes on #56 are the work so far: build on them and finish the ticket." \
+check "launch --continue: the prompt says where the work stands" "/mattpocock-skills:implement #56 continues: an earlier worker on #56 passed its capture threshold, ran /mp-ported-skills:capturing and was stopped. Its commits since $(git -C "$project" rev-parse --short "$cstart") and its capture's notes on #56 are the work so far: build on them and finish the ticket." \
     "$(tail -n 1 "$fake/args")"
 check "launch --continue: the name says continued" "worker project #56 (continued): Add the thing" "$(name_of)"
 out=$(launch --ticket 56 --continue nope 2>&1)

@@ -12,15 +12,15 @@
 #   blocked <what>     waiting on a human: `permission prompt`, `input needed`,
 #                      or `question` when claude agents names no waitingFor:
 #                      the worker asked in plain text (#85)
-#   zone               still working, and with --zone its context reading
+#   capture-due        still working, and with --zone its context reading
 #                      is due for a capture at a safe point (zone.sh --due,
 #                      #60): the supervisor captures it and continues the
 #                      ticket in a fresh session
 #   stopped            stopped, conversation kept
 #   gone               not in the list: removed, or never started
 #   unknown <state>    a state this script does not know
-# then `cwd <path>` (where the session runs), for zone `reading <N>% of
-# zone`, and for a blocked session
+# then `cwd <path>` (where the session runs), for capture-due `reading <N>%
+# of zone` and the due line, and for a blocked session
 # `needs <text>`: the action a `Waiting on:` line names (below), or else what
 # its job's state.json under $CLAUDE_CONFIG_DIR names, when it names one.
 #
@@ -83,7 +83,7 @@
 # the list needs assistant text stamped at or after it, or reads as working
 # (one with no transcript found stands; a block that names its waitingFor is
 # not gated) (#127). --zone reads a working worker's zone reading from its
-# transcript at each poll, and returns `zone` once zone.sh calls it due; a
+# transcript at each poll, and returns `capture-due` once zone.sh calls it due; a
 # worker with no transcript found, or no reading, goes on working.
 #
 # Exits 1 when the list cannot be read, which is never reported as gone.
@@ -116,7 +116,7 @@ while [ $# -gt 0 ]; do
         --stall)    need_value "$@"; STALL="$2"; shift 2 ;;
         --help)
             printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--interval S] [--timeout S] [--stall S] | watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] --file PATH | watch.sh --dir DIR --snapshot\n'
-            printf 'Prints: working, moved, done, zone, hang, blocked <what>, stopped, gone or unknown <state>; then cwd, reading, needs, worktree, branch and commit lines.\n'
+            printf 'Prints: working, moved, done, capture-due, hang, blocked <what>, stopped, gone or unknown <state>; then cwd, reading, needs, worktree, branch and commit lines.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
@@ -377,9 +377,10 @@ commits() {
 # or after it is still working: the list can show the previous turn's done
 # for a moment after a resume (#126). So is a blocked question from the list
 # whose transcript holds no assistant text at or after it (#127).
-# With --zone, a working session whose reading zone.sh calls due is zone.
+# With --zone, a working session whose reading zone.sh calls due is
+# capture-due.
 # With --since, a worktree or branch made in the repo since the snapshot is
-# listed, and makes a working, done or zone session moved. So is one made in the
+# listed, and makes a working, done or capture-due session moved. So is one made in the
 # Distribution repo the snapshot names, after a `distribution <path>` line.
 report() {
     out=$(classify "$1") || return 1
@@ -404,9 +405,10 @@ report() {
                     | select(.status == "idle") | .sessionId // empty')
                 if turn_ended "$session_id"; then
                     out=$(printf 'done%s\nnote claude agents still said working' "${out#working}")
-                elif [ -n "$ZONE" ] && sid=$(session_id_of "$1") && [ -n "$sid" ] &&
-                    reading=$(sh "$(dirname -- "$0")/zone.sh" --session "$sid" --due </dev/null 2>/dev/null); then
-                    out=$(printf 'zone%s\nreading %s' "${out#working}" "$(printf '%s\n' "$reading" | head -n 1)")
+                elif [ -n "$ZONE" ] && t=$(transcript_of "$(session_id_of "$1")") && [ -n "$t" ] &&
+                    reading=$(sh "$(dirname -- "$0")/zone.sh" --transcript "$t" --due </dev/null 2>/dev/null); then
+                    out=$(printf 'capture-due%s\nreading %s\n%s' "${out#working}" \
+                        "$(printf '%s\n' "$reading" | head -n 1)" "$(printf '%s\n' "$reading" | sed -n 2p)")
                 fi
             fi ;;
     esac
@@ -443,7 +445,7 @@ report() {
         if [ -n "$made" ]; then
             if printf '%s\n' "$made" | grep -Eq '^(worktree|branch) '; then
                 case $out in
-                    working* | done* | zone*) out=$(printf '%s\n' "$out" | sed '1s/.*/moved/') ;;
+                    working* | done* | capture-due*) out=$(printf '%s\n' "$out" | sed '1s/.*/moved/') ;;
                 esac
             fi
             out=$(printf '%s\n%s' "$out" "$made")

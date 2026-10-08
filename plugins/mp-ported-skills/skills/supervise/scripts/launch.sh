@@ -221,7 +221,7 @@ PROMPT="/mattpocock-skills:implement #$TICKET"
 if [ -n "$CONTINUE" ]; then
     short=$(git -C "$DIR" rev-parse -q --verify --short "$CONTINUE^{commit}") ||
         fail "--continue needs a commit in $DIR, not '$CONTINUE'; not launched"
-    PROMPT="$PROMPT continues: an earlier worker on #$TICKET reached its zone stop, ran /mp-ported-skills:capturing and was stopped. Its commits since $short and its capture's notes on #$TICKET are the work so far: build on them and finish the ticket."
+    PROMPT="$PROMPT continues: an earlier worker on #$TICKET passed its capture threshold, ran /mp-ported-skills:capturing and was stopped. Its commits since $short and its capture's notes on #$TICKET are the work so far: build on them and finish the ticket."
 fi
 top=$(git -C "$DIR" rev-parse --show-toplevel)
 

@@ -3,9 +3,11 @@
 # watch.sh --zone, which returns `zone` when a working worker's reading is
 # due for a capture (#60).
 #
-# Reads the recorded hand-run transcript (tests/fixtures/transcripts/
-# hand-run.jsonl) for the reading, and checks it against glance.sh on a
-# status-line record holding the same call's tokens. The safe-point cases
+# Checks the reading against the status line on a live pair: a session's
+# transcript, cut to its shapes and usage counts (tests/fixtures/
+# transcripts/zone-reading.jsonl), and the record its status line wrote
+# after its last call (zone-reading-record.json), read through glance.sh.
+# Reads the recorded hand-run transcript (hand-run.jsonl) for the rest. The safe-point cases
 # build small transcripts in the row shapes Claude Code writes: tool_use and
 # tool_result blocks paired by id, a background Bash result carrying
 # toolUseResult.backgroundTaskId, an async agent's carrying isAsync and
@@ -45,6 +47,17 @@ export CLAUDE_CONFIG_DIR="$cfg"
 zone() { sh "$scripts/zone.sh" "$@" </dev/null 2>&1; }
 
 # --- the reading, from a recorded transcript --------------------------------
+# The live pair: what the status line recorded, and the transcript's reading.
+pair_sid=$(jq -r .session_id "$transcripts/zone-reading-record.json")
+mkdir -p "$work/live-ctx" "$work/project"
+jq -c --arg p "$work/project" '.project_dir = $p' "$transcripts/zone-reading-record.json" \
+    >"$work/live-ctx/claude-$pair_sid-zone.json"
+out=$(zone --transcript "$transcripts/zone-reading.jsonl")
+check "reading: a live session's, as its status line recorded it" \
+    "$( (export WORKSTREAM_KIT_CONTEXT_DIR="$work/live-ctx"
+        sh "$root/plugins/mp-ported-skills/skills/glance/scripts/glance.sh" "$work/project" "$pair_sid" </dev/null) )" "$out"
+check "reading: that live session's reading" "103% of zone" "$out"
+
 hand="$transcripts/hand-run.jsonl"
 out=$(zone --transcript "$hand"); rc=$?
 check "reading: exit 0" "0" "$rc"
@@ -56,7 +69,7 @@ check "reading: the last call's context, of the zone" "61% of zone" "$out"
 last=$(jq -s '[.[] | select(.type == "assistant" and .message.usage != null) | .message.usage
         | .input_tokens + .cache_read_input_tokens + .cache_creation_input_tokens] | last' "$hand")
 sid=0f3c2b1a-0000-4000-8000-000000000002
-mkdir -p "$work/ctx" "$work/project"
+mkdir -p "$work/ctx"
 printf '{"session_id":"%s","project_dir":"%s","tokens":%s,"remaining_pct":50,"updated":"2026-09-25T20:52:06Z"}\n' \
     "$sid" "$work/project" "$last" >"$work/ctx/claude-$sid-zone.json"
 glance() { (export WORKSTREAM_KIT_CONTEXT_DIR="$work/ctx"
@@ -101,6 +114,11 @@ threshold=$(sed -n 's/^ZONE_CAPTURE=\([0-9][0-9]*\).*/\1/p' "$scripts/zone.sh")
 check "threshold: set in zone.sh" "yes" "$([ -n "$threshold" ] && echo yes || echo no)"
 check "threshold: plus one Read result stays below a 200k window's auto-compact point" "yes" \
     "$([ $((threshold * 150000 / 100 + 25000)) -lt $((200000 * 80 / 100)) ] && echo yes || echo no)"
+force=$(sed -n 's/^ZONE_FORCE=\([0-9][0-9]*\).*/\1/p' "$scripts/zone.sh")
+check "threshold: the force point, set in zone.sh, is past the threshold" "yes" \
+    "$([ -n "$force" ] && [ "$force" -gt "$threshold" ] && echo yes || echo no)"
+check "threshold: the force point plus one Read result stays below that point" "yes" \
+    "$([ $((force * 150000 / 100 + 25000)) -lt $((200000 * 80 / 100)) ] && echo yes || echo no)"
 check "threshold: zone.sh names it in its not-due line" "not due: below $threshold% of zone" \
     "$(zone --transcript "$hand" --due | sed -n 2p)"
 
@@ -153,6 +171,11 @@ not due: a tool call is running" "$(due)"
 { call 60000 a; result a '{"backgroundTaskId":"bbij1","stdout":""}'; call 130000 b; result b; } >"$work/t.jsonl"
 check "due: a background command still running" "86% of zone
 not due: background task bbij1 is running" "$(due)"
+# A tool's output that quotes a notification's tag does not end the task.
+jq -cn '{type: "user", isSidechain: false, message: {role: "user",
+    content: [{type: "tool_result", tool_use_id: "q", content: "<task-id>bbij1</task-id>"}]}}' >>"$work/t.jsonl"
+check "due: a quoted task tag does not end the task" "86% of zone
+not due: background task bbij1 is running" "$(due)"
 notified bbij1 >>"$work/t.jsonl"
 check "due: a background command that ended" "86% of zone
 due" "$(due)"
@@ -163,6 +186,25 @@ not due: background task aa30 is running" "$(due)"
 jq -cn '{type: "queue-operation", operation: "enqueue",
     content: "<task-notification>\n<task-id>aa30</task-id>\n<status>completed</status>\n</task-notification>"}' >>"$work/t.jsonl"
 check "due: an async agent whose report is queued" "86% of zone
+due" "$(due)"
+
+# From the force point, a background task no longer holds the capture; a
+# running tool call still does.
+{ call 60000 a; result a '{"isAsync":true,"agentId":"rev1"}'; call "$((force * 1500))" b; result b; } >"$work/t.jsonl"
+out=$(due); rc=$?
+check "due: at the force point, a background task is cut" "$force% of zone
+due: background task rev1 is cut" "$out"
+check "due: a cut is due, exit 0" "0" "$rc"
+{ call 60000 a; result a '{"isAsync":true,"agentId":"rev1"}'; call "$((force * 1500 - 1500))" b; result b; } >"$work/t.jsonl"
+check "due: just below it, a background task still holds" "$((force - 1))% of zone
+not due: background task rev1 is running" "$(due)"
+{ call 60000 a; result a; call 160000 b; } >"$work/t.jsonl"
+check "due: a running tool call holds at any reading" "106% of zone
+not due: a tool call is running" "$(due)"
+
+# A last line still being written is skipped.
+{ call 60000 a; result a; call 130000 b; result b; printf '{"type":"assistant","mess'; } >"$work/t.jsonl"
+check "due: a half-written last line is skipped" "86% of zone
 due" "$(due)"
 
 # A subagent's own pending call, on a sidechain row, is the Agent call's,
@@ -186,9 +228,10 @@ put() { command rm -rf "$cfg/projects"; mkdir -p "$cfg/projects/-work-project"; 
 watch() { sh "$scripts/watch.sh" --id c2a368ee --file "$fixtures/working-busy.json" "$@" </dev/null 2>&1; }
 
 { call 60000 a; result a; call 130000 b; result b; } >"$work/t.jsonl"; put
-check "watch --zone: due returns zone, with the reading" "zone
+check "watch --zone: due returns capture-due, with the reading" "capture-due
 cwd /work/project
-reading 86% of zone" "$(watch --zone)"
+reading 86% of zone
+due" "$(watch --zone)"
 check "watch: without --zone, still working" "working
 cwd /work/project" "$(watch)"
 
@@ -204,7 +247,7 @@ command rm -rf "$cfg/projects"
 check "watch --zone: no transcript, still working" "working
 cwd /work/project" "$(watch --zone)"
 
-# A done worker is not a zone stop: its settled capture follows the report.
+# A done worker is not capture-due: its settled capture follows the report.
 { call 60000 a; result a; call 130000 b; result b; } >"$work/t.jsonl"
 command rm -rf "$cfg/projects"; mkdir -p "$cfg/projects/-work-project"
 command cp "$work/t.jsonl" "$cfg/projects/-work-project/9121ff49-5e25-43f0-bf48-307db0776c36.jsonl"

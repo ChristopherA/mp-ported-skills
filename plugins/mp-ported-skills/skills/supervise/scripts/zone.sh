@@ -5,21 +5,31 @@
 # Prints the reading as status-line.sh --zone does ("41% of zone"): the
 # context of the session's last call, input plus cache read and written, as
 # a percentage of the smart zone (MP_SMART_ZONE_K, default 150k tokens),
-# rounded down. That is the count the status line records, so the two agree
-# for the same call. Only the main chain is read: a subagent's calls, on
+# rounded down. That is the count the status line records when it renders
+# after a call, so the two agree as of the session's last call; between
+# calls the status line can run a few points ahead, by what was added since. Only the main chain is read: a subagent's calls, on
 # sidechain rows or in their own transcripts, are not the session's context.
 # A background worker has no status line on screen, and its record is kept
 # under whatever folder it runs in, so the transcript is the one source the
 # supervisor can always read.
 #
 # With --due, a second line says whether the reading calls for a capture:
-#   due                 at or past ZONE_CAPTURE, at a safe point
+#   due                 at or past ZONE_CAPTURE, at a safe point; or at or
+#                       past ZONE_FORCE with no tool call running, when the
+#                       line is `due: background task <id> is cut`
 #   not due: <why>      below it, or not at a safe point, or no reading
 # A safe point is one where stopping the session loses no work in flight:
 # every tool call on the main chain has its result (a Bash command still
 # running, a `git commit` included, or a foreground subagent, holds it), and
 # every background command or async agent it started has reported back, by a
-# <task-notification> naming its task id, as a prompt or queued.
+# <task-notification> naming its task id, as a prompt or queued. A worker's
+# review agents can run for minutes, and workers crossed 100% of zone during
+# review, so from ZONE_FORCE a background task no longer holds the capture:
+# the stop ends it, and the continuation runs it again. A running tool call
+# always holds it, since the stop would cut a command such as a commit.
+#
+# The transcript is parsed line by line, so a last line still being written
+# is skipped rather than failing the read.
 #
 # Usage:
 #   zone.sh (--id ID | --session SESSION | --transcript FILE) [--due]
@@ -39,6 +49,9 @@ set -u
 # window compacts at about 106% of zone, and one tool result between polls
 # can add up to Read's cap of 25k tokens, 17 points (tests/supervise-zone.test.sh).
 ZONE_CAPTURE=80
+# The reading from which a background task still running no longer holds
+# the capture. The same bound applies (tests/supervise-zone.test.sh).
+ZONE_FORCE=88
 
 ID=""
 SESSION=""
@@ -82,8 +95,8 @@ fi
 
 # One row: the reading, or -1 with no call yet, then the first thing still
 # running, or empty at a safe point.
-row=$(jq -rs --argjson z "$zone_k" '
-    [.[] | objects] as $rows
+row=$(jq -Rrn --argjson z "$zone_k" '
+    [inputs | fromjson? | objects] as $rows
     | [$rows[] | select((.isSidechain // false) | not)] as $main
     | ([$main[] | select(.type == "assistant" and .message.usage != null)] | last) as $last
     | (if $last == null then -1
@@ -98,13 +111,18 @@ row=$(jq -rs --argjson z "$zone_k" '
        and any($end.message.content[]?; type == "object" and .type == "tool_use")) as $calling
     | [$main[] | select(.type == "user") | .toolUseResult? | objects
        | .backgroundTaskId // (select(.isAsync == true) | .agentId) // empty] as $started
-    | [$rows[] | tostring | scan("<task-id>([^<]*)</task-id>") | .[0]] as $ended
+    | [$rows[] | if .type == "queue-operation" then .content
+                 elif .type == "user" and .origin.kind? == "task-notification" then .message.content
+                 else empty end
+       | if type == "array" then map(.text? // empty) | join("\n") else . end
+       | strings | scan("<task-id>([^<]*)</task-id>") | .[0]] as $ended
     | ($started - $ended) as $running
-    | [$pct, (if ($calls - $results) != [] or $calling then "a tool call is running"
-              elif $running != [] then "background task \($running[0]) is running"
-              else "" end)] | @tsv' "$FILE" 2>/dev/null) || fail "transcript $FILE could not be read"
+    | [$pct, (if ($calls - $results) != [] or $calling then "call" else "" end),
+       ($running[0] // "")] | @tsv' "$FILE" 2>/dev/null) || fail "transcript $FILE could not be read"
 pct=$(printf '%s\n' "$row" | cut -f1)
-busy=$(printf '%s\n' "$row" | cut -f2)
+calling=$(printf '%s\n' "$row" | cut -f2)
+task=$(printf '%s\n' "$row" | cut -f3)
+case $pct in '' | *[!0-9-]*) fail "transcript $FILE gave no reading" ;; esac
 
 if [ "$pct" -lt 0 ]; then
     echo "No reading yet: the session has made no call"
@@ -116,8 +134,14 @@ echo "$pct% of zone"
 if [ "$pct" -lt "$ZONE_CAPTURE" ]; then
     echo "not due: below $ZONE_CAPTURE% of zone"
     exit 2
-elif [ -n "$busy" ]; then
-    echo "not due: $busy"
+elif [ -n "$calling" ]; then
+    echo "not due: a tool call is running"
     exit 2
+elif [ -n "$task" ] && [ "$pct" -lt "$ZONE_FORCE" ]; then
+    echo "not due: background task $task is running"
+    exit 2
+elif [ -n "$task" ]; then
+    echo "due: background task $task is cut"
+    exit 0
 fi
 echo due
