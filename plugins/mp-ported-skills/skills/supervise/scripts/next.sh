@@ -155,7 +155,7 @@ if [ -n "$HAS_SESSION" ]; then
         printf 'note: no zone reading for session %s in %s, so the loop goes on without its zone stop\n' "$sid" "$sdir" >&2
     else
         compact=${CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:-80}
-        case $compact in '' | *[!0-9]*) compact=80 ;; esac
+        case $compact in '' | *[!0-9]* | 0) compact=80 ;; esac
         # Both shares are whole numbers rounded down, so the window is known
         # only to a range; refuse only when the stop is at or above the
         # highest auto-compact point the reading allows. Early in a session

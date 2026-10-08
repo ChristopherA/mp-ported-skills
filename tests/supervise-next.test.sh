@@ -207,14 +207,14 @@ zrec z89 133500 86
 check "next: the supervisor below the zone stop goes on" "next implement #61
 exit 0" "$(next "$repo" --session z89 --session-dir "$sup")"
 check "next: the session's id from the environment when --session is empty" "stop zone: the supervisor's reading is 92% of zone, at or past the 90% the loop stops at, so it starts no more tickets
-exit 2" "$(CLAUDE_CODE_SESSION_ID=z92 next "$repo" --session "" --session-dir "$sup")"
+exit 2" "$(export CLAUDE_CODE_SESSION_ID=z92; next "$repo" --session "" --session-dir "$sup")"
 check "next: no reading for the session goes on, with a note" "note: no zone reading for session z00 in $sup, so the loop goes on without its zone stop
 next implement #61
 exit 0" "$(next "$repo" --session z00 --session-dir "$sup")"
 check "next: no session id goes on, with a note" "note: no session id, so the loop goes on without its zone stop
 next implement #61
 exit 0" "$(next "$repo" --session "" --session-dir "$sup")"
-check "next: without --session, no zone check" "next implement #61
+check "next: without --session, no zone stop" "next implement #61
 exit 0" "$(next "$repo")"
 zrec z95 142500 85
 echo x >"$repo/x.txt"
@@ -231,15 +231,15 @@ exit 2" "$(next "$repo" --ran 59 --max 1 --session z95 --session-dir "$sup")"
 # window is 80% of zone, below the stop.
 zrec w200 90000 55
 check "next: a stop at or above the auto-compact point is refused" "Error: the loop's zone stop, 90% of zone, is at or above this session's auto-compact point, about 80% of zone (60% of its window), so it would compact before the loop stopped
-exit 1" "$(CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60 next "$repo" --session w200 --session-dir "$sup")"
+exit 1" "$(export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; next "$repo" --session w200 --session-dir "$sup")"
 check "next: a 200k window compacting at 80% is above the stop" "next implement #61
-exit 0" "$(CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80 next "$repo" --session w200 --session-dir "$sup")"
+exit 0" "$(export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80; next "$repo" --session w200 --session-dir "$sup")"
 check "next: no override reads Claude Code's 80%" "next implement #61
 exit 0" "$(next "$repo" --session w200 --session-dir "$sup")"
 # A reading early in a session gives too coarse a window to refuse on.
 zrec early 3000 98
 check "next: an early reading is not refused" "next implement #61
-exit 0" "$(CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60 next "$repo" --session early --session-dir "$sup")"
+exit 0" "$(export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; next "$repo" --session early --session-dir "$sup")"
 
 # The stop itself sits below the auto-compact point of the smallest window a
 # supervisor runs on, 200k tokens, at the 80% this profile and Claude Code's

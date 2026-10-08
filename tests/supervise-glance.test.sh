@@ -8,8 +8,8 @@
 # names resolves to glance.sh from supervise's own folder, that the Report
 # step puts the line in the worker's report as printed, reasons included, and
 # that the Loop's final report lists it per ticket, and that the
-# loop reads the same reading between tickets and wraps up at its stop. What glance.sh prints is
-# checked in tests/glance.test.sh. Reads only files in this checkout.
+# loop reads the same reading between tickets and wraps up at its stop.
+# What glance.sh prints is checked in tests/glance.test.sh. Reads only files in this checkout.
 #
 # Usage: sh tests/supervise-glance.test.sh
 
