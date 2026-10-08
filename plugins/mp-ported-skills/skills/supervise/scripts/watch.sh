@@ -229,10 +229,9 @@ stale_question() {
 }
 
 # last_text <session id>: the session's last text, read from the main
-# transcript only, as turn_ended reads it; empty
-# when it has none. With --after, only text stamped at or after AFTER is
-# read: the previous turn's text is not what a resumed worker ended on
-# (#126).
+# transcript only, as turn_ended reads it; empty when it has none. With
+# --after, only text stamped at or after AFTER is read: the previous turn's
+# text is not what a resumed worker ended on (#126).
 last_text() {
     t=$(transcript_of "$1")
     [ -n "$t" ] || return 0
@@ -276,9 +275,9 @@ session_id_of() {
 }
 
 # transcript_size <session id>: total bytes across its transcript and the
-# subagent transcripts in the folder beside it, or empty when it has none (never 0 for "no
-# transcript yet", so a session with no transcript at all never compares
-# equal across polls and falsely reports no progress).
+# subagent transcripts in the folder beside it, or empty when it has none
+# (never 0 for "no transcript yet", so a session with no transcript at all
+# never compares equal across polls and falsely reports no progress).
 transcript_size() {
     main=$(transcript_of "$1")
     [ -n "$main" ] || { echo ""; return; }
