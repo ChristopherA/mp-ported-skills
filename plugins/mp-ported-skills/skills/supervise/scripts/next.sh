@@ -116,19 +116,25 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # The newest installed version beside this one, by number, when this script
-# runs from a version folder of the plugin cache.
+# runs from a version folder of the plugin cache. A folder the cache marked
+# .orphaned_at is no longer installed, so it counts only when it is this one.
 is_version() { printf '%s\n' "$1" | grep -qE '^[0-9]+[.][0-9]+[.][0-9]+$'; }
 scripts_line=""
 plugin_root=$(cd "$SCRIPT_DIR/../../.." && pwd)
 loaded=$(basename "$plugin_root")
 if is_version "$loaded"; then
-    newest=$(for d in "$plugin_root"/../*/skills/supervise/scripts/next.sh; do
-        [ -f "$d" ] || continue
-        v=$(basename "$(cd "$(dirname "$d")/../../.." && pwd)")
-        is_version "$v" && printf '%s\n' "$v"
-    done | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
-    [ -n "$newest" ] || newest=$loaded
-    SCRIPT_DIR=$(cd "$plugin_root/../$newest/skills/supervise/scripts" && pwd)
+    newest=$({
+        printf '%s\n' "$loaded"
+        for d in "$plugin_root"/../*/skills/supervise/scripts/step.sh; do
+            [ -f "$d" ] || continue
+            version_dir=$(cd "$(dirname "$d")/../../.." && pwd)
+            [ ! -e "$version_dir/.orphaned_at" ] || continue
+            version=$(basename "$version_dir")
+            is_version "$version" && printf '%s\n' "$version"
+        done
+    } | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
+    SCRIPT_DIR=$(cd "$plugin_root/../$newest/skills/supervise/scripts" && pwd) ||
+        fail "could not read the scripts of version $newest beside $plugin_root"
     scripts_line="scripts $newest $SCRIPT_DIR"
     [ "$newest" = "$loaded" ] ||
         scripts_line="$scripts_line (newer than the loaded $loaded; use it for the rest of the loop)"

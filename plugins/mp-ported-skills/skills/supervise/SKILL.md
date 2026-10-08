@@ -249,8 +249,6 @@ With `--loop N`, add `--max N`.
 
 It fetches, then prints `next implement #M` (exit 0), after a `scripts <version> <dir>` line when the scripts run from the plugin cache: go back to step 1 for #M, reading its body and comments, recording its start and taking a fresh snapshot, then Launch, which runs the one-session-per-checkout check again, so a session from the previous ticket still live refuses the launch (#57). Or it prints `stop <kind>: <detail>` (exit 2), and the loop ends there:
 
-The `scripts` line names the newest installed version of this plugin and its `supervise/scripts` folder, which `next.sh` already read the next step with (#169). A worker that pushes a plugin bump installs the new version, but this session goes on naming the folder it loaded, and `/reload-plugins` does not change that mid-loop; in the #141 to #143 loop, the next worker would have launched without the grants text the previous one added. So run every script for the rest of the loop, step 1 to the next `next.sh`, from that folder in place of `${CLAUDE_SKILL_DIR}/scripts`. When the line ends `(newer than the loaded <version>; ...)`, say in the report that the loop switched, from which version to which. Each ticket's script version is the one the `scripts` line before it named; for the first ticket, the loaded one, `basename "$(cd "${CLAUDE_SKILL_DIR}/../.." && pwd)"`, which outside the cache is a folder name, not a version.
-
 - `held`: the checkout's marker still names a worker, so a stop did not finish.
 - `not-landed`: uncommitted paths, no upstream, or commits the upstream lacks. The next ticket starts from the default branch as pushed, so the loop waits for the maintainer rather than stacking work.
 - `behind`: the upstream moved on, so the next worker would start from an old commit.
@@ -260,6 +258,8 @@ The `scripts` line names the newest installed version of this plugin and its `su
 - `repeat`: `state.sh` still recommends a ticket this loop already ran, which happens when its work went in without `Closes #N`; running it again would rebuild it.
 
 Exit 1: report the error, and end the loop.
+
+The `scripts` line names the newest installed version of this plugin (a cache folder marked `.orphaned_at` does not count) and its `supervise/scripts` folder, which `next.sh` already read the next step with (#169). A worker that pushes a plugin bump installs the new version, but this session goes on naming the folder it loaded, and `/reload-plugins` does not change that mid-loop; in the #141 to #143 loop, the next worker would have launched without the grants text the previous one added. So run every script for the rest of the loop, step 1 to the next `next.sh`, from that folder in place of `${CLAUDE_SKILL_DIR}/scripts`. When the line ends `(newer than the loaded <version>; ...)`, say in the report that the loop switched, from which version to which. Each ticket's script version is the one the `scripts` line before it named; for the first ticket, the loaded one, `basename "$(cd "${CLAUDE_SKILL_DIR}/../.." && pwd)"`, which outside the cache is a folder name, not a version.
 
 Leaving the supervisor's zone is not yet a stop condition (#78), so expect a two-ticket loop to end past it; say so in the report when the session's peak zone reading passed 100%.
 

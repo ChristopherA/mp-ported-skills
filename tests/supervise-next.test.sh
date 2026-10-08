@@ -176,8 +176,15 @@ next implement #99
 exit 0" "$(from_cache 0.8.9)"
 check "next: a stop names no scripts" "stop repeat: #99 ran earlier in this loop and state.sh still recommends it; was its work committed with Closes #99?
 exit 2" "$(from_cache 0.8.64 --ran 99)"
-command rm -rf "$cache/0.8.68"
-check "next: no newer version, the loaded scripts" "scripts 0.8.64 $cache/0.8.64/skills/supervise/scripts
+mkdir -p "$cache/0.8.70"
+command cp -R "$root/plugins/mp-ported-skills/." "$cache/0.8.70/"
+touch "$cache/0.8.70/.orphaned_at"
+check "next: a newer folder the cache orphaned is passed over" "scripts 0.8.68 $new (newer than the loaded 0.8.64; use it for the rest of the loop)
+next implement #99
+exit 0" "$(from_cache 0.8.64)"
+command rm -rf "$cache/0.8.68" "$cache/0.8.70"
+touch "$cache/0.8.64/.orphaned_at"
+check "next: no newer version, the loaded scripts, orphaned or not" "scripts 0.8.64 $cache/0.8.64/skills/supervise/scripts
 next implement #61
 exit 0" "$(from_cache 0.8.64)"
 
