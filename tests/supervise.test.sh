@@ -249,11 +249,11 @@ cwd /work/project" "$(watch_file working-busy c2a368ee)"
 # Right after resume.sh, the transcript's last row is still the turn_duration
 # that ended the previous turn. With --after (the epoch resume.sh printed),
 # only a turn end stamped at or after it counts (#122).
-stamped() { # <turn_duration timestamp> [fixture] [jq filter] [$w for it] -- the fixture (turn-ended), its turn_duration rows stamped, then the filter
+stamped() { # <turn_duration timestamp, or empty to leave them> [fixture] [jq filter] [$w for it] [session id] -- the fixture (turn-ended), its turn_duration rows stamped, then the filter
     dir="$cfg/projects/-work-project"
     command rm -rf "$cfg/projects"; mkdir -p "$dir"
-    jq -c --arg t "$1" --arg w "${4:-}" "if .subtype == \"turn_duration\" then .timestamp = \$t else . end | ${3:-.}" \
-        "$transcripts/${2:-turn-ended}.jsonl" >"$dir/9121ff49-5e25-43f0-bf48-307db0776c36.jsonl"
+    jq -c --arg t "$1" --arg w "${4:-}" "if \$t != \"\" and .subtype == \"turn_duration\" then .timestamp = \$t else . end | ${3:-.}" \
+        "$transcripts/${2:-turn-ended}.jsonl" >"$dir/${5:-9121ff49-5e25-43f0-bf48-307db0776c36}.jsonl"
 }
 watch_after() { # <--after value> -- watch.sh --after on the working-idle fixture
     sh "$scripts/watch.sh" --id 9121ff49 --after "$1" --file "$fixtures/working-idle.json" </dev/null 2>&1
@@ -311,11 +311,8 @@ needs git push origin main" "$(done_after "$after")"
 mkdir -p "$cfg/jobs/91a06a74"
 jq '.needs = "clarify: should pid always win?"' "$fixtures/job-state.json" >"$cfg/jobs/91a06a74/state.json"
 asked_at() { # <text time, or empty for none stamped> -- turn-ended for the blocked session, ending on a question stamped then
-    dir="$cfg/projects/-work-project"
-    command rm -rf "$cfg/projects"; mkdir -p "$dir"
-    jq -c --arg w "$1" 'if .type == "assistant" and .message.content == [{"type": "text"}]
-        then .message.content[0].text = "Should pid always win?" | (if $w == "" then . else .timestamp = $w end) else . end' \
-        "$transcripts/turn-ended.jsonl" >"$dir/$blocked_session.jsonl"
+    stamped "" turn-ended 'if .type == "assistant" and .message.content == [{"type": "text"}]
+        then .message.content[0].text = "Should pid always win?" | (if $w == "" then . else .timestamp = $w end) else . end' "$1" "$blocked_session"
 }
 question_after() { # <agents json> -- watch.sh --after on it for the blocked session
     sh "$scripts/watch.sh" --id 91a06a74 --after "$after" --file "$1" </dev/null 2>&1

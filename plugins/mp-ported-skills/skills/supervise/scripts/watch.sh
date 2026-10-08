@@ -177,23 +177,31 @@ classify() {
 # with --arg after "$AFTER".
 AFTER_JQ='def not_before: $after == "" or ((.timestamp // "" | sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch 0) >= ($after | tonumber));'
 
+# transcript_of <session id>: the path of the session's main transcript, or
+# empty when none is found. It is looked for in every project folder, since
+# a worker that entered a worktree has its transcript moved to the
+# worktree's folder.
+transcript_of() {
+    [ -n "$1" ] || return 0
+    for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
+        [ -f "$t" ] || continue
+        printf '%s\n' "$t"
+        return 0
+    done
+}
+
 # turn_ended <session id>: whether the session's transcript shows its turn
 # ended: its last conversation row is a turn_duration row with no background
 # agents pending, since their reports start another turn. With --after, that
 # row counts only when it is stamped at or after AFTER: right after a
 # resume, the last row is still the turn_duration that ended the previous
-# turn (#122). The transcript is looked for in every project folder, since
-# a worker that entered a worktree has its transcript moved to the
-# worktree's folder.
+# turn (#122).
 turn_ended() {
-    [ -n "$1" ] || return 1
-    for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
-        [ -f "$t" ] || continue
-        jq -e -s "$AFTER_JQ"'[.[] | select(.type == "user" or .type == "assistant" or .type == "system")] | last
-            | .type == "system" and .subtype == "turn_duration"
-              and (.pendingBackgroundAgentCount // 0) == 0 and not_before' --arg after "$AFTER" "$t" >/dev/null 2>&1 && return 0
-    done
-    return 1
+    t=$(transcript_of "$1")
+    [ -n "$t" ] || return 1
+    jq -e -s "$AFTER_JQ"'[.[] | select(.type == "user" or .type == "assistant" or .type == "system")] | last
+        | .type == "system" and .subtype == "turn_duration"
+          and (.pendingBackgroundAgentCount // 0) == 0 and not_before' --arg after "$AFTER" "$t" >/dev/null 2>&1
 }
 
 # stale_since <session id> <jq row test>: whether what the list says is the
@@ -201,14 +209,10 @@ turn_ended() {
 # no row passing the test stamped at or after AFTER. With no transcript
 # found, the list stands. stale_done and stale_question name the tests.
 stale_since() {
-    [ -n "$1" ] || return 1
-    for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
-        [ -f "$t" ] || continue
-        jq -e -s "$AFTER_JQ"'any(.[]; ('"$2"') and not_before) | not' \
-            --arg after "$AFTER" "$t" >/dev/null 2>&1
-        return
-    done
-    return 1
+    t=$(transcript_of "$1")
+    [ -n "$t" ] || return 1
+    jq -e -s "$AFTER_JQ"'any(.[]; ('"$2"') and not_before) | not' \
+        --arg after "$AFTER" "$t" >/dev/null 2>&1
 }
 
 # stale_done <session id>: whether a done from claude agents is the previous
@@ -225,19 +229,17 @@ stale_question() {
 }
 
 # last_text <session id>: the session's last text, read from the main
-# transcript only, in every project folder, as turn_ended reads it; empty
+# transcript only, as turn_ended reads it; empty
 # when it has none. With --after, only text stamped at or after AFTER is
 # read: the previous turn's text is not what a resumed worker ended on
 # (#126).
 last_text() {
-    [ -n "$1" ] || return 0
-    for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
-        [ -f "$t" ] || continue
-        jq -r -s "$AFTER_JQ"'[.[] | select(.type == "assistant" and (.isSidechain | not) and not_before)
-                   | .message.content[]? | select(.type == "text") | .text // empty]
-                  | last // empty' --arg after "$AFTER" "$t" 2>/dev/null
-        return 0
-    done
+    t=$(transcript_of "$1")
+    [ -n "$t" ] || return 0
+    jq -r -s "$AFTER_JQ"'[.[] | select(.type == "assistant" and (.isSidechain | not) and not_before)
+               | .message.content[]? | select(.type == "text") | .text // empty]
+              | last // empty' --arg after "$AFTER" "$t" 2>/dev/null
+    return 0
 }
 
 # waiting_on <session id>: the action a worker whose turn ended waits on,
@@ -273,21 +275,20 @@ session_id_of() {
         | .sessionId // empty' 2>/dev/null
 }
 
-# transcript_size <session id>: total bytes across its transcript and any
-# subagent transcripts, or empty when none are found (never 0 for "no
+# transcript_size <session id>: total bytes across its transcript and the
+# subagent transcripts in the folder beside it, or empty when it has none (never 0 for "no
 # transcript yet", so a session with no transcript at all never compares
 # equal across polls and falsely reports no progress).
 transcript_size() {
-    [ -n "$1" ] || { echo ""; return; }
+    main=$(transcript_of "$1")
+    [ -n "$main" ] || { echo ""; return; }
     total=0
-    found=""
-    for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl "$CLAUDE_CONFIG_DIR"/projects/*/"$1"/subagents/*.jsonl; do
+    for t in "$main" "${main%.jsonl}"/subagents/*.jsonl; do
         [ -f "$t" ] || continue
-        found=1
         sz=$(wc -c <"$t" 2>/dev/null) || sz=0
         total=$((total + sz))
     done
-    [ -n "$found" ] && echo "$total" || echo ""
+    echo "$total"
 }
 
 # lock_reason <worktree path>: its "locked" reason in $repo, or empty when
