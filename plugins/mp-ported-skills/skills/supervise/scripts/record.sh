@@ -9,12 +9,23 @@
 #                            with no background agents pending, and how long
 #                            after launch
 # * reported                 --now (default: now), and how long after the
-#                            turn ended: how late the supervisor saw it
+#                            turn ended: how late the supervisor saw it, and
+#                            after the last approval below, when one came
+#                            after the turn end
+# * approval waits           for each post.sh post and push.sh push for this
+#                            worker on the maintainer's approval, how long
+#                            after the worker's last turn end before it it
+#                            came: the maintainer's answer, which waits on a
+#                            human leaves out (#86)
 #   API calls                distinct requests in the worker's transcript
 #                            and its subagents'
 #   tokens and cost          by model, from the worker transcript's last
 #                            cost-state row, which Claude Code keeps for the
-#                            whole session, subagents included
+#                            whole session, subagents included; when the
+#                            transcript holds none yet, the record waits up
+#                            to MP_RECORD_COST_WAIT seconds (default 10) for
+#                            the one `claude stop` writes a moment after the
+#                            stop (#86)
 # * supervisor since launch  the supervisor transcript's calls and tokens
 #                            after launch, and its cost-state total less the
 #                            last one written before launch
@@ -30,8 +41,17 @@
 #                            each as its question and the answer's first
 #                            sentence
 #   human interventions      the job timeline's blocked entries, each with
-#                            its detail (*), and plain prompts typed into the
-#                            worker after its first (by `claude attach`); a
+#                            its detail (*), plain prompts typed into the
+#                            worker after its first (by `claude attach`),
+#                            and AskUserQuestion calls answered there, which
+#                            come back as a tool_result, not a prompt. The
+#                            transcript adds waits the timeline has no
+#                            blocked entry for (#86): an answered
+#                            AskUserQuestion, and a turn end whose last text
+#                            has a `Waiting on:` line (*). A blocked entry
+#                            stamped from 5 seconds before the question or
+#                            turn end, up to its answer or the next prompt,
+#                            is the same wait. A
 #                            blocked entry whose next prompt is a supervisor
 #                            answer is the supervisor's, not a human's, and
 #                            one that follows a turn end whose last text
@@ -111,6 +131,8 @@ git -C "$DIR" rev-parse -q --verify "$START^{commit}" >/dev/null || fail "not a 
 jq -en --arg t "$NOW" '$t | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601' >/dev/null 2>&1 ||
     fail "--now needs an ISO 8601 UTC time such as 2026-09-29T06:15:24Z, not '$NOW'"
 zone_k=${MP_SMART_ZONE_K:-150}
+cost_wait=${MP_RECORD_COST_WAIT:-10}
+case $cost_wait in '' | *[!0-9]*) cost_wait=10 ;; esac
 case $zone_k in '' | *[!0-9]* | 0) zone_k=150 ;; esac
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 errors=$(mktemp)
@@ -174,15 +196,29 @@ else
     [ -n "$sid" ] || note "job state $job names no session, so the worker's transcript was not read"
 fi
 
-# --- the worker's transcript -----------------------------------------------
-worker='{}'
-if [ -n "$sid" ]; then
-    if ! wt=$(transcript "$sid"); then
-        note "no transcript for session $sid under $CLAUDE_CONFIG_DIR/projects, so its calls, cost, zone, captures and typed messages were not read"
-    elif ! worker=$(jq -cs --argjson z "$zone_k" "$defs"'
+# read_worker: the worker transcript $wt read into $worker; on a failed
+# read, $worker is left as it was.
+read_worker() {
+    read_out=$(jq -cs --argjson z "$zone_k" "$defs"'
         def text: .message.content | if type == "string" then .
             elif type == "array" and all(.[]; .type == "text") then map(.text) | join("\n") else null end;
+        # The text of the last line starting `Waiting on:`, less markdown.
+        def waiting: [splits("\n") | select(test("^[`* ]*Waiting on:"))] | last
+            | if . == null then null else gsub("[`*]"; "") | sub("^\\s+"; "") | sub("\\s+$"; "") end;
         [.[] | objects] as $rows
+        # AskUserQuestion calls answered through claude attach: the answer
+        # comes back as a tool_result, the answers in the row'"'"'s
+        # toolUseResult. One the supervisor answered comes back as a prompt.
+        | ([$rows[] | select(.type == "assistant" and (.isSidechain // false | not)) | .timestamp as $at
+            | .message.content[]? | objects | select(.type == "tool_use" and .name == "AskUserQuestion")
+            | {id, at: $at, detail: (.input.questions // [] | first // {} | .header // .question // "")}]) as $calls_q
+        | ([$rows[] | select(.type == "user" and (.isSidechain // false | not)) | . as $r
+            | .message.content | arrays | .[] | objects
+            | select(.type == "tool_result" and (.is_error // false | not)
+                     and ($r.toolUseResult.answers? != null
+                          or (.content | if type == "string" then . else tostring end
+                              | startswith("Your questions have been answered"))))
+            | {id: .tool_use_id, at: $r.timestamp}]) as $replies
         | ($rows | calls) as $calls
         | ($calls | map(context * 100 / ($z * 1000) | floor)) as $pct
         | {calls: ($pct | length),
@@ -229,6 +265,7 @@ if [ -n "$sid" ]; then
                elif $r.type == "system" and $r.subtype == "turn_duration" then
                    (($r.pendingBackgroundAgentCount // 0) > 0) as $pending
                    | .list += [{at: $r.timestamp, end: true, pending: $pending,
+                                waiting: (if $pending then null else .text | waiting end),
                                 unasked: ($pending | not) and .text != "" and (.text | asks | not)
                                          and (.text | test("(?m)^[`* ]*Waiting on:") | not)}]
                else . end) | .list),
@@ -240,13 +277,36 @@ if [ -n "$sid" ]; then
                            models: [.modelUsage // {} | to_entries[]
                                     | {model: .key, cost: (.value.costUSD // 0),
                                        tokens: ([.value | .inputTokens, .outputTokens, .cacheReadInputTokens,
-                                                 .cacheCreationInputTokens] | map(. // 0) | add)}]} end)}' \
-        "$wt" 2>/dev/null); then
+                                                 .cacheCreationInputTokens] | map(. // 0) | add)}]} end),
+           questions: [$calls_q[] as $q | ([$replies[] | select(.id == $q.id and .at != null)] | first) as $r
+                       | select($r != null and $q.at != null) | {asked: $q.at, at: $r.at, detail: $q.detail}]}' \
+        "$wt" 2>/dev/null) || return 1
+    worker=$read_out
+}
+
+# --- the worker's transcript -----------------------------------------------
+worker='{}'
+if [ -n "$sid" ]; then
+    if ! wt=$(transcript "$sid"); then
+        note "no transcript for session $sid under $CLAUDE_CONFIG_DIR/projects, so its calls, cost, zone, captures and typed messages were not read"
+    elif ! read_worker; then
         note "transcript $wt could not be read, so its calls, cost, zone, captures and typed messages were not read"
         worker='{}'
     else
-        [ "$(printf '%s' "$worker" | jq -r '.usage == null')" = false ] ||
-            note "the transcript holds no cost-state row, so its tokens and cost were not read"
+        # claude stop writes the cost-state row a moment after the stop.
+        waited=0
+        while [ "$(printf '%s' "$worker" | jq -r '.usage == null')" = true ] && [ "$waited" -lt "$cost_wait" ]; do
+            sleep 1
+            waited=$((waited + 1))
+            read_worker || break
+        done
+        if [ "$(printf '%s' "$worker" | jq -r '.usage == null')" = true ]; then
+            if [ "$cost_wait" -gt 0 ]; then
+                note "the transcript holds no cost-state row after $cost_wait s waiting for the one claude stop writes, so its tokens and cost were not read"
+            else
+                note "the transcript holds no cost-state row, so its tokens and cost were not read"
+            fi
+        fi
         [ "$(printf '%s' "$worker" | jq -r '.turnEnd == null')" = false ] ||
             note "the transcript holds no turn end, so its turn had not ended when this was recorded"
     fi
@@ -297,19 +357,20 @@ elif ! supervisor=$(jq -rs --arg l "$launched" "$defs"'
 fi
 
 # --- waits on a human ------------------------------------------------------
-# The times post.sh posted and push.sh pushed for this worker, one a line,
-# from the checkout's records; with none, or none readable, every wait they
-# would clear stays a human's. A push.sh line from before it wrote a time
-# has none, and is skipped.
+# The times post.sh posted and push.sh pushed for this worker, one a line
+# with `post` or `push` after it, from the checkout's records; with none, or
+# none readable, every wait they would clear stays a human's. A push.sh line
+# from before it wrote a time has none, and is skipped.
 approvals=""
 posted=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-posted 2>/dev/null)
 pushed=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-pushed 2>/dev/null)
 if [ -n "$ID" ]; then
     approvals=$({
-        [ ! -f "$posted" ] || awk -v id="$ID" '$1 == id { print $2 }' "$posted"
-        [ ! -f "$pushed" ] || awk -v id="$ID" '$1 == id { print $5 }' "$pushed"
-    } | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$')
+        [ ! -f "$posted" ] || awk -v id="$ID" '$1 == id { print $2, "post" }' "$posted"
+        [ ! -f "$pushed" ] || awk -v id="$ID" '$1 == id { print $5, "push" }' "$pushed"
+    } | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z (post|push)$')
 fi
+approvals_json=$(jq -cn --arg t "$approvals" '[$t | splits("\n") | select(. != "") | split(" ") | {at: .[0], kind: .[1]}]')
 waits=""
 if [ -n "$SESSION" ]; then
     :
@@ -319,7 +380,8 @@ elif [ ! -f "$timeline" ]; then
 elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // []')" \
         --argjson m "$(printf '%s' "$worker" | jq -c '.marks // []')" \
         --argjson a "$(printf '%s' "$worker" | jq -c '.asked // []')" \
-        --argjson approvals "$(jq -cn --arg t "$approvals" '$t | [splits("\n") | select(. != "")]')" "$defs"'
+        --argjson q "$(printf '%s' "$worker" | jq -c '.questions // []')" \
+        --argjson approvals "$(printf '%s' "$approvals_json" | jq -c 'map(.at)')" "$defs"'
         # A wait is the supervisor'"'"'s when the first prompt after it is its answer.
         # It is no wait when the worker'"'"'s last prompt or turn end before it is
         # an unasked turn end: a finished report watch.sh reads as done.
@@ -330,8 +392,23 @@ elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // 
         # It is the supervisor'"'"'s too when post.sh posted or push.sh pushed
         # for the worker at or after it, with no prompt to the worker in
         # between.
-        [.[] | objects | select(.state == "blocked")
-         | (.at // "") as $b
+        # The transcript adds two waits the timeline may hold no blocked
+        # entry for (#86), each counted once when one is stamped from 5
+        # seconds before it: a turn end with a Waiting on: line, up to the
+        # next prompt, which goes through the same rules; and an
+        # AskUserQuestion answered through claude attach, up to the answer,
+        # which is a human'"'"'s.
+        [.[] | objects | select(.state == "blocked") | {at: (.at // ""), detail: (.detail // "")}] as $blocks
+        | [$blocks[] | select(.at != "") | .at | epoch] as $bt
+        | [$m[] | select(.end and (.waiting // null) != null) | (.at | epoch) as $e
+           | ([$a[] | epoch | select(. > $e)] | min) as $next
+           | select([$bt[] | select(. >= $e - 5 and ($next == null or . < $next))] | length == 0)
+           | {at, detail: .waiting}] as $waiting
+        | [$q[] | (.asked | epoch) as $s | (.at | epoch) as $r
+           | select([$bt[] | select(. >= $s - 5 and . <= $r)] | length == 0)
+           | {at: .asked, detail: "AskUserQuestion: \(.detail)"}] as $questions
+        | [($blocks + $waiting)[]
+         | .at as $b
          | select($b == "" or ([$p[] | select((.at | epoch) > ($b | epoch))] | min_by(.at | epoch) | .sup // false | not))
          | select($b == "" or (($b | epoch) as $be
              | ([$m[] | select((.at | epoch) <= $be)] | max_by(.at | epoch) // {}) as $last
@@ -341,8 +418,8 @@ elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // 
              | not))
          | select($b == "" or (($b | epoch) as $be
              | [$approvals[] | epoch | select(. >= $be) | . as $pe
-                | select([$a[] | epoch | select(. > $be and . <= $pe)] | length == 0)] | length == 0))
-         | .detail // ""] as $w
+                | select([$a[] | epoch | select(. > $be and . <= $pe)] | length == 0)] | length == 0))]
+        | (. + $questions | sort_by(.at) | map(.detail)) as $w
         | if ($w | length) == 0 then ""
           else "\($w | length) wait\(if ($w | length) > 1 then "s" else "" end) on a human"
                + (($w | map(select(. != "")) | join("; ")) as $d | if $d == "" then "" else " (\($d))" end) end' \
@@ -384,13 +461,18 @@ fi
 jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launched "$launched" --arg now "$NOW" \
     --argjson w "$worker" --arg sub "$subcalls" --arg sup "$supervisor" --arg waits "$waits" \
     --arg actions "$actions" --arg short "$short" --arg count "$count" --arg children "$children" \
-    --arg ticket "$ticket" --arg n "$TICKET" "$defs"'
+    --arg ticket "$ticket" --arg n "$TICKET" --argjson ap "$approvals_json" "$defs"'
     def plural($k; $word): "\($k) \($word)\(if $k == 1 then "" else "s" end)";
     ($session != "") as $hand
     | (if $hand then "session" else "worker" end) as $who
     | (if $hand then $w.started // "" else $launched end) as $launched
     | ($launched | if . == "" then null else epoch end) as $l
     | ($w.turnEnd | if . == null then null else epoch end) as $e
+    # Each approval with the worker'"'"'s last turn end before it.
+    | [$ap[] | (.at | epoch) as $pe
+       | ([$w.marks // [] | .[] | select(.end) | .at | epoch | select(. <= $pe)] | max) as $te
+       | . + {epoch: $pe, span: (if $te == null then null else $pe - $te end)}] | sort_by(.epoch) as $ap
+    | ($ap | last) as $lastap
     | (if $hand then "## Hand run of #\($n)" else "## Supervised run of #\($n)" end),
       "",
       (if $hand then "- session: \($session), \($w.model // "unknown")",
@@ -401,7 +483,14 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
                        else ($w.turnEnd | stamp) + (if $l == null then ""
                             else ", \($e - $l | span) after \(if $hand then "the start" else "launch" end)" end) end)",
       (select($hand | not)
-       | "- reported: \($now | stamp)\(if $e == null then "" else ", \(($now | epoch) - $e | span) after the turn ended" end)"),
+       | "- reported: \($now | stamp)\(if $e == null then "" else ", \(($now | epoch) - $e | span) after the turn ended" end)"
+         + (if $e == null or $lastap == null or $lastap.epoch < $e then ""
+            else ", \(($now | epoch) - $lastap.epoch | span) after the last approval" end)),
+      (select($hand | not)
+       | "- approval waits: \(if $w.calls == null then "unknown"
+                              elif ($ap | length) == 0 then "none"
+                              else [$ap[] | "\(if .span == null then "unknown time" else .span | span end) before the \(.kind) on approval at \(.at)"]
+                                   | join("; ") end)"),
       "- API calls: \(if $w.calls == null then "unknown"
                      elif $sub == "" then "\($w.calls) by the \($who), its subagents unknown"
                      else "\($w.calls + ($sub | tonumber)), \($w.calls) by the \($who) and \($sub) by its subagents" end)",
@@ -425,7 +514,9 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
       "- human interventions: \([(select($waits != "") | if $waits == "unknown" then "unknown waits" else $waits end),
                                  (if $w.calls == null then "unknown typed messages"
                                   elif $w.typed > 0 then "\(plural($w.typed; "message")) typed into the \($who)"
-                                  else empty end)]
+                                  else empty end),
+                                 (select(($w.questions // []) | length > 0)
+                                  | "\(plural($w.questions | length; "question")) answered in the \($who)")]
                                 | if length == 0 then "none" else join(", ") end)",
       (select($hand | not)
        | if $actions == "" or $actions == "none" then "- shared actions: none"

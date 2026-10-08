@@ -36,10 +36,12 @@ check() { # <name> <expected> <actual>
 
 # Every variable the scripts read, set or unset here, so the result does not
 # depend on the session running the test.
-unset MP_SMART_ZONE_K CLAUDE_CODE_SESSION_ID FAKE_GH_FAIL WORKSTREAM_KIT_CONTEXT_DIR CLAUDE_CODE_SESSION_ATTENDED
+unset MP_SMART_ZONE_K MP_RECORD_COST_WAIT CLAUDE_CODE_SESSION_ID FAKE_GH_FAIL WORKSTREAM_KIT_CONTEXT_DIR CLAUDE_CODE_SESSION_ATTENDED
 cfg="$work/config"
 mkdir -p "$cfg"
 export CLAUDE_CONFIG_DIR="$cfg"
+# No wait for a cost-state row, but where a test sets one.
+export MP_RECORD_COST_WAIT=0
 
 # --- fake gh ---------------------------------------------------------------
 mkdir -p "$work/bin"
@@ -167,6 +169,7 @@ check "record: the whole record" "## Supervised run of #56
 - launched: 2026-09-29T06:01:24Z
 - turn ended: 2026-09-29T06:14:24Z, 13 min after launch
 - reported: 2026-09-29T06:15:24Z, 1 min after the turn ended
+- approval waits: none
 - API calls: 5, 3 by the worker and 2 by its subagents
 - tokens and cost: claude-haiku-4-5-20251001 20k tokens \$0.02; claude-sonnet-5 28.0M tokens \$8.43; \$8.45 in all
 - supervisor since launch: 2 API calls, 183k tokens, \$0.54
@@ -272,6 +275,23 @@ out=$(record)
 check "record: no cost-state row" "unknown" "$(field 'tokens and cost' "$out")"
 check "record: no cost-state row, named" "- note: the transcript holds no cost-state row, so its tokens and cost were not read" \
     "$(printf '%s\n' "$out" | grep '^- note: the transcript')"
+# `claude stop` writes the row a moment after the stop, and the record waits
+# for it (#86); one that never comes is named with the wait.
+(sleep 2; cost 8.4512 '{"claude-sonnet-5": {"inputTokens": 5, "outputTokens": 600, "cacheReadInputTokens": 221000,
+    "cacheCreationInputTokens": 27800000, "costUSD": 8.43},
+    "claude-haiku-4-5-20251001": {"inputTokens": 10, "outputTokens": 90, "cacheReadInputTokens": 0,
+    "cacheCreationInputTokens": 20000, "costUSD": 0.0212}}' >>"$cfg/projects/-work-project/$sid.jsonl") &
+out=$( (export MP_RECORD_COST_WAIT=10; record) )
+wait
+check "record: a cost-state row written after the stop is read" \
+    "claude-haiku-4-5-20251001 20k tokens \$0.02; claude-sonnet-5 28.0M tokens \$8.43; \$8.45 in all" \
+    "$(field 'tokens and cost' "$out")"
+jq -c 'select(.type != "cost-state")' "$cfg/projects/-work-project/$sid.jsonl" >"$work/t"
+command mv "$work/t" "$cfg/projects/-work-project/$sid.jsonl"
+out=$( (export MP_RECORD_COST_WAIT=1; record) )
+check "record: no cost-state row after the wait, named" \
+    "- note: the transcript holds no cost-state row after 1 s waiting for the one claude stop writes, so its tokens and cost were not read" \
+    "$(printf '%s\n' "$out" | grep '^- note: the transcript')"
 
 setup
 command rm -rf "$cfg/jobs"
@@ -342,6 +362,7 @@ check "record: a recorded job" "## Supervised run of #56
 - launched: 2026-09-30T05:46:16Z
 - turn ended: 2026-09-30T05:46:26Z, under a minute after launch
 - reported: 2026-09-30T05:47:26Z, 1 min after the turn ended
+- approval waits: none
 - API calls: 2, 2 by the worker and 0 by its subagents
 - tokens and cost: claude-sonnet-5 147k tokens \$0.31; \$0.31 in all
 - supervisor since launch: 0 API calls, 0 tokens, \$0.00
@@ -560,6 +581,104 @@ command cat "$work/pending-head" >"$cfg/projects/-work-project/$sid.jsonl"
 check "pending agents: a block the worker has not gone on from is a wait" \
     "2 waits on a human (awaiting spec review before proceeding; awaiting label change + comment)" \
     "$(field 'human interventions' "$(record)")"
+
+# Waits the timeline has no row for, read from the transcript (#86), in the
+# shapes the #58 run's worker (39af1911) wrote. It asked an AskUserQuestion
+# before the job's timeline had any row, and the answer typed through
+# `claude attach` came back as a tool_result, with the answers in the row's
+# toolUseResult.
+ask() { # <time> <id> <header> <question> -- an AskUserQuestion call
+    jq -cn --arg t "$1" --arg id "$2" --arg h "$3" --arg q "$4" \
+        '{type: "assistant", timestamp: $t, requestId: "q-\($id)", message: {role: "assistant", content: [
+            {type: "tool_use", id: $id, name: "AskUserQuestion", input: {questions: [{question: $q, header: $h,
+                options: [{label: "Yes", description: "Go on."}, {label: "No", description: "Stop."}],
+                multiSelect: false}]}}]}}'
+}
+answered() { # <time> <id> <question> <answer> -- its answer, typed through claude attach
+    jq -cn --arg t "$1" --arg id "$2" --arg q "$3" --arg a "$4" \
+        '{type: "user", timestamp: $t, message: {role: "user", content: [{type: "tool_result", tool_use_id: $id,
+            content: "Your questions have been answered: \"\($q)\"=\"\($a)\". You can now continue with the user'"'"'s answers in mind."}]},
+          toolUseResult: {questions: [{question: $q}], answers: {($q): $a}, annotations: {}}}'
+}
+working() { # <time> -- a timeline row
+    jq -cn --arg t "$1" '{at: $t, state: "working", detail: "Reading ticket #56", text: ""}'
+}
+job
+{
+    said 2026-09-29T06:01:25.000Z '<command-message>mattpocock-skills:implement</command-message>'
+    ask 2026-09-29T06:01:40.000Z q1 'Next step' 'Proceed with #56?'
+    answered 2026-09-29T06:03:31.000Z q1 'Proceed with #56?' 'Yes'
+    text 2026-09-29T06:10:00.000Z 'Committed on main.
+
+Waiting on: git push origin main'
+    ended 2026-09-29T06:10:30.000Z
+} >"$cfg/projects/-work-project/$sid.jsonl"
+command cp "$cfg/projects/-work-project/$sid.jsonl" "$work/asked"
+# The block is stamped a moment before the turn end, as #58's was.
+{
+    working 2026-09-29T06:03:35.000Z
+    blocked 2026-09-29T06:10:29.963Z '3 commits ready; awaiting push go-ahead'
+} >"$cfg/jobs/c2a368ee/timeline.jsonl"
+out=$(record)
+check "transcript waits: a question asked before the timeline is a wait, its answer an intervention" \
+    "2 waits on a human (AskUserQuestion: Next step; 3 commits ready; awaiting push go-ahead), 1 question answered in the worker" \
+    "$(field 'human interventions' "$out")"
+# A question the timeline did record a block for is counted once.
+{
+    working 2026-09-29T06:01:30.000Z
+    blocked 2026-09-29T06:01:41.000Z 'proceed with #56?'
+    blocked 2026-09-29T06:10:29.963Z '3 commits ready; awaiting push go-ahead'
+} >"$cfg/jobs/c2a368ee/timeline.jsonl"
+check "transcript waits: a question with a block is one wait" \
+    "2 waits on a human (proceed with #56?; 3 commits ready; awaiting push go-ahead), 1 question answered in the worker" \
+    "$(field 'human interventions' "$(record)")"
+# A question the supervisor answered (answer.sh, #90) comes back as a plain
+# prompt, not as an answered tool_result: neither a human's wait nor answer.
+{
+    said 2026-09-29T06:01:25.000Z '<command-message>mattpocock-skills:implement</command-message>'
+    ask 2026-09-29T06:01:40.000Z q1 'Next step' 'Proceed with #56?'
+    jq -cn '{type: "user", timestamp: "2026-09-29T06:03:30.000Z", message: {role: "user", content: [{type: "tool_result",
+        tool_use_id: "q1", is_error: true, content: "[Request interrupted by user for tool use]"}]}}'
+    said 2026-09-29T06:03:31.000Z '[supervisor answer to "Proceed with #56?"] Yes, proceed with #56.'
+} >"$cfg/projects/-work-project/$sid.jsonl"
+{
+    working 2026-09-29T06:01:30.000Z
+    blocked 2026-09-29T06:01:41.000Z 'Proceed with #56?'
+} >"$cfg/jobs/c2a368ee/timeline.jsonl"
+check "transcript waits: a question the supervisor answered is not a human's" "none" \
+    "$(field 'human interventions' "$(record)")"
+# A turn that ends on `Waiting on:` with no block after it is a wait, as in
+# #155's run, where the capture's last row was `working`; a push.sh push on
+# the maintainer's approval clears it (#156), and its wait is reported apart.
+command cp "$work/asked" "$cfg/projects/-work-project/$sid.jsonl"
+working 2026-09-29T06:10:31.000Z >"$cfg/jobs/c2a368ee/timeline.jsonl"
+out=$(record --now 2026-09-29T06:41:00Z)
+check "transcript waits: a Waiting on: line with no block is a wait" \
+    "2 waits on a human (AskUserQuestion: Next step; Waiting on: git push origin main), 1 question answered in the worker" \
+    "$(field 'human interventions' "$out")"
+check "approval waits: none" "none" "$(field 'approval waits' "$out")"
+pushed=$(git -C "$repo" rev-parse --path-format=absolute --git-path mp-supervise-pushed)
+printf '%s\n' "c2a368ee origin/main $start $start 2026-09-29T06:40:00Z" >"$pushed"
+out=$(record --now 2026-09-29T06:41:00Z)
+check "transcript waits: a push on approval clears it" \
+    "1 wait on a human (AskUserQuestion: Next step), 1 question answered in the worker" \
+    "$(field 'human interventions' "$out")"
+check "approval waits: from the turn end to the push" "30 min before the push on approval at 2026-09-29T06:40:00Z" \
+    "$(field 'approval waits' "$out")"
+check "approval waits: the report's latency after it" \
+    "2026-09-29T06:41:00Z, 31 min after the turn ended, 1 min after the last approval" \
+    "$(field reported "$out")"
+posted=$(git -C "$repo" rev-parse --path-format=absolute --git-path mp-supervise-posted)
+printf '%s\n' "c2a368ee 2026-09-29T06:20:00Z issue-comment https://github.com/o/r/issues/139#issuecomment-1" >"$posted"
+check "approval waits: a post and a push, in time order" \
+    "10 min before the post on approval at 2026-09-29T06:20:00Z; 30 min before the push on approval at 2026-09-29T06:40:00Z" \
+    "$(field 'approval waits' "$(record --now 2026-09-29T06:41:00Z)")"
+command rm -f "$pushed" "$posted"
+# A hand-run session's answered question is the person's answer too.
+answered_hand=$(PATH="$work/bin:$PATH" sh "$scripts/record.sh" --session "$sid" --dir "$repo" --start "$start" \
+    --ticket 56 </dev/null)
+check "transcript waits: a hand run's answered question" "1 question answered in the session" \
+    "$(field 'human interventions' "$answered_hand")"
 command rm -rf "$cfg/projects/-work-project"
 # watch.sh confirms a block with the same `asks`; the two copies match.
 asks_in() { sed -n 's/^.*\(def asks: .*;\).*$/\1/p' "$scripts/$1"; }
