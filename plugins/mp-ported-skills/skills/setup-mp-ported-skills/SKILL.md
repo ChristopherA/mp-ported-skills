@@ -8,7 +8,7 @@ Turn this plugin's three profile features on or off in the current Claude Code *
 
 - **Remote Control**: `remoteControlAtStartup`.
 - **Status line**: `statusLine`, the profile's copy of the status line, and its install stamp. Line 2 reads `[Opus 5.5|medium] 41% of zone`, tokens in context as a percentage of the **smart zone**. The plugin's SessionStart hook keeps the copy current after this skill makes it.
-- **Titles**: `env.MP_SESSION_TITLE=1`. Sessions are titled `<project> · <profile> · <host>`, and status line 1 shows only what is unusual instead of `host · profile » project » branch`.
+- **Titles**: `env.MP_SESSION_TITLE=1`. Sessions are titled `<project> · <profile> · <host>`, except one a shell wrapper already named with `-n` (it sets `CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX`), and status line 1 shows only what is unusual instead of `host · profile » project » branch`.
 - **Supervision doc** (#58): `docs/agents/supervision.md` in a **Project**, not the profile -- where `/supervise` reads standing grants for a worker's shared actions. This one has no off: once written, it is the maintainer's file to keep or edit by hand.
 - **Distribution repo** (#143): `docs/agents/distribution-repo.md` at the Project repo's top, one path naming the separate repo, cloned beside it, that the Project's code is committed to. `/supervise` reads it to watch and push that repo's work. No file means the code lives in the Project's own repo. Run this in the maintainer's own session: a `/supervise` worker may not edit it.
 

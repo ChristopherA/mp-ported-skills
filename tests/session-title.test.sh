@@ -36,7 +36,7 @@ mkdir -p "$repo/sub/dir"
 export CLAUDE_CONFIG_DIR="$work/.claude-testprof"
 mkdir -p "$CLAUDE_CONFIG_DIR"
 export CLAUDE_PLUGIN_ROOT="$root/plugins/mp-ported-skills"
-unset MP_SESSION_TITLE 2>/dev/null || true
+unset MP_SESSION_TITLE CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX 2>/dev/null || true
 host=$(hostname -s)
 
 title() { # <source> <cwd>: the title the hook sets, with titles on
@@ -62,6 +62,13 @@ check "opt-in unset: no output" "" "$out"
 check "opt-in unset: exit 0" "0" "$rc"
 check "opt-in not 1: no output" "" \
     "$(printf '{"source":"startup","cwd":"%s"}' "$repo" | MP_SESSION_TITLE=yes sh -c "$hook_cmd")"
+
+# The shell wrapper titled the session with -n and set the prefix variable:
+# no title, so the wrapper's stays.
+out=$(printf '{"source":"startup","cwd":"%s"}' "$repo" \
+    | MP_SESSION_TITLE=1 CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX=host-myrepo sh -c "$hook_cmd"); rc=$?
+check "wrapper-named: no output" "" "$out"
+check "wrapper-named: exit 0" "0" "$rc"
 
 # The title and the status line name the host and profile the same way, so
 # the two agree on screen. The status line's line 1 with titles off starts

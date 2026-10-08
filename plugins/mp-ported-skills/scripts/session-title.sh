@@ -13,8 +13,15 @@
 # checked again here), so a /rename survives resume and compact. Prints
 # nothing, and exits 0, whenever it sets no title. Reads the SessionStart
 # payload on stdin, which Claude Code closes; run by hand, pipe one in.
+#
+# A session the maintainer's shell wrapper started already has a title: the
+# wrapper passes -n and sets CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX in the
+# same launch. A title here would replace the wrapper's with one in a
+# different format, so with the variable set the hook sets none. Sessions started without the wrapper, such as new ones from
+# the Claude app, still get this title.
 
 [ "${MP_SESSION_TITLE:-}" = 1 ] || exit 0
+[ -z "${CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX:-}" ] || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 input=$(cat)
 source=$(printf '%s' "$input" | jq -r '.source // empty' 2>/dev/null) || source=""
