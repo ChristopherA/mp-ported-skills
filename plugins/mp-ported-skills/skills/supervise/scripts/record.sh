@@ -14,9 +14,10 @@
 #                            after the turn end
 # * approval waits           for each post.sh post and push.sh push for this
 #                            worker on the maintainer's approval, how long
-#                            after the worker's last turn end before it it
-#                            came: the maintainer's answer, which waits on a
-#                            human leaves out (#86)
+#                            it came after the worker's last turn end before
+#                            it with no background agents pending: the
+#                            maintainer's answer, which waits on a human
+#                            leaves out (#86)
 #   API calls                distinct requests in the worker's transcript
 #                            and its subagents'
 #   tokens and cost          by model, from the worker transcript's last
@@ -267,7 +268,7 @@ read_worker() {
                    | .list += [{at: $r.timestamp, end: true, pending: $pending,
                                 waiting: (if $pending then null else .text | waiting end),
                                 unasked: ($pending | not) and .text != "" and (.text | asks | not)
-                                         and (.text | test("(?m)^[`* ]*Waiting on:") | not)}]
+                                         and (.text | waiting) == null}]
                else . end) | .list),
            answers: [$rows[] | select(.type == "user" and (.isMeta // false | not)) | text // empty
                      | capture("^\\[supervisor answer to \"(?<q>.*)\"\\] (?<a>[^.!?]*[.!?]?)")],
@@ -468,9 +469,10 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
     | (if $hand then $w.started // "" else $launched end) as $launched
     | ($launched | if . == "" then null else epoch end) as $l
     | ($w.turnEnd | if . == null then null else epoch end) as $e
-    # Each approval with the worker'"'"'s last turn end before it.
+    # Each approval with the worker'"'"'s last turn end before it, with no
+    # agents pending.
     | [$ap[] | (.at | epoch) as $pe
-       | ([$w.marks // [] | .[] | select(.end) | .at | epoch | select(. <= $pe)] | max) as $te
+       | ([$w.marks // [] | .[] | select(.end and (.pending | not)) | .at | epoch | select(. <= $pe)] | max) as $te
        | . + {epoch: $pe, span: (if $te == null then null else $pe - $te end)}] | sort_by(.epoch) as $ap
     | ($ap | last) as $lastap
     | (if $hand then "## Hand run of #\($n)" else "## Supervised run of #\($n)" end),

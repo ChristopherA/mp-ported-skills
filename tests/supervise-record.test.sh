@@ -673,7 +673,14 @@ printf '%s\n' "c2a368ee 2026-09-29T06:20:00Z issue-comment https://github.com/o/
 check "approval waits: a post and a push, in time order" \
     "10 min before the post on approval at 2026-09-29T06:20:00Z; 30 min before the push on approval at 2026-09-29T06:40:00Z" \
     "$(field 'approval waits' "$(record --now 2026-09-29T06:41:00Z)")"
-command rm -f "$pushed" "$posted"
+command rm -f "$posted"
+# A turn end with background agents pending is not the turn end it waits from.
+jq -cn '{type: "system", subtype: "turn_duration", timestamp: "2026-09-29T06:30:00.000Z", pendingBackgroundAgentCount: 1}' \
+    >>"$cfg/projects/-work-project/$sid.jsonl"
+check "approval waits: a turn end with agents pending is passed over" \
+    "30 min before the push on approval at 2026-09-29T06:40:00Z" \
+    "$(field 'approval waits' "$(record --now 2026-09-29T06:41:00Z)")"
+command rm -f "$pushed"
 # A hand-run session's answered question is the person's answer too.
 answered_hand=$(PATH="$work/bin:$PATH" sh "$scripts/record.sh" --session "$sid" --dir "$repo" --start "$start" \
     --ticket 56 </dev/null)
