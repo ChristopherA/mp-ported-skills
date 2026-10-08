@@ -102,10 +102,10 @@
 # docs/agents/triage-labels.md (#140). It reports those and
 # docs/agents/supervision.md on origin's default branch, present or not, on
 # `setup:` lines on stderr. Once the session passes its checks, it writes
-# the session's id to the marker `git rev-parse --git-path
-# mp-supervise-worker`, which keeps an
-# attended session read-only in the checkout (scripts/supervise-read-only.sh)
-# until release.sh removes it.
+# the session's id to the marker
+# `git rev-parse --git-path mp-supervise-worker`, which keeps an attended
+# session read-only in the checkout (scripts/supervise-read-only.sh) until
+# release.sh removes it.
 #
 # A Project that names a Distribution repo in docs/agents/distribution-repo.md
 # on origin (distribution.sh, #125) has it checked the same way, each error
@@ -212,34 +212,35 @@ project_default=$default
 top=$(git -C "$DIR" rev-parse --show-toplevel)
 
 # The setup files a run relies on (#140), each reported on stderr as a
-# `setup:` line before anything launches. The tracker docs, which resuming's
-# state.sh reads for the tracker and its labels, are read at the repo's top
-# in the working tree, which the check above found clean; a missing one
-# refuses the launch, naming the command that writes it. supervision.md is
-# read where grant.sh reads grants, origin's default branch (docs/adr/0005):
-# without it there every shared action waits for approval, which is legal, so
-# the launch goes on and its line says so. Each command named is
-# user-invoked, so the line says the maintainer types it.
+# `setup:` line before anything launches, a refusal included. The tracker
+# docs, which resuming's state.sh reads for the tracker and its labels, are
+# read at the repo's top in the working tree, which the check above found
+# clean; a missing one refuses the launch, naming the command that writes it.
+# supervision.md is read where grant.sh reads grants, origin's default branch
+# (docs/adr/0005): without it there every shared action waits for approval,
+# which is legal, so the launch goes on and its line says so. Each command
+# named is user-invoked, so the line says the maintainer types it.
 you_type="(you type it; user-invoked)"
 missing=""
 for f in docs/agents/issue-tracker.md docs/agents/triage-labels.md; do
-    [ -f "$top/$f" ] || missing="$missing${missing:+ and }$f"
+    if [ -f "$top/$f" ]; then
+        printf 'setup: %s present\n' "$f" >&2
+    else
+        printf 'setup: %s missing; /setup-matt-pocock-skills writes it %s\n' "$f" "$you_type" >&2
+        missing="$missing${missing:+ and }$f"
+    fi
 done
-case $missing in
-    '') ;;
-    *' and '*) fail "$top lacks $missing; /setup-matt-pocock-skills writes them $you_type; not launched" ;;
-    *) fail "$top lacks $missing; /setup-matt-pocock-skills writes it $you_type; not launched" ;;
-esac
 SUPERVISION=docs/agents/supervision.md
 if git -C "$DIR" cat-file -e "origin/${project_default}:$SUPERVISION" 2>/dev/null; then
     supervision="present on origin/$project_default"
-elif [ -f "$top/$SUPERVISION" ]; then
+elif git -C "$DIR" cat-file -e "HEAD:$SUPERVISION" 2>/dev/null; then
     supervision="committed here but not on origin/$project_default, so not yet in force: every shared action waits for approval until it is pushed"
 else
     supervision="missing on origin/$project_default, so every shared action waits for approval; /setup-mp-ported-skills offers it $you_type"
 fi
-printf 'setup: docs/agents/issue-tracker.md present\nsetup: docs/agents/triage-labels.md present\nsetup: %s %s\n' \
-    "$SUPERVISION" "$supervision" >&2
+printf 'setup: %s %s\n' "$SUPERVISION" "$supervision" >&2
+[ -z "$missing" ] ||
+    fail "$top lacks $missing; /setup-matt-pocock-skills writes them $you_type; not launched"
 
 # The Distribution repo (#125), named on origin's default branch, read once
 # here and kept for the run. distribution.sh passes its own notes (a copy

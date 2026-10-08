@@ -985,19 +985,22 @@ setup_lines() { grep '^setup: ' "$work/launch-stderr"; }
 project_git rm -q docs/agents/issue-tracker.md
 project_git commit -m 'no tracker doc'
 out=$(launch --ticket 56 2>&1); rc=$?
-not_launched "no issue-tracker.md" "Error: $project lacks docs/agents/issue-tracker.md; /setup-matt-pocock-skills writes it (you type it; user-invoked); not launched"
+not_launched "no issue-tracker.md" "Error: $project lacks docs/agents/issue-tracker.md; /setup-matt-pocock-skills writes them (you type it; user-invoked); not launched"
 project_git rm -q docs/agents/triage-labels.md
 project_git commit -m 'no tracker docs'
 out=$(launch --ticket 56 2>&1); rc=$?
 not_launched "no tracker docs" "Error: $project lacks docs/agents/issue-tracker.md and docs/agents/triage-labels.md; /setup-matt-pocock-skills writes them (you type it; user-invoked); not launched"
+check "launch: no tracker docs still reports every setup file" "setup: docs/agents/issue-tracker.md missing; /setup-matt-pocock-skills writes it (you type it; user-invoked)
+setup: docs/agents/triage-labels.md missing; /setup-matt-pocock-skills writes it (you type it; user-invoked)
+setup: docs/agents/supervision.md missing on origin/main, so every shared action waits for approval; /setup-mp-ported-skills offers it (you type it; user-invoked)" "$(setup_lines)"
 project_git reset -q --hard HEAD~1
 out=$(launch_dir "$project/sub" --ticket 56 2>&1); rc=$?
-not_launched "no issue-tracker.md, from a subfolder" "Error: $project lacks docs/agents/issue-tracker.md; /setup-matt-pocock-skills writes it (you type it; user-invoked); not launched"
+not_launched "no issue-tracker.md, from a subfolder" "Error: $project lacks docs/agents/issue-tracker.md; /setup-matt-pocock-skills writes them (you type it; user-invoked); not launched"
 project_git reset -q --hard HEAD~1
 project_git rm -q docs/agents/triage-labels.md
 project_git commit -m 'no labels doc'
 out=$(launch --ticket 56 2>&1); rc=$?
-not_launched "no triage-labels.md" "Error: $project lacks docs/agents/triage-labels.md; /setup-matt-pocock-skills writes it (you type it; user-invoked); not launched"
+not_launched "no triage-labels.md" "Error: $project lacks docs/agents/triage-labels.md; /setup-matt-pocock-skills writes them (you type it; user-invoked); not launched"
 project_git reset -q --hard HEAD~1
 out=$(launch --ticket 56 2>&1); rc=$?
 check "launch: no supervision.md on origin launches" "0 c2a368ee" "$rc $out"
