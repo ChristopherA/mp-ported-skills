@@ -25,6 +25,14 @@
 # Otherwise prints `next implement #N`. The one-session-per-checkout check
 # is launch.sh's, which the loop runs next. Writes nothing but the fetch.
 #
+# Run from the plugin cache (<plugin>/<version>/skills/supervise/scripts),
+# it first prints `scripts <version> <dir>`, the newest installed version's
+# scripts, which it also reads the next step with (#169). A worker's push
+# and plugin update can install a newer version mid-loop, while the
+# supervisor's skill text still names the folder it loaded; when the newest
+# is newer than this one, the line ends `(newer than the loaded <version>;
+# use it for the rest of the loop)`. Outside a cache it prints no such line.
+#
 # Usage:
 #   next.sh --dir DIR [--ran "N M ..."] [--max N] [--from FILE]
 #   next.sh --max N     only check the count, before the loop's first launch:
@@ -107,6 +115,24 @@ if [ -n "$HAS_MAX" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# The newest installed version beside this one, by number, when this script
+# runs from a version folder of the plugin cache.
+is_version() { printf '%s\n' "$1" | grep -qE '^[0-9]+[.][0-9]+[.][0-9]+$'; }
+scripts_line=""
+plugin_root=$(cd "$SCRIPT_DIR/../../.." && pwd)
+loaded=$(basename "$plugin_root")
+if is_version "$loaded"; then
+    newest=$(for d in "$plugin_root"/../*/skills/supervise/scripts/next.sh; do
+        [ -f "$d" ] || continue
+        v=$(basename "$(cd "$(dirname "$d")/../../.." && pwd)")
+        is_version "$v" && printf '%s\n' "$v"
+    done | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
+    [ -n "$newest" ] || newest=$loaded
+    SCRIPT_DIR=$(cd "$plugin_root/../$newest/skills/supervise/scripts" && pwd)
+    scripts_line="scripts $newest $SCRIPT_DIR"
+    [ "$newest" = "$loaded" ] ||
+        scripts_line="$scripts_line (newer than the loaded $loaded; use it for the rest of the loop)"
+fi
 if [ -n "$FROM" ]; then
     step=$(sh "$SCRIPT_DIR/step.sh" --from "$FROM" </dev/null) || fail "step.sh failed on $FROM"
 else
@@ -119,6 +145,7 @@ case $step in
             [ "$r" = "$n" ] &&
                 halt "repeat: #$n ran earlier in this loop and state.sh still recommends it; was its work committed with Closes #$n?"
         done
+        [ -z "$scripts_line" ] || printf '%s\n' "$scripts_line"
         echo "next $step" ;;
     "stop: next: 7 "*) halt "nothing-left: ${step#stop: }" ;;
     *) halt "other-step: ${step#stop: }" ;;

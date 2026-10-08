@@ -147,6 +147,40 @@ done
 check "next: a bad count refused with --dir too" "Error: --max needs a positive integer, not '0'
 exit 1" "$(next "$repo" --max 0)"
 
+# Run from a plugin cache, next.sh names the scripts the next ticket launches
+# with: the newest installed version's, which a worker's push and plugin
+# update may have put beside the loaded one (#169).
+repo=$(new_repo cached)
+state "2 /implement #61 ($you): #61 t61"
+cache="$work/cache/mp-ported-skills/mp-ported-skills"
+for v in 0.8.64 0.8.9 0.8.68; do
+    mkdir -p "$cache/$v"
+    command cp -R "$root/plugins/mp-ported-skills/." "$cache/$v/"
+done
+mkdir -p "$cache/latest/skills/supervise/scripts"
+from_cache() { # <version> [args...] -- the cached next.sh's output, then `exit N`
+    v=$1; shift
+    out=$(sh "$cache/$v/skills/supervise/scripts/next.sh" --dir "$repo" "$@" --from "$work/state.txt" </dev/null 2>&1)
+    printf '%s\nexit %s' "$out" "$?"
+}
+new="$cache/0.8.68/skills/supervise/scripts"
+printf '#!/bin/sh\necho "implement #99"\n' >"$new/step.sh"
+check "next: a newer version installed in the cache" "scripts 0.8.68 $new (newer than the loaded 0.8.64; use it for the rest of the loop)
+next implement #99
+exit 0" "$(from_cache 0.8.64)"
+check "next: the newest version is the loaded one" "scripts 0.8.68 $new
+next implement #99
+exit 0" "$(from_cache 0.8.68)"
+check "next: 0.8.9 sorts below 0.8.68" "scripts 0.8.68 $new (newer than the loaded 0.8.9; use it for the rest of the loop)
+next implement #99
+exit 0" "$(from_cache 0.8.9)"
+check "next: a stop names no scripts" "stop repeat: #99 ran earlier in this loop and state.sh still recommends it; was its work committed with Closes #99?
+exit 2" "$(from_cache 0.8.64 --ran 99)"
+command rm -rf "$cache/0.8.68"
+check "next: no newer version, the loaded scripts" "scripts 0.8.64 $cache/0.8.64/skills/supervise/scripts
+next implement #61
+exit 0" "$(from_cache 0.8.64)"
+
 mkdir -p "$work/plain"
 check "next: not a checkout" "Error: $work/plain is not a git checkout
 exit 1" "$(next "$work/plain")"
