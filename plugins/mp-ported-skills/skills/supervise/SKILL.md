@@ -130,6 +130,14 @@ sh "${CLAUDE_SKILL_DIR}/scripts/view.sh" --close --pane '<session> <window> <tab
 
 It prints `closed pane <session>`, or `pane <session> already closed` when iTerm2 closed it with the viewer. It closes the pane whatever runs there, so never call it while the worker runs. While the worker is left running (`blocked`, `hang`), leave its viewer open, in either mode: it is where the maintainer answers.
 
+When the worker's run ends, whatever the outcome (for a settled run, after the capture and any push, with the record below), run the glance for this supervisor session and put the line it prints in that worker's report. Leaving the zone is not yet a stop condition (#78), so this is how a maintainer on a remote client, with no status line, sees the supervisor approach it:
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/../glance/scripts/glance.sh" "<project folder>" </dev/null
+```
+
+It prints this session's reading (`63% of zone`), taking the session id from `CLAUDE_CODE_SESSION_ID`, or one line naming why there is none (`No reading: ...`, `No reading yet: ...`). For a session with no reading, report that line as it reads, never a number in its place.
+
 Then record the run, whatever the outcome, with the same `<cwd>` and `<start>` and the ticket's number. For a settled run, record it after the capture and any push, once the worker is stopped, so its `captures and clears` field counts the capture and its shared actions show the push:
 
 ```sh
@@ -263,7 +271,7 @@ The `scripts` line names the newest installed version of this plugin (a cache fo
 
 Leaving the supervisor's zone is not yet a stop condition (#78), so expect a two-ticket loop to end past it; say so in the report when the session's peak zone reading passed 100%.
 
-The final report lists every ticket the loop ran, in order: its number, the worker's id, the script version it was launched with, its outcome, its commits, the shared actions, the capture's report and the run record's comment; then the condition that ended the loop, with the worker's id and the ticket it stopped on. A stop from `next.sh` comes after the last ticket, so name that ticket and its worker's id with its `stop` line.
+The final report lists every ticket the loop ran, in order: its number, the worker's id, the script version it was launched with, its outcome, the supervisor's glance line at its end, its commits, the shared actions, the capture's report and the run record's comment; then the condition that ended the loop, with the worker's id and the ticket it stopped on. A stop from `next.sh` comes after the last ticket, so name that ticket and its worker's id with its `stop` line.
 
 ## Routine answers
 
