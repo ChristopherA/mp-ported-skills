@@ -20,6 +20,10 @@ _Avoid_: usable context, context budget
 The tokens in a session's context expressed as a percentage of the smart zone.
 _Avoid_: context percentage, usage
 
+**Zone capture**:
+A supervisor's capture of a worker whose zone reading passed its threshold mid-ticket, followed by a fresh worker that continues the same ticket.
+_Avoid_: zone stop (the supervisor's own loop stop), compaction
+
 **Glance**:
 The zone reading, printed into the conversation on request, for a view that has no status line.
 _Avoid_: status, zone check

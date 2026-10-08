@@ -68,7 +68,13 @@
 # job's respawnFlags began with the flag and its text, so it can be confirmed.
 #
 # Usage:
-#   launch.sh --dir DIR --ticket N [--model MODEL] [--effort LEVEL]
+#   launch.sh --dir DIR --ticket N [--model MODEL] [--effort LEVEL] [--continue START]
+#
+# --continue starts a worker that continues ticket N after an earlier
+# worker's zone capture (#60): its prompt tells /implement that the commits
+# since START and the capture's notes on the ticket are the work so far, and
+# its name ends `#N (continued)`. START is the first worker's start, a
+# commit in DIR.
 #
 # MODEL defaults to claude-sonnet-5 and must support auto mode, so a Haiku
 # model is refused. LEVEL is one of claude's effort levels (low, medium,
@@ -133,6 +139,7 @@ DIR=""
 TICKET=""
 MODEL="claude-sonnet-5"
 EFFORT=""
+CONTINUE=""
 
 need_value() { [ $# -ge 2 ] || { printf 'Error: %s needs a value\n' "$1" >&2; exit 1; }; }
 while [ $# -gt 0 ]; do
@@ -141,8 +148,9 @@ while [ $# -gt 0 ]; do
         --ticket) need_value "$@"; TICKET="$2"; shift 2 ;;
         --model)  need_value "$@"; MODEL="$2"; shift 2 ;;
         --effort) need_value "$@"; EFFORT="$2"; shift 2 ;;
+        --continue) need_value "$@"; CONTINUE="$2"; shift 2 ;;
         --help)
-            printf 'Usage: launch.sh --dir DIR --ticket N [--model MODEL] [--effort LEVEL]\n'
+            printf 'Usage: launch.sh --dir DIR --ticket N [--model MODEL] [--effort LEVEL] [--continue START]\n'
             printf 'Starts /mattpocock-skills:implement #N as a background session in DIR. Outputs: its short id\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
@@ -209,6 +217,12 @@ check_repo() {
 }
 check_repo "$DIR" ""
 project_default=$default
+PROMPT="/mattpocock-skills:implement #$TICKET"
+if [ -n "$CONTINUE" ]; then
+    short=$(git -C "$DIR" rev-parse -q --verify --short "$CONTINUE^{commit}") ||
+        fail "--continue needs a commit in $DIR, not '$CONTINUE'; not launched"
+    PROMPT="$PROMPT continues: an earlier worker on #$TICKET reached its zone stop, ran /mp-ported-skills:capturing and was stopped. Its commits since $short and its capture's notes on #$TICKET are the work so far: build on them and finish the ticket."
+fi
 top=$(git -C "$DIR" rev-parse --show-toplevel)
 
 # The setup files a run relies on (#140), each reported on stderr as a
@@ -316,6 +330,7 @@ A push in the Distribution repo is covered only by a distribution-push grant, ne
 
 # The worker's name (#103), in characters, not bytes, whatever the locale.
 NAME="worker ${top##*/} #$TICKET"
+[ -z "$CONTINUE" ] || NAME="$NAME (continued)"
 NAME_MAX=80
 if title=$(cd "$DIR" && gh issue view "$TICKET" --json title --jq .title </dev/null 2>&1); then
     [ -z "$title" ] || NAME="$NAME: $title"
@@ -334,7 +349,7 @@ set -- --model "$MODEL"
 out=$(cd "$DIR" && CLAUDE_CONFIG_DIR="$CONFIG" claude --bg "$@" \
     --disallowedTools "$DENY" --no-chrome --settings "$GUARD_OFF" \
     --append-system-prompt "$GRANTS" --name "$NAME" --permission-mode auto \
-    "/mattpocock-skills:implement #$TICKET" </dev/null 2>&1)
+    "$PROMPT" </dev/null 2>&1)
 esc=$(printf '\033')
 id=$(printf '%s\n' "$out" | sed "s/$esc\[[0-9;]*m//g" |
     sed -n 's/^backgrounded · \([0-9a-f][0-9a-f]*\)\( · .*\)\{0,1\}$/\1/p' | head -n 1)

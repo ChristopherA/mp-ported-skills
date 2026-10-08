@@ -749,6 +749,20 @@ c2a368ee" "$out"
 out=$( (export FAKE_GH_TITLE=""; launch --ticket 56 2>&1) )
 check "launch: an empty title names the Project and ticket" "worker project #56" "$(name_of)"
 
+# A continuation after a zone capture (#60) names the earlier worker's start,
+# so the fresh worker builds on its commits rather than starting over.
+cstart=$(git -C "$project" rev-parse HEAD)
+out=$(launch --ticket 56 --continue "$cstart" 2>&1)
+rc=$?
+check "launch --continue: exit 0" "0 c2a368ee" "$rc $out"
+check "launch --continue: the prompt says where the work stands" "/mattpocock-skills:implement #56 continues: an earlier worker on #56 reached its zone stop, ran /mp-ported-skills:capturing and was stopped. Its commits since $(git -C "$project" rev-parse --short "$cstart") and its capture's notes on #56 are the work so far: build on them and finish the ticket." \
+    "$(tail -n 1 "$fake/args")"
+check "launch --continue: the name says continued" "worker project #56 (continued): Add the thing" "$(name_of)"
+out=$(launch --ticket 56 --continue nope 2>&1)
+rc=$?
+check "launch --continue: refuses what is not a commit" "1 Error: --continue needs a commit in $project, not 'nope'; not launched" "$rc $out"
+check "launch --continue: a refusal launches nothing" "" "$(command cat "$fake/args" 2>/dev/null)"
+
 launch --ticket 56 --model claude-opus-5-5 >/dev/null 2>&1
 check "launch: --model passes through" "claude-opus-5-5" "$(sed -n 3p "$fake/args")"
 check "launch: no --effort, none passed" "no" "$(grep -qx -- --effort "$fake/args" && echo yes || echo no)"
