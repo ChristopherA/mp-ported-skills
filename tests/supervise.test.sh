@@ -373,7 +373,14 @@ project_git() { # <git args> -- git in $project, its output dropped, errors show
 }
 project_git init -b main
 echo seed >"$project/README"
-project_git add README
+# The tracker docs launch.sh requires (#140).
+tracker_docs() { # <dir> -- write the two tracker docs there
+    mkdir -p "$1/docs/agents"
+    echo '# Issue tracker: GitHub' >"$1/docs/agents/issue-tracker.md"
+    echo '# Triage labels' >"$1/docs/agents/triage-labels.md"
+}
+tracker_docs "$project"
+project_git add README docs
 project_git commit -m seed
 project_git branch older
 project_git worktree add -q "$work/kept" -b kept
@@ -680,11 +687,22 @@ done
 # --- launch.sh -------------------------------------------------------------
 # launch.sh reads `claude agents` for other live sessions in the checkout;
 # LAUNCH_AGENTS names the list the fake serves (by default, none there).
+# Its `setup:` lines (#140) are left out of stderr here, and checked on their
+# own below; the rest of stderr comes first, then stdout, the order launch.sh
+# writes them in, since the id is its last line.
 launch_dir() { # <dir> [args...] -- launch.sh --dir <dir> with the fake claude
     d=$1; shift
     reset_fake
     echo "${LAUNCH_AGENTS:-$fixtures/working-busy.json}" >"$fake/seq"
-    PATH="$work/bin:$PATH" sh "$scripts/launch.sh" --dir "$d" "$@" </dev/null
+    launch_run "$scripts" "$d" "$@"
+}
+launch_run() { # <scripts dir> <dir> [args...] -- launch.sh there, setup: lines dropped
+    lr_scripts=$1; lr_dir=$2; shift 2
+    PATH="$work/bin:$PATH" sh "$lr_scripts/launch.sh" --dir "$lr_dir" "$@" </dev/null >"$work/launch-stdout" 2>"$work/launch-stderr"
+    lr_rc=$?
+    grep -v '^setup: ' "$work/launch-stderr" >&2
+    command cat "$work/launch-stdout"
+    return $lr_rc
 }
 launch() { launch_dir "$project" "$@"; } # [args...] -- launch.sh --dir $project
 out=$(launch --ticket 56 2>&1)
@@ -960,13 +978,54 @@ check "main-checkout: a subfolder of the main checkout passes, silently" "0 " \
     "$(out=$(sh "$scripts/main-checkout.sh" "$project/sub" </dev/null 2>&1); echo "$? $out")"
 command rm -f "$marker"
 
+# The setup files (#140): a missing tracker doc refuses the launch, naming
+# the command that writes it; supervision.md is read on origin's default
+# branch, and its absence there is reported, not refused.
+setup_lines() { grep '^setup: ' "$work/launch-stderr"; }
+project_git rm -q docs/agents/issue-tracker.md
+project_git commit -m 'no tracker doc'
+out=$(launch --ticket 56 2>&1); rc=$?
+not_launched "no issue-tracker.md" "Error: $project lacks docs/agents/issue-tracker.md; /setup-matt-pocock-skills writes it (you type it; user-invoked); not launched"
+project_git rm -q docs/agents/triage-labels.md
+project_git commit -m 'no tracker docs'
+out=$(launch --ticket 56 2>&1); rc=$?
+not_launched "no tracker docs" "Error: $project lacks docs/agents/issue-tracker.md and docs/agents/triage-labels.md; /setup-matt-pocock-skills writes them (you type it; user-invoked); not launched"
+project_git reset -q --hard HEAD~1
+out=$(launch_dir "$project/sub" --ticket 56 2>&1); rc=$?
+not_launched "no issue-tracker.md, from a subfolder" "Error: $project lacks docs/agents/issue-tracker.md; /setup-matt-pocock-skills writes it (you type it; user-invoked); not launched"
+project_git reset -q --hard HEAD~1
+project_git rm -q docs/agents/triage-labels.md
+project_git commit -m 'no labels doc'
+out=$(launch --ticket 56 2>&1); rc=$?
+not_launched "no triage-labels.md" "Error: $project lacks docs/agents/triage-labels.md; /setup-matt-pocock-skills writes it (you type it; user-invoked); not launched"
+project_git reset -q --hard HEAD~1
+out=$(launch --ticket 56 2>&1); rc=$?
+check "launch: no supervision.md on origin launches" "0 c2a368ee" "$rc $out"
+check "launch: no supervision.md on origin says every shared action waits" "setup: docs/agents/issue-tracker.md present
+setup: docs/agents/triage-labels.md present
+setup: docs/agents/supervision.md missing on origin/main, so every shared action waits for approval; /setup-mp-ported-skills offers it (you type it; user-invoked)" "$(setup_lines)"
+command rm -f "$marker"
+printf '## Grants\n\n- push\n' >"$project/docs/agents/supervision.md"
+project_git add docs
+project_git commit -m 'local grants'
+out=$(launch --ticket 56 2>&1); rc=$?
+check "launch: supervision.md only committed here launches, with grant.sh's note" "0 note: docs/agents/supervision.md grants push on the working tree or current branch, not on the committed origin/main; ignored
+c2a368ee" "$rc $out"
+check "launch: supervision.md only committed here is not in force" "setup: docs/agents/issue-tracker.md present
+setup: docs/agents/triage-labels.md present
+setup: docs/agents/supervision.md committed here but not on origin/main, so not yet in force: every shared action waits for approval until it is pushed" "$(setup_lines)"
+check "launch: supervision.md only committed here grants nothing" "$no_grants" \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d')"
+command rm -f "$marker"
+project_git reset -q --hard HEAD~1
+
 # The grants come from grant.sh's source, docs/agents/supervision.md on
 # origin's default branch (#88): one committed but not pushed is not listed.
 granted="$work/granted"
 git init -q --bare "$work/granted.git"
 git init -q -b main "$granted"
 granted_git() { git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@" >/dev/null 2>&1; }
-mkdir -p "$granted/docs/agents"
+tracker_docs "$granted"
 printf '# Supervision\n\n## Grants\n\n- push: to main, once tests pass\n- issue-close\n- issue-comment: findings\n\n## Other\n\n- pr-merge\n' \
     >"$granted/docs/agents/supervision.md"
 granted_git add docs
@@ -981,7 +1040,7 @@ launch_in() { # <dir> [args...] -- launch.sh --dir <dir> with the fake claude
     d=$1; shift
     reset_fake
     echo "$fixtures/working-busy.json" >"$fake/seq"
-    PATH="$work/bin:$PATH" sh "$scripts/launch.sh" --dir "$d" "$@" </dev/null
+    launch_run "$scripts" "$d" "$@"
 }
 out=$(launch_in "$granted" --ticket 56 2>/dev/null); rc=$?
 check "launch with grants: exit 0" "0 c2a368ee" "$rc $out"
@@ -996,6 +1055,9 @@ check "launch with grants: notes the grant committed only locally" "note: docs/a
     "$(launch_in "$granted" --ticket 56 2>&1 >/dev/null)"
 check "launch with grants: the job's flags carry them" "--append-system-prompt" \
     "$(jq -r '.respawnFlags[0]' "$cfg/jobs/c2a368ee/state.json")"
+check "launch with grants: a fully set-up Project reports every file present" "setup: docs/agents/issue-tracker.md present
+setup: docs/agents/triage-labels.md present
+setup: docs/agents/supervision.md present on origin/main" "$(setup_lines)"
 command rm -f "$(git -C "$granted" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
 # A grant.sh error is not read as "no grants": nothing launches.
 mkdir -p "$work/broken-scripts"
@@ -1003,7 +1065,7 @@ command cp -f "$scripts"/*.sh "$work/broken-scripts/"
 printf '#!/bin/sh\necho "Error: broken" >&2\nexit 1\n' >"$work/broken-scripts/grant.sh"
 reset_fake
 echo "$fixtures/working-busy.json" >"$fake/seq"
-out=$(PATH="$work/bin:$PATH" sh "$work/broken-scripts/launch.sh" --dir "$granted" --ticket 56 </dev/null 2>&1); rc=$?
+out=$(launch_run "$work/broken-scripts" "$granted" --ticket 56 2>&1); rc=$?
 check "launch: a grant.sh error exits 1" "1" "$rc"
 check "launch: a grant.sh error never launched" "no" "$([ -f "$fake/args" ] && echo yes || echo no)"
 check "launch: a grant.sh error says why" "grant.sh: Error: broken
@@ -1744,6 +1806,10 @@ dproj="$work/dproj"
 dist="$work/dist"
 new_repo "$dproj"
 new_repo "$dist"
+tracker_docs "$dproj"
+dgit "$dproj" add docs
+dgit "$dproj" commit -m "Tracker docs"
+dgit "$dproj" push origin main
 distribution() { sh "$scripts/distribution.sh" --dir "$dproj" </dev/null; }
 name_dist() { # <file content> -- commit it as distribution-repo.md and push it
     mkdir -p "$dproj/docs/agents"

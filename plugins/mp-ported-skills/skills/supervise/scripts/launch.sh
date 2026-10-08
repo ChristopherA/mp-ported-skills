@@ -98,8 +98,12 @@
 # Before launching, it checks that DIR is a git checkout, in the main
 # checkout rather than a linked worktree (main-checkout.sh, #79), on its
 # default branch with a clean tree and no other live background session in it
-# (#76). Once the session passes its checks, it writes the session's id to
-# the marker `git rev-parse --git-path mp-supervise-worker`, which keeps an
+# (#76), and that its repo holds docs/agents/issue-tracker.md and
+# docs/agents/triage-labels.md (#140). It reports those and
+# docs/agents/supervision.md on origin's default branch, present or not, on
+# `setup:` lines on stderr. Once the session passes its checks, it writes
+# the session's id to the marker `git rev-parse --git-path
+# mp-supervise-worker`, which keeps an
 # attended session read-only in the checkout (scripts/supervise-read-only.sh)
 # until release.sh removes it.
 #
@@ -205,6 +209,37 @@ check_repo() {
 }
 check_repo "$DIR" ""
 project_default=$default
+top=$(git -C "$DIR" rev-parse --show-toplevel)
+
+# The setup files a run relies on (#140), each reported on stderr as a
+# `setup:` line before anything launches. The tracker docs, which resuming's
+# state.sh reads for the tracker and its labels, are read at the repo's top
+# in the working tree, which the check above found clean; a missing one
+# refuses the launch, naming the command that writes it. supervision.md is
+# read where grant.sh reads grants, origin's default branch (docs/adr/0005):
+# without it there every shared action waits for approval, which is legal, so
+# the launch goes on and its line says so. Each command named is
+# user-invoked, so the line says the maintainer types it.
+you_type="(you type it; user-invoked)"
+missing=""
+for f in docs/agents/issue-tracker.md docs/agents/triage-labels.md; do
+    [ -f "$top/$f" ] || missing="$missing${missing:+ and }$f"
+done
+case $missing in
+    '') ;;
+    *' and '*) fail "$top lacks $missing; /setup-matt-pocock-skills writes them $you_type; not launched" ;;
+    *) fail "$top lacks $missing; /setup-matt-pocock-skills writes it $you_type; not launched" ;;
+esac
+SUPERVISION=docs/agents/supervision.md
+if git -C "$DIR" cat-file -e "origin/${project_default}:$SUPERVISION" 2>/dev/null; then
+    supervision="present on origin/$project_default"
+elif [ -f "$top/$SUPERVISION" ]; then
+    supervision="committed here but not on origin/$project_default, so not yet in force: every shared action waits for approval until it is pushed"
+else
+    supervision="missing on origin/$project_default, so every shared action waits for approval; /setup-mp-ported-skills offers it $you_type"
+fi
+printf 'setup: docs/agents/issue-tracker.md present\nsetup: docs/agents/triage-labels.md present\nsetup: %s %s\n' \
+    "$SUPERVISION" "$supervision" >&2
 
 # The Distribution repo (#125), named on origin's default branch, read once
 # here and kept for the run. distribution.sh passes its own notes (a copy
@@ -279,7 +314,6 @@ This Project's code lives in its Distribution repo, $DIST, named in docs/agents/
 A push in the Distribution repo is covered only by a distribution-push grant, never by push (#141). With none, do not push it: end your turn on \`Waiting on: git -C $DIST push origin $dist_default\`, or, when this Project's push waits too, on \`Waiting on: git push origin $default; git -C $DIST push origin $dist_default\`."
 
 # The worker's name (#103), in characters, not bytes, whatever the locale.
-top=$(git -C "$DIR" rev-parse --show-toplevel)
 NAME="worker ${top##*/} #$TICKET"
 NAME_MAX=80
 if title=$(cd "$DIR" && gh issue view "$TICKET" --json title --jq .title </dev/null 2>&1); then
