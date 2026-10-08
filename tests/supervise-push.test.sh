@@ -42,13 +42,15 @@ repo_git() { # <folder> <git args...> -- git there, unsigned, with a test identi
 }
 
 # The sweep stub: records its arguments, and its folder with them in
-# sweep-log; prints a hit and exits 1 when $work/sweep-hit exists, empty or
-# naming the folder it runs in.
+# sweep-log; exits 2 on an empty range, as the real sweep does; prints a hit
+# and exits 1 when $work/sweep-hit exists, empty or naming the folder it runs
+# in.
 sweep="$work/sweep.sh"
 cat >"$sweep" <<EOF
 #!/bin/sh
 printf '%s\n' "\$*" >"$work/sweep-args"
 printf '%s %s\n' "\$(pwd -P)" "\$*" >>"$work/sweep-log"
+r=\$2; if [ "\${r%%..*}" = "\${r##*..}" ]; then echo "range \$r contains no commits -- nothing was swept"; exit 2; fi
 if [ -f "$work/sweep-hit" ] && { [ ! -s "$work/sweep-hit" ] || [ "\$(command cat "$work/sweep-hit")" = "\$(pwd -P)" ]; }; then echo 'docs/x.md:3: private path'; exit 1; fi
 echo 'sweep: clean'
 EOF
@@ -350,6 +352,9 @@ check "dist only: the Project has nothing to go" "ok project fast-forward: nothi
 check "dist only: only the Distribution repo is pushed" "pushed distribution:origin/main $(dshort "$dist_start")..$(dshort "$dist_head")" \
     "$(printf '%s\n' "$out" | grep '^pushed')"
 check "dist only: the Distribution repo's remote has its commits" "$dist_head" "$(git -C "$dist_remote" rev-parse main)"
+check "dist only: the Project's empty range is not swept" "ok project sweep: nothing to push" \
+    "$(printf '%s\n' "$out" | grep '^ok project sweep')"
+check "dist only: only the Distribution repo is swept" "$dist --range $dist_start..$dist_head" "$(command cat "$work/sweep-log")"
 
 # A failing check in either repo pushes neither.
 dist_refused() { # <name> <expected fail lines>

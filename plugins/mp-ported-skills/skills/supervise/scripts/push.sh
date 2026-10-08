@@ -30,7 +30,8 @@
 #   sweep         the --sweep command, run in the repo with `--range
 #                 UP..HEAD` appended, exits 0; on a hit its output follows,
 #                 indented. CMD is shell code: give one command, since the
-#                 range is appended to its last one
+#                 range is appended to its last one. A repo with nothing to
+#                 push is not swept: `ok sweep: nothing to push`
 # Before them it prints `push <branch> to <upstream>: UP..HEAD` and a
 # `commit <sha> <subject>` line for each commit in the range.
 #
@@ -225,6 +226,9 @@ check_repo() {
 
     if [ "$NO_SWEEP" = 1 ]; then
         echo "skip ${label}sweep: --no-sweep given, the range was not swept"
+    elif [ "$ahead" = 0 ]; then
+        # An empty range has nothing to sweep, and a sweep may refuse one.
+        ok "sweep: nothing to push"
     else
         swept=$(cd "$repo" && sh -c "$SWEEP"' --range "$1"' sh "$up..$tip" </dev/null 2>&1)
         rc=$?
