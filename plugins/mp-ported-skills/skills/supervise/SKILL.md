@@ -130,13 +130,13 @@ sh "${CLAUDE_SKILL_DIR}/scripts/view.sh" --close --pane '<session> <window> <tab
 
 It prints `closed pane <session>`, or `pane <session> already closed` when iTerm2 closed it with the viewer. It closes the pane whatever runs there, so never call it while the worker runs. While the worker is left running (`blocked`, `hang`), leave its viewer open, in either mode: it is where the maintainer answers.
 
-When the worker's run ends, whatever the outcome (for a settled run, after the capture and any push, with the record below), run the glance for this supervisor session and put the line it prints in that worker's report. Leaving the zone is not yet a stop condition (#78), so this is how a maintainer on a remote client, with no status line, sees the supervisor approach it:
+At each worker's report, whatever the outcome (for a settled run, after the capture and any push, with the record below), run the glance for this supervisor session and put the line it prints in that worker's report. It is how a maintainer on a remote client, with no status line, sees the supervisor approach its zone, which is not yet a stop condition (Loop, below):
 
 ```sh
-sh "${CLAUDE_SKILL_DIR}/../glance/scripts/glance.sh" "<project folder>" </dev/null
+sh "${CLAUDE_SKILL_DIR}/../glance/scripts/glance.sh" "$PWD" "${CLAUDE_SESSION_ID}" </dev/null
 ```
 
-It prints this session's reading (`63% of zone`), taking the session id from `CLAUDE_CODE_SESSION_ID`, or one line naming why there is none (`No reading: ...`, `No reading yet: ...`). For a session with no reading, report that line as it reads, never a number in its place.
+Pass this session's own folder, `$PWD`, not the Project folder: the reading is kept under the folder the session started in, matched exactly, so from the Hub the Project folder finds none. It prints this session's reading (`63% of zone`), or one line naming why there is none (`No reading: ...`, `No reading yet: ...`). For a session with no reading, report that line as it reads, never a number in its place.
 
 Then record the run, whatever the outcome, with the same `<cwd>` and `<start>` and the ticket's number. For a settled run, record it after the capture and any push, once the worker is stopped, so its `captures and clears` field counts the capture and its shared actions show the push:
 
@@ -205,7 +205,7 @@ A worker blocked on a `git push` no grant covers has finished its work and commi
 
    It runs every check again, pushes only the checked commit, to the branch's upstream, and prints `pushed <upstream> A..B`. It records the push in the checkout, so `actions.sh` names the branch as pushed by the supervisor on the maintainer's approval, not as the worker's, and `record.sh` does not count the worker's wait for it as a wait on a human, as long as no prompt reached the worker between its block and the push. Exit 2: a check failed since the question; report it and push nothing. Exit 3: the push failed; report its error. With two repos it tries both with `--dry-run` before pushing either, and prints `pushed distribution:<upstream> A..B` for the Distribution repo; an exit 3 after the first push landed says which already went, and the other is reported as unpushed. If a permission check refuses the push, report the refusal and stop. Do not route around it.
 5. When a `version` line showed a bump of a plugin this profile has installed, update it through Bash: `claude plugin marketplace update <marketplace> && claude plugin update <plugin>@<marketplace>`, and report the version it installed.
-6. When the capture lists an issue comment or new issue, Post on approval, below. Then go on with the Report step for `done`, with no second capture: the shared actions, the ticket's state, the capture's report and the run record, taken now, after the capture, the stop and the push, so the record carries the worker's cost, the capture and the push.
+6. When the capture lists an issue comment or new issue, Post on approval, below. Then go on with the Report step for `done`, with no second capture: the shared actions, the ticket's state, the capture's report, the glance and the run record, taken now, after the capture, the stop and the push, so the record carries the worker's cost, the capture and the push.
 
 ## Post on approval
 
