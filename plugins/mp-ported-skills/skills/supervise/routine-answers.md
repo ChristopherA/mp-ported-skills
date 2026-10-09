@@ -17,5 +17,5 @@ It reads the question from the worker's transcript: a pending AskUserQuestion wi
   ```
 
   The prompt starts `[supervisor answer to "<q>"]`, which `record.sh` lists under `supervisor answers`, apart from human interventions. List each question answered and its answer in the report.
-- **Exit 2**: `not routine: <why>`, after `question <q>` when one was read. Report the block by the items of `SKILL.md`'s Report step, as before, with `claude attach ID`, adding the `why` line.
-- **Exit 1**: report the error, and the block as before.
+- **Exit 2**: `not routine: <why>`, after `question <q>` when one was read. Report the block by the items of `SKILL.md`'s Report step, with `claude attach ID`, adding the `why` line.
+- **Exit 1**: report the error, and the block.

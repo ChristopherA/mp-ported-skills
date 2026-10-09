@@ -1,6 +1,6 @@
 # Report: the other states
 
-Part of `/supervise`. `SKILL.md`, beside this file, sends a run here at the step that needs it. `${CLAUDE_SKILL_DIR}` in the commands below is the folder holding this file and `SKILL.md`: Claude Code fills it in only in `SKILL.md`, so write that folder out when you run them.
+Part of `/supervise`. `SKILL.md`, beside this file, sends a run here at the step that needs it.
 
 - **`moved`**: stop the worker at once, and release its marker, with `stop.sh` (Stopping, in `SKILL.md`). Report where it went: the `cwd` line, with its commits there, `git -C <cwd> log --oneline <start>..HEAD` on `git -C <cwd> branch --show-current`, when `cwd` is not the Project folder; and every `worktree`, `branch` and `commit` line. Say the commits sit on a branch nobody pushes. A worktree inside the Project folder, such as one under `.claude/worktrees/`, also leaves its folder untracked there, so `state.sh` reports work in flight until the maintainer removes the worktree; say so. Moving or salvaging the commits is the maintainer's. An `other` line alongside these is still another session's worktree, not the worker's; report it as such, not as part of why the worker moved.
 - **`blocked permission prompt`**, **`blocked input needed`**, **`blocked question`**: what it waits for (the `needs` line), the id, and the command to open it, in a fenced code block of its own:
