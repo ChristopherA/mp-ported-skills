@@ -106,7 +106,7 @@ sh "${CLAUDE_SKILL_DIR}/scripts/release.sh" --dir "<project folder>" --id ID </d
 
 It prints `released ID`, or `no marker in <folder>`, then `released ID in <path>` when it also cleared the marker in the Project's Distribution repo. Exit 1: the marker names another worker, or the folder is not a checkout; report it and leave the marker.
 
-With `--watch tmux` or `--watch iterm`, once the worker is stopped or gone, close its viewer: read `${CLAUDE_SKILL_DIR}/watching.md`, Closing the viewer. While the worker is left running (`blocked`, `hang`), leave its viewer open.
+With `--watch tmux` or `--watch iterm`, once the worker is stopped or gone, close its viewer: read `${CLAUDE_SKILL_DIR}/watching.md`, Closing the viewer. While the worker is left running (`blocked`, `hang`), leave its viewer open, in either mode: it is where the maintainer answers.
 
 At each worker's report, whatever the outcome (for a settled run, after the capture and any push, with the record below), run the glance for this supervisor session and put the line it prints in that worker's report. It is how a maintainer on a remote client, with no status line, sees the supervisor approach its zone, which with `--loop` stops the loop (Zone stop, `loop.md`):
 
@@ -145,7 +145,7 @@ Capturing after the push cost a second round of Push on approval each time the c
    sh "${CLAUDE_SKILL_DIR}/scripts/watch.sh" --dir "<project folder>" --snapshot > "<scratchpad>/snapshot-capture.txt" </dev/null
    ```
 
-2. Send the capture as a follow-up (Follow-ups, below), and with `--watch tmux` or `--watch iterm` open the viewer again once it prints `resumed ID`:
+2. Send the capture as a follow-up (Follow-ups, below), and with `--watch tmux` or `--watch iterm` open the viewer again once it prints `resumed ID` (read `${CLAUDE_SKILL_DIR}/watching.md`):
 
    ```sh
    sh "${CLAUDE_SKILL_DIR}/scripts/resume.sh" --id ID --dir "<project folder>" --prompt "/mp-ported-skills:capturing" </dev/null
@@ -154,18 +154,13 @@ Capturing after the push cost a second round of Push on approval each time the c
 3. Watch it as in Watch (section 3), with `--since "<scratchpad>/snapshot-capture.txt"` and `--after <epoch>` from the `after` line `resume.sh` printed, and go on by its first line:
    - **`done`**, with nothing waiting on a push: the Report step for `done`, with no second capture.
    - **`blocked input needed`** on a `git push` no grant covers: the capture committed, or the work was already waiting on the push. Push on approval, once, over everything from `<start>` to HEAD: read `${CLAUDE_SKILL_DIR}/push-on-approval.md` and follow it.
-   - **`blocked input needed`** on a `gh issue comment` or `gh issue create` no grant covers: the capture found something it could not post. When a `git push` also waits (its report lists one, or `git -C "<project folder>" status -sb` shows the branch ahead), Push on approval first; then Post on approval: read `${CLAUDE_SKILL_DIR}/post-on-approval.md` and follow it.
+   - **`blocked input needed`** on a `gh issue comment` or `gh issue create` no grant covers: the capture found something it could not post. When a `git push` also waits (its report lists one, or `git -C "<project folder>" status -sb` shows the branch ahead), Push on approval first (read `${CLAUDE_SKILL_DIR}/push-on-approval.md` and follow it); then Post on approval: read `${CLAUDE_SKILL_DIR}/post-on-approval.md` and follow it.
    - **`blocked question`** with no `Waiting on:` line: the capture's last text ends on a question to the maintainer; report it as the Report step says for `blocked question`. A capture that only lists its unposted findings, one ending on a decision, returns as `done` with `note claude agents said blocked` (#114), and goes on as for `done`.
    - **Any other state**: the Report step for that state.
 4. Pass on the capture's report, from its last output, in this run's report:
    - its unposted findings, and its ungranted before-clear jobs, as items for the maintainer, leaving out any the supervisor then does itself (the push, a plugin update, a post on approval). Each issue comment or new issue among them goes through Post on approval after any push, however the capture ended: read `${CLAUDE_SKILL_DIR}/post-on-approval.md` and follow it; a capture that lists one and ends on a statement returns `done` (#144);
    - its next step, and when that differs from what `step.sh` now prints for the folder, say so and give `step.sh`'s;
    - push state as it stands after Push on approval, not as the capture described it: the capture wrote before the push.
-
-
-
-
-
 
 ## Follow-ups
 
@@ -176,6 +171,5 @@ sh "${CLAUDE_SKILL_DIR}/scripts/resume.sh" --id ID --dir "<project folder>" --pr
 ```
 
 It stops the worker, waits until `claude agents` shows it `stopped` or has shown no pid for 60 seconds (`--settle`), and resumes the job's original session id with the prompt and no flags. It refuses while another background session is live in the same checkout, naming each. A resume that starts a copy instead of waking the worker loses the launch's EnterWorktree deny, auto mode and model, so the copy is stopped and removed at once, the worker stopped again, and the resume retried, up to 3 times (`--tries`). It prints one line for each copy, then `after <epoch>` and `resumed ID`; name every copy in the report. On a wake it writes the worker's marker again, since the worker is live again, and prints a `note` line first when it could not; report that line. Release the marker again once the follow-up's worker is stopped. The id stays the same, so watch it again with `watch.sh`, adding `--after <epoch>` from the `after` line. Right after the resume, the worker's transcript still ends on the turn that ended before the stop, and a watch without `--after` reads that as the follow-up's turn ending and returns `done` while the follow-up still runs (#122). With it, only a turn end written at or after that time counts. Then, with `--watch tmux` or `--watch iterm` open its viewer again once `resumed ID` is printed, never before: read `${CLAUDE_SKILL_DIR}/watching.md` and follow it. Exit 1: nothing resumed, report the error. Exit 2: every try started a copy; each was removed, the worker is left stopped, and the error names them all.
-
 
 Done when the report names the ticket (with `--loop`, each ticket the loop ran, and the condition that ended it), the outcome, each zone capture with its reading and the continuing worker's id, each question the supervisor answered with its answer, the shared actions (or `none`), each post on approval with its URL or the finding as unposted, either its commits or the id with `claude attach`, the capture's report for a settled run, and the run record's comment; and for a loop's `zone` stop, the loop summary's URL, the actions waiting on the maintainer, and this session's own capture after the report.
