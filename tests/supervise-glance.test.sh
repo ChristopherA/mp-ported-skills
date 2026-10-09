@@ -70,7 +70,7 @@ check "a zone stop lists what waits on the maintainer and takes none" yes \
 check "a zone stop ends with this session's capture" yes \
     "$(contains "$loop" 'After the final report, run `/mp-ported-skills:capturing` in this session')"
 check "the old not-a-stop text is gone" no \
-    "$(contains "$loop" "not yet a stop condition")"
+    "$(cat "$supervise" "$loop" | grep -qF "not yet a stop condition" && echo yes || echo no)"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

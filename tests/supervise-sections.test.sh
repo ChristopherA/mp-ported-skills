@@ -6,9 +6,11 @@
 # The whole of SKILL.md loads when the skill starts, so a section kept there
 # costs every run its size, and a loop pays it once per ticket. This checks
 # that each moved file exists, that SKILL.md tells the reader to read it,
-# that its heading is gone from SKILL.md, that each moved file says what
-# `${CLAUDE_SKILL_DIR}` means in it (Claude Code fills it in only in
-# SKILL.md), and that every file SKILL.md names to read exists. Reads only
+# that its heading is gone from SKILL.md, that each moved file explains
+# every `${CLAUDE_...}` it uses (Claude Code fills them in only in
+# SKILL.md), and that every file SKILL.md names to read exists. Every
+# mention of a moved file, in SKILL.md or another moved file, tells the
+# reader to read it. Reads only
 # files in this checkout.
 #
 # Usage: sh tests/supervise-sections.test.sh
@@ -47,7 +49,11 @@ printf '%s\n' "$moved" | while IFS='|' read -r file heading; do
     echo "$file exists:$e"
     echo "$file read from SKILL.md:$(contains "$skill" "read \`\${CLAUDE_SKILL_DIR}/$file\`")"
     echo "$file heading left SKILL.md:$(contains "$skill" "$heading")"
-    echo "$file says what CLAUDE_SKILL_DIR is:$(contains "$dir/$file" 'Claude Code fills it in only in `SKILL.md`')"
+    # Each ${CLAUDE_...} the file uses is explained in it, since only
+    # SKILL.md has them filled in; the shell does not set them.
+    for v in $(grep -o '[$][{]CLAUDE_[A-Z_]*[}]' "$dir/$file" | sort -u); do
+        echo "$file explains $v:$(contains "$dir/$file" "\`$v\` in the commands below is")"
+    done
 done > "${TMPDIR:-/tmp}/supervise-sections.$$"
 while IFS=: read -r name got; do
     case $name in
@@ -59,10 +65,15 @@ command rm -f "${TMPDIR:-/tmp}/supervise-sections.$$"
 
 # Every file SKILL.md tells the reader to read is there.
 missing=
-for f in $(sed -n 's/.*read `${CLAUDE_SKILL_DIR}\/\([a-z-]*\.md\)`.*/\1/p' "$skill" | sort -u); do
+for f in $(grep -o 'read `[$][{]CLAUDE_SKILL_DIR[}]/[a-z-]*[.]md`' "$skill" | sed 's/.*\///; s/`$//' | sort -u); do
     [ -f "$dir/$f" ] || missing="$missing $f"
 done
 check "every file SKILL.md names exists" "" "$missing"
+
+# A moved file named without a read instruction is one a run reaches
+# without having read it.
+bare=$(grep -n 'in `[a-z-]*[.]md`' "$dir"/*.md | grep -v 'read `' | grep -v 'Zone capture, in `zone-capture.md`' | sed 's/:.*//' | sort -u | tr '\n' ' ')
+check "no moved file is named without a read instruction" "" "$bare"
 
 # The common path stays inline.
 for heading in '## 1. Step' '## 2. Launch' '## 3. Watch' '## 4. Report' '### Stopping' '## Capture' '## Follow-ups'; do
