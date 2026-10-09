@@ -15,6 +15,12 @@ The full HTTPS URL clones with no SSH step. The short `ChristopherA/mp-ported-sk
 
 Install `mattpocock-skills` as well: these skills hand work to his where one already does the job.
 
+### Issue tracker: GitHub Issues only
+
+When you run `/setup-matt-pocock-skills` in a repo, choose **GitHub** as the issue tracker. These skills read and write tickets with the `gh` CLI: labels, comments, sub-issues and their order, and blocked-by links. With the GitLab or local-markdown tracker that `mattpocock-skills` also offers, `resuming`, `capturing` and `supervise` may not work.
+
+Other trackers are not a priority. Once the skills are stable on GitHub Issues, the plan is to support the in-repo local-markdown tracker that `mattpocock-skills` offers as well.
+
 ## Skills
 
 - **`clarifying`**: settles a mixed list of open items, or a single decision, one question at a time. It sorts the items into settled, facts, frontier, blocked and elsewhere; looks facts up rather than asking; asks each frontier decision with a recommendation; and ends with a summary and a completeness word (full, partial or minimal), taking no action. Use it on the list a `grilling` round, spec or triage hands back.
