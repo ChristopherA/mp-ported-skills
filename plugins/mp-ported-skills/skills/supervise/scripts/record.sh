@@ -244,6 +244,8 @@ read_worker() {
                    | map(select(test("^\\s*[<\\[]") | not)) | length),
            # Prompts that answer a wait, typed or the supervisor'"'"'s, by time:
            # its answers and its capture follow-up, which resume.sh sends (#131).
+           # The transcript does not say who sent a prompt, so a capture the
+           # maintainer types through claude attach reads as the supervisor'"'"'s.
            prompts: ([$rows[] | select(.type == "user" and (.isMeta // false | not))
                       | {at: (.timestamp // null), text: (text // null)} | select(.text != null)] | .[1:]
                      | map(select(.at != null)

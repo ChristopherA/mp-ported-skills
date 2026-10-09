@@ -390,7 +390,11 @@ itself one by editing this file.
                       repos/<o>/<r>/issues.
      No grant covers any other gh api write or a GraphQL mutation,
      addComment and createIssue included.
-     Example: `- push: release branches only` -->
+     Example: `- push: release branches only`
+     A push grant covers the commits a worker's capture makes after its
+     reviewed work only when its note says so, as
+     `- push: to main, after tests pass; its capture's commits included`
+     does; without it, the capture waits for approval to push them. -->
 DOC
     echo "  + docs/agents/supervision.md  written, in project $proj"
     echo "supervision-doc: written. It grants nothing until a line is added under \"## Grants\" and pushed." ;;

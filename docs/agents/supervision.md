@@ -30,7 +30,11 @@ itself one by editing this file.
                       repos/<o>/<r>/issues.
      No grant covers any other gh api write or a GraphQL mutation,
      addComment and createIssue included.
-     Example: `- push: release branches only` -->
+     Example: `- push: release branches only`
+     A push grant covers the commits a worker's capture makes after its
+     reviewed work only when its note says so, as
+     `- push: to main, after tests pass; its capture's commits included`
+     does; without it, the capture waits for approval to push them. -->
 
 - push: to main, after the worker's own tests and /code-review pass; its capture's commits included
 - issue-comment: a capture's findings, on this repo's tickets
