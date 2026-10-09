@@ -8,10 +8,11 @@
 # that each moved file exists, that SKILL.md tells the reader to read it,
 # that its heading is gone from SKILL.md, that each moved file explains
 # every `${CLAUDE_...}` it uses (Claude Code fills them in only in
-# SKILL.md), and that every file SKILL.md names to read exists. Every
-# mention of a moved file, in SKILL.md or another moved file, tells the
-# reader to read it. Reads only
-# files in this checkout.
+# SKILL.md), and that every file a read instruction names exists. A step
+# that sends the reader to a moved file, in SKILL.md or another moved
+# file, tells the reader to read it; a mention that only says where a
+# section lives names the file in parentheses. Reads only files in this
+# checkout.
 #
 # Usage: sh tests/supervise-sections.test.sh
 
