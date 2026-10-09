@@ -144,7 +144,7 @@ reorder: none, #118 has no parent" "$(run 118)"
 # --- reads that fail change nothing -----------------------------------------
 reset
 issue 118 ready-for-agent >"$FAKE_GH/issue-118.json"
-out=$(FAKE_GH_PARENT_FAIL=1 run --apply 118); rc=$?
+out=$(export FAKE_GH_PARENT_FAIL=1; run --apply 118); rc=$?
 check "parent read fails: exit 1" 1 "$rc"
 check "parent read fails: names the read" "Error: could not read #118's parent: gh: Server Error (HTTP 500)" "$out"
 check "parent read fails: writes nothing" "" "$(log)"
