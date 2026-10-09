@@ -18,6 +18,9 @@ set -u
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 skills="$root/plugins/mp-ported-skills/skills"
 supervise="$skills/supervise/SKILL.md"
+# Sections only some runs reach live beside SKILL.md (#135).
+push="$skills/supervise/push-on-approval.md"
+loop="$skills/supervise/loop.md"
 
 pass=0 fail=0
 check() { # <name> <expected> <actual>
@@ -51,23 +54,23 @@ check "the reading goes in the worker's report" yes \
 check "a session with no reading reports the reason" yes \
     "$(contains "$supervise" "report that line as it reads, never a number in its place")"
 check "Push on approval's report carries the glance" yes \
-    "$(contains "$supervise" "the capture's report, the glance and the run record")"
+    "$(contains "$push" "the capture's report, the glance and the run record")"
 # The Loop's final report lists the reading for each ticket.
 check "the final report lists each ticket's reading" yes \
-    "$(contains "$supervise" "its outcome, the supervisor's glance line at its end, its commits")"
+    "$(contains "$loop" "its outcome, the supervisor's glance line at its end, its commits")"
 
 # Between tickets, next.sh reads this session's reading from the same
 # folder the glance passes, and stops the loop at its zone stop (#78).
 check "the loop passes next.sh this session and its folder" yes \
-    "$(contains "$supervise" '--session "${CLAUDE_SESSION_ID}" --session-dir "$PWD" </dev/null')"
+    "$(contains "$loop" '--session "${CLAUDE_SESSION_ID}" --session-dir "$PWD" </dev/null')"
 check "a zone stop posts a loop summary" yes \
-    "$(contains "$supervise" 'gh issue comment <parent> --body-file "<scratchpad>/loop-summary.md"')"
+    "$(contains "$loop" 'gh issue comment <parent> --body-file "<scratchpad>/loop-summary.md"')"
 check "a zone stop lists what waits on the maintainer and takes none" yes \
-    "$(contains "$supervise" "Take none of them")"
+    "$(contains "$loop" "Take none of them")"
 check "a zone stop ends with this session's capture" yes \
-    "$(contains "$supervise" 'After the final report, run `/mp-ported-skills:capturing` in this session')"
+    "$(contains "$loop" 'After the final report, run `/mp-ported-skills:capturing` in this session')"
 check "the old not-a-stop text is gone" no \
-    "$(contains "$supervise" "not yet a stop condition")"
+    "$(contains "$loop" "not yet a stop condition")"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
