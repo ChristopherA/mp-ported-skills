@@ -173,6 +173,7 @@ check "record: the whole record" "## Supervised run of #56
 - API calls: 5, 3 by the worker and 2 by its subagents
 - tokens and cost: claude-haiku-4-5-20251001 20k tokens \$0.02; claude-sonnet-5 28.0M tokens \$8.43; \$8.45 in all
 - supervisor since launch: 2 API calls, 183k tokens, \$0.54
+- supervisor context: 90k (60% of zone) at launch, 92k (61%) at report
 - peak zone: 174%, past 100% from worker call 2
 - captures and clears: 1 capture, 1 clear, 1 compact
 - supervisor answers: none
@@ -191,6 +192,16 @@ check "record: supervisor from the session id" "2 API calls, 183k tokens, \$0.54
     "$(field 'supervisor since launch' "$( (export CLAUDE_CODE_SESSION_ID="$sup";
         PATH="$work/bin:$PATH" sh "$scripts/record.sh" --id c2a368ee --dir "$repo" --start "$start" \
             --ticket 56 --now 2026-09-29T06:15:24Z </dev/null) )")"
+
+# The supervisor's context follows the zone too, and a supervisor with no
+# call before launch has no reading there (#118).
+check "record: the supervisor's context in a larger zone" "90k (30% of zone) at launch, 92k (30%) at report" \
+    "$(field 'supervisor context' "$( (export MP_SMART_ZONE_K=300; record) )")"
+jq -c 'select(.requestId != "s0")' "$cfg/projects/-work-hub/$sup.jsonl" >"$work/sup.jsonl"
+command mv "$work/sup.jsonl" "$cfg/projects/-work-hub/$sup.jsonl"
+check "record: no supervisor call before launch" "unknown at launch, 92k (61%) at report" \
+    "$(field 'supervisor context' "$(record)")"
+supervisor
 
 # Hours past the turn end, as the #66 run's 4-hour timeout reported.
 check "record: latency in hours" "2026-09-29T09:45:24Z, 3 h 31 min after the turn ended" \
@@ -248,6 +259,7 @@ setup
 command rm -rf "$cfg/projects/-work-hub"
 out=$(record)
 check "record: no supervisor transcript" "unknown" "$(field 'supervisor since launch' "$out")"
+check "record: no supervisor transcript, context unknown" "unknown" "$(field 'supervisor context' "$out")"
 check "record: no supervisor transcript, named" "- note: no transcript for supervisor session $sup under $cfg/projects, so its share was not read" \
     "$(printf '%s\n' "$out" | grep '^- note: no transcript for supervisor')"
 out=$(PATH="$work/bin:$PATH" sh "$scripts/record.sh" --id c2a368ee --dir "$repo" --start "$start" --ticket 56 \
@@ -377,6 +389,7 @@ check "record: a recorded job" "## Supervised run of #56
 - API calls: 2, 2 by the worker and 0 by its subagents
 - tokens and cost: claude-sonnet-5 147k tokens \$0.31; \$0.31 in all
 - supervisor since launch: 0 API calls, 0 tokens, \$0.00
+- supervisor context: 92k (61% of zone) at launch, 92k (61%) at report
 - peak zone: 49%
 - captures and clears: none
 - supervisor answers: none

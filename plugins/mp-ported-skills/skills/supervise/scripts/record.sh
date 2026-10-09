@@ -30,6 +30,11 @@
 # * supervisor since launch  the supervisor transcript's calls and tokens
 #                            after launch, and its cost-state total less the
 #                            last one written before launch
+# * supervisor context       the supervisor's context size, input plus
+#                            cache read and written, at its last call before
+#                            launch and at its last call so far, each as a
+#                            percentage of the smart zone: what this run
+#                            cost a looping supervisor's zone (#118)
 #   peak zone                the largest context, input plus cache read and
 #                            written, of any worker call, as a percentage of
 #                            the smart zone (MP_SMART_ZONE_K, default 150k
@@ -336,6 +341,7 @@ fi
 
 # --- the supervisor's share ------------------------------------------------
 supervisor=""
+sup_context=""
 if [ -n "$SESSION" ]; then
     :
 elif [ -z "$SUPERVISOR" ]; then
@@ -344,7 +350,7 @@ elif [ -z "$launched" ]; then
     note "the launch time is unknown, so the supervisor's share was not read"
 elif ! st=$(transcript "$SUPERVISOR"); then
     note "no transcript for supervisor session $SUPERVISOR under $CLAUDE_CONFIG_DIR/projects, so its share was not read"
-elif ! supervisor=$(jq -rs --arg l "$launched" "$defs"'
+elif ! sup_row=$(jq -rs --arg l "$launched" --argjson z "$zone_k" "$defs"'
         ($l | epoch) as $launch
         | [.[] | objects] as $rows
         | ($rows | calls | map(select((.timestamp // "") != "" and (.timestamp | epoch) >= $launch))) as $after
@@ -355,11 +361,20 @@ elif ! supervisor=$(jq -rs --arg l "$launched" "$defs"'
                 .last = ($r.totalCostUSD // 0)
                 | if .at == null or .at < $launch then .before = ($r.totalCostUSD // 0) else . end
               else . end)) as $cost
-        | "\($after | length) API calls, \($after | map(tokens) | add // 0 | size) tokens"
-          + (if $cost.last == null then ", cost unknown" else ", \($cost.last - $cost.before | money)" end)' \
+        | ($rows | calls) as $all
+        | def reading: "\(context | size) (\(context * 100 / ($z * 1000) | floor)%";
+          ([$all[] | select((.timestamp // "") != "" and (.timestamp | epoch) < $launch)] | last) as $before
+        | [("\($after | length) API calls, \($after | map(tokens) | add // 0 | size) tokens"
+            + (if $cost.last == null then ", cost unknown" else ", \($cost.last - $cost.before | money)" end)),
+           (if ($all | length) == 0 then ""
+            else (if $before == null then "unknown at launch" else ($before | reading) + " of zone) at launch" end)
+                 + ", " + ($all | last | reading) + ") at report" end)]
+        | @tsv' \
         "$st" 2>/dev/null); then
     note "supervisor transcript $st could not be read, so its share was not read"
-    supervisor=""
+else
+    supervisor=$(printf '%s' "$sup_row" | cut -f1)
+    sup_context=$(printf '%s' "$sup_row" | cut -f2)
 fi
 
 # --- waits on a human ------------------------------------------------------
@@ -465,7 +480,7 @@ fi
 
 # --- print -----------------------------------------------------------------
 jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launched "$launched" --arg now "$NOW" \
-    --argjson w "$worker" --arg sub "$subcalls" --arg sup "$supervisor" --arg waits "$waits" \
+    --argjson w "$worker" --arg sub "$subcalls" --arg sup "$supervisor" --arg supctx "$sup_context" --arg waits "$waits" \
     --arg actions "$actions" --arg short "$short" --arg count "$count" --arg children "$children" \
     --arg ticket "$ticket" --arg n "$TICKET" --argjson ap "$approvals_json" "$defs"'
     def plural($k; $word): "\($k) \($word)\(if $k == 1 then "" else "s" end)";
@@ -505,6 +520,7 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
                             else ([$w.usage.models | sort_by(.model)[] | "\(.model) \(.tokens | size) tokens \(.cost | money)"]
                                   + ["\($w.usage.total | money) in all"]) | join("; ") end)",
       (select($hand | not) | "- supervisor since launch: \(if $sup == "" then "unknown" else $sup end)"),
+      (select($hand | not) | "- supervisor context: \(if $supctx == "" then "unknown" else $supctx end)"),
       "- peak zone: \(if $w.calls == null then "unknown"
                      elif $w.calls == 0 then "none: no API calls"
                      else "\($w.peak)%" + (if $w.crossed == null then "" else ", past 100% from \($who) call \($w.crossed)" end) end)",
