@@ -54,7 +54,9 @@
 #                            turn end, up to its answer or the next prompt,
 #                            is the same wait. A
 #                            blocked entry whose next prompt is a supervisor
-#                            answer is the supervisor's, not a human's, and
+#                            answer, or the capture it sends once the work
+#                            is settled (#131), is the supervisor's, not a
+#                            human's, and
 #                            one that follows a turn end whose last text
 #                            ends on a statement, with no `Waiting on:`
 #                            line, is a finished report watch.sh reads as
@@ -240,11 +242,12 @@ read_worker() {
            # The first prompt is the launch prompt, a slash command or plain text.
            typed: ([$rows[] | select(.type == "user" and (.isMeta // false | not)) | text // empty] | .[1:]
                    | map(select(test("^\\s*[<\\[]") | not)) | length),
-           # Prompts that answer a wait, typed or the supervisor'"'"'s, by time.
+           # Prompts that answer a wait, typed or the supervisor'"'"'s, by time:
+           # its answers and its capture follow-up, which resume.sh sends (#131).
            prompts: ([$rows[] | select(.type == "user" and (.isMeta // false | not))
                       | {at: (.timestamp // null), text: (text // null)} | select(.text != null)] | .[1:]
                      | map(select(.at != null)
-                           | .sup = (.text | test("^\\[supervisor answer to "))
+                           | .sup = (.text | test("^\\[supervisor answer to |<command-name>/([^<]*:)?capturing</command-name>"))
                            | select(.sup or (.text | test("^\\s*[<\\[]") | not))
                            | {at, sup})),
            # Every prompt after the first, slash commands included, by time;

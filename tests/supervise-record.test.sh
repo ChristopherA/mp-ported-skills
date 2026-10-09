@@ -318,13 +318,21 @@ command rm -rf "$cfg/projects"
 job
 worker
 jq -c 'select(.type != "assistant" or ((.message.content // []) | map(.name) | index("Skill") | not))
-       | select(.subtype != "compact_boundary")
-       | select((.message.content | type) != "string" or (.message.content | test("/clear") | not))' \
+       | select(.subtype != "compact_boundary" and .subtype != "turn_duration")
+       | select((.message.content | type) != "string" or (.message.content | test("/clear|yes, go on") | not))' \
     "$cfg/projects/-work-project/$sid.jsonl" >"$work/t"
+# The build blocks on the push it waits on, and the capture blocks on it again.
+{
+    echo '{"at":"2026-09-29T06:01:30.000Z","state":"working","detail":"","text":""}'
+    echo '{"at":"2026-09-29T06:14:25.000Z","state":"blocked","detail":"git push origin main (ungranted)","text":""}'
+    echo '{"at":"2026-09-29T06:20:01.000Z","state":"working","detail":"","text":""}'
+    echo '{"at":"2026-09-29T06:21:02.000Z","state":"blocked","detail":"git push origin main (ungranted)","text":""}'
+} >"$cfg/jobs/c2a368ee/timeline.jsonl"
 {
     command cat "$work/t"
     call 2026-09-29T06:14:20.000Z r4 claude-sonnet-5 1 100000 1000 50 \
         '[{"type":"text","text":"Waiting on: git push origin main"}]'
+    jq -cn '{type: "system", subtype: "turn_duration", timestamp: "2026-09-29T06:14:24.529Z", pendingBackgroundAgentCount: 0}'
     said 2026-09-29T06:20:00.000Z "$(printf '<command-message>mp-ported-skills:capturing</command-message>\n<command-name>/mp-ported-skills:capturing</command-name>')"
     call 2026-09-29T06:21:00.000Z r5 claude-sonnet-5 1 100000 1000 50 \
         '[{"type":"text","text":"Waiting on: git push origin main"}]'
@@ -339,6 +347,9 @@ check "settled: one push round recorded" "1" \
 out=$(PATH="$work/bin:$PATH" sh "$scripts/record.sh" --id c2a368ee --dir "$settled" --start "$settled_start" \
     --ticket 56 --supervisor "$sup" --now 2026-09-29T06:25:00Z </dev/null)
 check "settled: the record counts the capture" "1 capture" "$(field 'captures and clears' "$out")"
+# The capture follow-up is the supervisor's, not a message typed into the
+# worker, and the build's push wait it answered is not a human's (#131).
+check "settled: no wait on a human, no typed message" "none" "$(field 'human interventions' "$out")"
 check "settled: the record shows the one push" \
     "  - branch origin/main pushed by the supervisor on the maintainer's approval: holds the worker's commits" \
     "$(printf '%s\n' "$out" | grep '^  - ')"

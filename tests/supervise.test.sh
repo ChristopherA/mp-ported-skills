@@ -1063,6 +1063,7 @@ check "launch with grants: lists the grants on origin, and only those" "You are 
 - issue-close
 - issue-comment: findings
 A shared action one of these grants covers goes ahead without asking: when /implement or a capture reaches it, take it, and do not end your turn to ask first.
+A granted push goes ahead as soon as its grant's conditions hold, before any capture: the supervisor sends /mp-ported-skills:capturing after your turn ends. A commit that capture makes is pushed under the push grant only when the grant's note names a capture's commits, as \`its capture's commits included\` does; otherwise end the capture's turn on \`Waiting on: git push origin main\`.
 A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`." \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d')"
 check "launch with grants: notes the grant committed only locally" "note: docs/agents/supervision.md grants pr-create on the working tree or current branch, not on the committed origin/main; ignored" \

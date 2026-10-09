@@ -63,9 +63,12 @@
 # ends its turn on one `Waiting on:` line naming it, which watch.sh's `needs`
 # line can carry. Without it, workers asked before every push, as /implement
 # and the maintainer's rules say, and the run stalled at blocked with a grant
-# in place. Checked live with 2.1.286: a `claude --bg` session given
-# --append-system-prompt replied with a codeword only that text held, and its
-# job's respawnFlags began with the flag and its text, so it can be confirmed.
+# in place. With a push grant, it is also told to push before the capture
+# the supervisor sends, and that the capture's own commits are covered only
+# when the grant's note names them (#131). Checked live with 2.1.286: a
+# `claude --bg` session given --append-system-prompt replied with a codeword
+# only that text held, and its job's respawnFlags began with the flag and its
+# text, so it can be confirmed.
 #
 # Usage:
 #   launch.sh --dir DIR --ticket N [--model MODEL] [--effort LEVEL] [--continue START]
@@ -300,12 +303,13 @@ marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-
 # grant, and a note (a grant committed only locally) is passed on.
 errs=$(mktemp) || fail "mktemp failed, so the grants cannot be read; not launched"
 granted=""
+push_granted=""
 actions="push pr-create pr-merge issue-close issue-comment issue-create"
 [ -z "$DIST" ] || actions="$actions distribution-push"
 for action in $actions; do
     cited=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$action" </dev/null 2>"$errs") &&
         granted="$granted
-- $cited"
+- $cited" && { [ "$action" != push ] || push_granted=1; }
     if grep -q '^Error' "$errs"; then
         printf 'grant.sh: %s\n' "$(command cat "$errs")" >&2
         command rm -f "$errs"
@@ -319,6 +323,8 @@ pushes="push is git push"
 if [ -n "$granted" ]; then
     GRANTS="You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/$default ($pushes; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create):$granted
 A shared action one of these grants covers goes ahead without asking: when /implement or a capture reaches it, take it, and do not end your turn to ask first."
+    [ -z "$push_granted" ] || GRANTS="$GRANTS
+A granted push goes ahead as soon as its grant's conditions hold, before any capture: the supervisor sends /mp-ported-skills:capturing after your turn ends. A commit that capture makes is pushed under the push grant only when the grant's note names a capture's commits, as \`its capture's commits included\` does; otherwise end the capture's turn on \`Waiting on: git push origin $default\`."
 else
     GRANTS="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/$default, holds no standing grant."
 fi
