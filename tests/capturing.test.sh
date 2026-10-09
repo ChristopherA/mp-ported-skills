@@ -71,5 +71,21 @@ check "a yes applies the placement through the priority API" yes \
 check "unattended leaves the order alone" yes \
     "$(contains "$capturing" "no grant covers a sub-issue reorder")"
 
+# A ticket left open for a live check is relabelled and moved after its
+# parent's ready-for-agent children in one step, gated like the relabel, and
+# the supervisor runs it on approval (#194). What the script does is checked
+# in tests/capturing-live-check.test.sh.
+live='sh "${CLAUDE_SKILL_DIR}/scripts/live-check.sh" N </dev/null'
+check "capturing calls live-check.sh" yes "$(contains "$capturing" "$live")"
+if [ -f "$skills/capturing/scripts/live-check.sh" ]; then found=yes; else found=no; fi
+check "live-check.sh is in capturing's folder" yes "$found"
+check "unattended, the capture waits on the relabel and the move" yes \
+    "$(contains "$capturing" "on \`Waiting on: sh <this skill's folder>/scripts/live-check.sh --apply N\`")"
+supervise="$skills/supervise/SKILL.md"
+sup_call='sh "${CLAUDE_SKILL_DIR}/../capturing/scripts/live-check.sh" --dir "<project folder>" N </dev/null'
+check "the supervisor routes the wait" yes \
+    "$(contains "$supervise" "**\`blocked input needed\`** on \`live-check.sh --apply N\`")"
+check "the supervisor calls live-check.sh from its own plugin" yes "$(contains "$supervise" "$sup_call")"
+
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

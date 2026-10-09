@@ -15,6 +15,13 @@ Walk the whole session for what was decided, learned or promised and is not yet 
 
 - **Settled decision or term**: an ADR or `CONTEXT.md`, through `domain-modeling`.
 - **Unfinished work** of this session's own: a ticket, published to this repo's tracker per `docs/agents/issue-tracker.md`, or none when this repo has no tracker. This session originated it, so it lands ready: `ready-for-agent`, or `ready-for-human` when it needs human judgment or access. `needs-triage` is the on-ramp for work arriving from others. When this session's work sits under a parent, link it as a sub-issue of that parent, placed per **A new ticket under a parent** below.
+- **A ticket of this session's own left open for a live check**: its build landed, and a criterion waits on a check only the user can run (a live `/supervise` run, a phone test). It moves to `ready-for-human` and, in the same step, after its parent's last open `ready-for-agent` child: left ahead of them, `resuming` names it as the parent's next child, and `/supervise` stops on it as `by hand` with buildable children behind it. See what that takes, which writes nothing:
+
+  ```sh
+  sh "${CLAUDE_SKILL_DIR}/scripts/live-check.sh" N </dev/null
+  ```
+
+  It prints the relabel, the parent, and the reorder with its `after:` ticket, or why none is needed; exit 1 is a read that failed, so change nothing and report its error. Then, by `before-clear.sh --action other`: `attended`, run it again with `--apply` before `N` and report its lines. `ungranted`: no grant covers a relabel or a sub-issue reorder, so change neither, and end the turn, after the rest of the capture, on `Waiting on: sh <this skill's folder>/scripts/live-check.sh --apply N`, the folder written out, so a supervised run reports the wait and its supervisor runs both on the user's yes. Do this before the bullet below, which reads the new label.
 - **A `ready-for-human` ticket this session worked on and left open**: first read its parent's labels, `gh api 'repos/{owner}/{repo}/issues/N/parent' --jq '[.labels[].name]'` (a 404, `No parent issue found`, means it has none). When the read fails any other way, change no label, and report the error with the label move left for the user. When the parent is labelled `in-motion`, change no label, and say why in the report: the parent stays the work in flight and `resuming` names its next child, while moving the label onto this child would hide the parent's other children. Otherwise label it `in-motion` and remove that label from every other open ticket, so `resuming` names it first and git's silence cannot hide it. Create the label per `docs/agents/issue-tracker.md` when the tracker lacks it. When the session finished or set aside the ticket that holds the label, remove it.
 - **Open decision**: `clarifying`.
 - **Something only another person knows**: name it and suggest the user run `/to-questionnaire` (you type it; user-invoked).
@@ -69,7 +76,7 @@ Run `git status` and compare it with what this session changed. Show the user an
 
 ## 6. Report
 
-- What was routed where, what stays open, and what has no home. Name each finding with the comment or ticket it became, and the `granted: <citation>` line when it posted unasked; or, when nobody could confirm it and no grant covered it, its intended target, text and command, left unposted; and each finding the user skipped. For each ticket filed under a parent, the place it took in the order, or, unattended, the proposed place, its reason and the reorder command left unrun.
+- What was routed where, what stays open, and what has no home. Name each finding with the comment or ticket it became, and the `granted: <citation>` line when it posted unasked; or, when nobody could confirm it and no grant covered it, its intended target, text and command, left unposted; and each finding the user skipped. For each ticket filed under a parent, the place it took in the order, or, unattended, the proposed place, its reason and the reorder command left unrun. For a ticket left open for a live check, `live-check.sh`'s lines, applied or, unattended, left for the `Waiting on:` line.
 - **One first next step**, from this repo's tracker only, read after move 5 from `resuming`'s script rather than worked out by hand:
 
   ```sh

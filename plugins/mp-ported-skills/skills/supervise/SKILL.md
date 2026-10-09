@@ -157,6 +157,12 @@ Capturing after the push cost a second round of Push on approval each time the c
    - **`done`**, with nothing waiting on a push: the Report step for `done`, with no second capture.
    - **`blocked input needed`** on a `git push` no grant covers: the capture committed, or the work was already waiting on the push. Push on approval, once, over everything from `<start>` to HEAD: read `${CLAUDE_SKILL_DIR}/push-on-approval.md` and follow it.
    - **`blocked input needed`** on a `gh issue comment` or `gh issue create` no grant covers: the capture found something it could not post. When a `git push` also waits (its report lists one, or `git -C "<project folder>" status -sb` shows the branch ahead), Push on approval first (read `${CLAUDE_SKILL_DIR}/push-on-approval.md` and follow it); then Post on approval: read `${CLAUDE_SKILL_DIR}/post-on-approval.md` and follow it.
+   - **`blocked input needed`** on `live-check.sh --apply N`: the capture left ticket #N open for a live check, and no grant covers its relabel to `ready-for-human` or its move after the parent's last open `ready-for-agent` child (#194). When a `git push` also waits, Push on approval first, as above. Then run the script from this plugin, not the path the line names, with `--dir "<project folder>"` and without `--apply`; it writes nothing and prints the relabel, the parent, and the reorder with its `after:` ticket. Exit 1: report its error and change nothing. Otherwise ask the maintainer once, with those lines in the question; on a yes run it again with `--apply` and report its lines, which end `applied: ...`. Unapproved, the ticket keeps its place, and `step.sh` may stop on it as `by hand`: say so in the report.
+
+     ```sh
+     sh "${CLAUDE_SKILL_DIR}/../capturing/scripts/live-check.sh" --dir "<project folder>" N </dev/null
+     ```
+
    - **`blocked question`** with no `Waiting on:` line: the capture's last text ends on a question to the maintainer; report it as the Report step says for `blocked question`. A capture that only lists its unposted findings, one ending on a decision, returns as `done` with `note claude agents said blocked` (#114), and goes on as for `done`.
    - **Any other state**: the Report step for that state.
 4. Pass on the capture's report, from its last output, in this run's report:
