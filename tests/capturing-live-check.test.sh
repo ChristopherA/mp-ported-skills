@@ -41,7 +41,11 @@ case "$1 $2" in
     "issue edit") shift 2; echo "edit $*" >>"$FAKE_GH/log"; exit 0 ;;
 esac
 case " $* " in
-    *" --method PATCH "*) echo "$*" >>"$FAKE_GH/log"; exit 0 ;;
+    *" --method PATCH "*)
+        # The real API answers 422 to a priority change missing either id.
+        case " $* " in *" sub_issue_id="[0-9]*) ;; *) echo 'gh: Validation Failed (HTTP 422)' >&2; exit 1 ;; esac
+        case " $* " in *" after_id="[0-9]*) ;; *) echo 'gh: Validation Failed (HTTP 422)' >&2; exit 1 ;; esac
+        echo "$*" >>"$FAKE_GH/log"; exit 0 ;;
 esac
 [ "$1" = api ] || exit 1
 case $path in
@@ -165,6 +169,15 @@ check "label strings come from triage-labels.md" \
 parent: #40
 reorder: $patch -F sub_issue_id=118000 -F after_id=146000
 after: #146, the last open afk child of #40" "$(run 118)"
+
+# A label string is passed to gh as one argument, never run as shell.
+reset
+printf '| Role | Label | Meaning |\n|---|---|---|\n| `ready-for-agent` | `afk` | x |\n| `ready-for-human` | `hitl;touch$IFS%s` | y |\n' \
+    "$work/pwned" >"$work/proj/docs/agents/triage-labels.md"
+issue 118 afk >"$FAKE_GH/issue-118.json"
+run --apply 118 >/dev/null
+check "label string is not run as shell" "no" "$([ -e "$work/pwned" ] && echo yes || echo no)"
+check "label string reaches gh whole" "edit 118 --remove-label afk --add-label hitl;touch\$IFS$work/pwned" "$(log)"
 command rm -rf "$work/proj/docs"
 
 # --- usage ------------------------------------------------------------------

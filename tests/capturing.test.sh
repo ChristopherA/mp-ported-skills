@@ -81,6 +81,8 @@ if [ -f "$skills/capturing/scripts/live-check.sh" ]; then found=yes; else found=
 check "live-check.sh is in capturing's folder" yes "$found"
 check "unattended, the capture waits on the relabel and the move" yes \
     "$(contains "$capturing" "on \`Waiting on: sh <this skill's folder>/scripts/live-check.sh --apply N\`")"
+check "attended, the capture asks before the relabel and the move" yes \
+    "$(contains "$capturing" "\`attended\`: both are tracker changes others see, so ask once")"
 supervise="$skills/supervise/SKILL.md"
 sup_call='sh "${CLAUDE_SKILL_DIR}/../capturing/scripts/live-check.sh" --dir "<project folder>" N </dev/null'
 check "the supervisor routes the wait" yes \

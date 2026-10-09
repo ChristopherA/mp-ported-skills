@@ -77,14 +77,15 @@ ticket=$(gh api "repos/{owner}/{repo}/issues/$N" 2>"$errs") &&
 id=$(printf '%s' "$ticket" | jq -r '.id')
 labels=$(printf '%s' "$ticket" | jq -c '[.labels[].name]')
 
-relabel=
-if ! printf '%s' "$labels" | jq -e --arg l "$human" 'index($l)' >/dev/null ||
-   printf '%s' "$labels" | jq -e --arg l "$agent" 'index($l)' >/dev/null; then
-    relabel="gh issue edit $N"
-    printf '%s' "$labels" | jq -e --arg l "$agent" 'index($l)' >/dev/null &&
-        relabel="$relabel --remove-label $agent"
-    printf '%s' "$labels" | jq -e --arg l "$human" 'index($l)' >/dev/null ||
-        relabel="$relabel --add-label $human"
+has_label() { printf '%s' "$labels" | jq -e --arg l "$1" 'index($l)' >/dev/null; }
+
+# The gh arguments stay in variables; the printed commands are for display
+# only, so a label string read from the docs is never run as shell.
+remove= add= relabel=
+has_label "$agent" && remove=$agent
+has_label "$human" || add=$human
+if [ -n "$remove$add" ]; then
+    relabel="gh issue edit $N${remove:+ --remove-label $remove}${add:+ --add-label $add}"
 fi
 
 # The parent: a 404 means none; any other failure stops before any write.
@@ -96,7 +97,7 @@ elif ! grep -q -e 'HTTP 404' -e 'No parent issue found' "$errs"; then
     fail "could not read #$N's parent: $(gh_err)"
 fi
 
-reorder= after= why=
+reorder= after= after_id= why=
 if [ -z "$parent" ]; then
     why="#$N has no parent"
 else
@@ -115,7 +116,8 @@ else
         | .value | {number, id}')
     if [ -n "$last" ]; then
         after=$(printf '%s' "$last" | jq -r .number)
-        reorder="gh api --method PATCH 'repos/{owner}/{repo}/issues/$parent/sub_issues/priority' -F sub_issue_id=$id -F after_id=$(printf '%s' "$last" | jq -r .id)"
+        after_id=$(printf '%s' "$last" | jq -r .id)
+        reorder="gh api --method PATCH 'repos/{owner}/{repo}/issues/$parent/sub_issues/priority' -F sub_issue_id=$id -F after_id=$after_id"
     else
         why="no open $agent child of #$parent follows #$N"
     fi
@@ -131,14 +133,19 @@ else
 fi
 [ "$APPLY" = 1 ] || exit 0
 
-done_=
+applied=
 if [ -n "$relabel" ]; then
-    eval "$relabel" >/dev/null 2>"$errs" || fail "the relabel failed, so nothing was moved: $(gh_err)"
-    done_=relabel
+    set -- "$N"
+    [ -n "$remove" ] && set -- "$@" --remove-label "$remove"
+    [ -n "$add" ] && set -- "$@" --add-label "$add"
+    gh issue edit "$@" >/dev/null 2>"$errs" ||
+        fail "the relabel failed, so nothing was moved: $(gh_err)"
+    applied=relabel
 fi
 if [ -n "$reorder" ]; then
-    eval "$reorder" >/dev/null 2>"$errs" ||
-        fail "the reorder failed${done_:+ after the relabel ran}: $(gh_err)"
-    done_="${done_:+$done_, }reorder"
+    gh api --method PATCH "repos/{owner}/{repo}/issues/$parent/sub_issues/priority" \
+        -F "sub_issue_id=$id" -F "after_id=$after_id" >/dev/null 2>"$errs" ||
+        fail "the reorder failed${applied:+ after the relabel ran}: $(gh_err)"
+    applied="${applied:+$applied, }reorder"
 fi
-echo "applied: ${done_:-nothing}"
+echo "applied: ${applied:-nothing}"
