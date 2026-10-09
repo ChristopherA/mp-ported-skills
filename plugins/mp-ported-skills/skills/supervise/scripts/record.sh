@@ -362,13 +362,14 @@ elif ! sup_row=$(jq -rs --arg l "$launched" --argjson z "$zone_k" "$defs"'
                 | if .at == null or .at < $launch then .before = ($r.totalCostUSD // 0) else . end
               else . end)) as $cost
         | ($rows | calls) as $all
-        | def reading: "\(context | size) (\(context * 100 / ($z * 1000) | floor)%";
+        # The first reading in the field says what the percentage is of.
+        | def reading($of): "\(context | size) (\(context * 100 / ($z * 1000) | floor)%\($of))";
           ([$all[] | select((.timestamp // "") != "" and (.timestamp | epoch) < $launch)] | last) as $before
         | [("\($after | length) API calls, \($after | map(tokens) | add // 0 | size) tokens"
             + (if $cost.last == null then ", cost unknown" else ", \($cost.last - $cost.before | money)" end)),
            (if ($all | length) == 0 then ""
-            else (if $before == null then "unknown at launch" else ($before | reading) + " of zone) at launch" end)
-                 + ", " + ($all | last | reading) + ") at report" end)]
+            else (if $before == null then "unknown at launch" else ($before | reading(" of zone")) + " at launch" end)
+                 + ", " + ($all | last | reading(if $before == null then " of zone" else "" end)) + " at report" end)]
         | @tsv' \
         "$st" 2>/dev/null); then
     note "supervisor transcript $st could not be read, so its share was not read"

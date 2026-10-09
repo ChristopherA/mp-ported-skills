@@ -199,7 +199,7 @@ check "record: the supervisor's context in a larger zone" "90k (30% of zone) at 
     "$(field 'supervisor context' "$( (export MP_SMART_ZONE_K=300; record) )")"
 jq -c 'select(.requestId != "s0")' "$cfg/projects/-work-hub/$sup.jsonl" >"$work/sup.jsonl"
 command mv "$work/sup.jsonl" "$cfg/projects/-work-hub/$sup.jsonl"
-check "record: no supervisor call before launch" "unknown at launch, 92k (61%) at report" \
+check "record: no supervisor call before launch" "unknown at launch, 92k (61% of zone) at report" \
     "$(field 'supervisor context' "$(record)")"
 supervisor
 
