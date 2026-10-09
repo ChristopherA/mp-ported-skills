@@ -1,6 +1,6 @@
 # A supervisor's context cost per ticket
 
-What a `/supervise` session spends of its own context on each ticket it runs, by step, for #118. The measurements below are done; the options weighed against them and the estimate of tickets per session are left for the rest of #118 (see its latest comment).
+What a `/supervise` session spends of its own context on each ticket it runs, by step, for #118; the options for spending less, weighed against those numbers; and how many tickets one supervisor session fits.
 
 ## Method
 
@@ -60,6 +60,46 @@ A worker's run has two turn ends to watch, its work and its capture, so the watc
 | #131 | zone capture: two workers, an answer and a question | 22,600 |
 
 A clean ticket costs 7.7k to 9.6k. A ticket that blocks once on a question costs 1k to 3k more; one with a zone capture and continuation costs about twice a clean one.
+
+## Options weighed
+
+From #118's list and its comments, each against the numbers above.
+
+| Option | Verdict | Reason |
+|---|---|---|
+| Don't load `SKILL.md` again per ticket | Adopted, built by the loop (#59) | A second `/supervise` in one session cost 20k, more than two clean tickets. `--loop` loads it once. |
+| A smaller loaded skill | Adopted, built | #135 split the rarer branches into files read when reached (64,231 to 38,213 bytes, about 24k to 14k tokens). #118 then cut the Watch, Stopping and record-field paragraphs to what the supervisor acts on, pointing at `watch.sh`'s and `record.sh`'s headers for the rest (38,213 to 33,865 bytes, about 1.6k tokens a load). The Report step's `actions.sh` paragraph stays: the supervisor applies every rule in it at each run. |
+| A context reading per ticket in the run record | Adopted, built | `record.sh`'s `supervisor context` field, from 0.8.80. |
+| Scripts that return one line | Adopted, as its own ticket under #40 (draft below) | The watch cycle is a clean run's largest per-ticket cost: two turn ends a worker, 2k to 3.5k each, for the task notification, reading the watch's output and `last-message.sh`. The end of a run then takes `stop.sh`, `actions.sh`, the glance and `record.sh` as four calls, the first three 2k to 5.1k together. Folding each group into one call whose output is a short verdict, with the detail in a file read only when the verdict is not clean, is a change to several scripts and to `SKILL.md`'s Report step, so it goes in a ticket of its own (draft below), measured against the By step table. |
+| A subagent for the read-only parts | Rejected | The noisy parts it would take are already scripts with short output: the test suite is about 840 tokens, a ticket read and a worker's last message are each under the 2k to 3.5k turn-end cost, which the one-line scripts above cut further. A subagent's brief and report would cost the supervisor a call of their own. Not measured, since no step it could take is large enough to be worth it. |
+| A lighter supervisor session | Not built: the maintainer's choice | The fixed load is 65.8k to 69.3k. The worker research (`docs/research/worker-fixed-load.md`) measured the Artifact tool's description at 11,414 tokens and Claude in Chrome's at about 2.5k: together about one and a half clean tickets. The supervisor needs neither, but it is a session the maintainer starts, so dropping them is a flag on that start (`--disallowedTools`), not something the skill can do. Of the profile's rules, the supervisor needs the ones on asking, Remote Control and supervise runs, which #133 counts as interactive-only for workers; little is left to cut there. |
+| Hand a worker's findings off the supervisor | Adopted, built | The #113 and #130 runs spent most of their excess on tickets and comments the supervisor wrote from a worker's findings. A worker's capture now posts them itself under the `issue-create` and `issue-comment` grants. |
+
+### Draft ticket: one-line watch and finish
+
+Title: `/supervise: fold the watch cycle and the end of a run into one-line verdicts`
+
+Priority: Medium. Parent: #40. Blocked by: none.
+
+Each worker turn end costs the supervisor 2k to 3.5k (the watch's task notification, reading its output, `last-message.sh`), twice a worker, and the end of a run takes `stop.sh`, `actions.sh`, the glance and `record.sh` as four calls, the first three costing 2k to 5.1k together (`docs/research/supervisor-context.md`, By step). Together that is most of a clean ticket's 7.7k to 9.6k.
+
+Build:
+- `watch.sh` writes its full result and the worker's last message to a file, and prints only the state line and, when the state is not `done` or `capture-due`, the lines the report needs, so a clean turn end is one short notification and no second read.
+- One script for a settled run's end that stops the worker, reads its shared actions, takes the glance and writes the run record, and prints one line per result that needs the maintainer (an `ungranted` action, a `note`, a refused stop), or one `clean` line.
+
+Acceptance: a clean ticket's cost to the supervisor, measured as in `docs/research/supervisor-context.md`, falls below the 7.7k to 9.6k it costs now; every case `SKILL.md`'s Report step reports today is still reported.
+
+## Tickets per session
+
+From the numbers above, at plugin 0.8.81:
+
+- A loop starts at about 85k, 57% of zone: 69.3k fixed, about 12.8k for `SKILL.md` (33,865 bytes) and about 3.3k for `loop.md` (8,639 bytes).
+- `next.sh` stops the loop at 90% of zone, 135k, checked between tickets, so a ticket started just under it runs on past it.
+- At 7.7k to 9.6k a clean ticket, the reading after k tickets is 85k plus k times that. The loop starts its seventh clean ticket at 7.7k a ticket (131k after six) and stops after six at 9.6k (143k, 95%). So **6 to 7 clean tickets** in one session.
+- A ticket that blocks once on a question costs 1k to 3k more, and one with a zone capture about twice a clean one: either takes about one ticket off the count, **5 to 6**.
+- The wrap-up after the zone stop, a loop summary and the supervisor's own capture (8k to 15k), starts at 90% to 96% of zone, so it ends past 100%. A zone stop that left room for the capture would start no ticket past about 135k less one ticket and the capture, near 75% of zone, and the loop would run one ticket fewer.
+
+The live loop at 0.8.54 to 0.8.60 ran five tickets from 44% to 93% of zone with the 43.6 KB `SKILL.md` loaded; the #135/#131 loop at 0.8.77 ran two zone-captured tickets from 69% to 94% with the 64 KB one. The next loop at 0.8.81 or later confirms the estimate, from each run record's `supervisor context` field.
 
 ## Script
 
