@@ -63,16 +63,20 @@ while IFS=: read -r name got; do
 done < "${TMPDIR:-/tmp}/supervise-sections.$$"
 command rm -f "${TMPDIR:-/tmp}/supervise-sections.$$"
 
-# Every file SKILL.md tells the reader to read is there.
+# Every file SKILL.md or a moved file tells the reader to read is there.
 missing=
-for f in $(grep -o 'read `[$][{]CLAUDE_SKILL_DIR[}]/[a-z-]*[.]md`' "$skill" | sed 's/.*\///; s/`$//' | sort -u); do
+for f in $(cat "$dir"/*.md | grep -o 'read `[$][{]CLAUDE_SKILL_DIR[}]/[a-z-]*[.]md`' | sed 's/.*\///; s/`$//' | sort -u); do
     [ -f "$dir/$f" ] || missing="$missing $f"
 done
-check "every file SKILL.md names exists" "" "$missing"
+check "every file a read instruction names exists" "" "$missing"
 
-# A moved file named without a read instruction is one a run reaches
-# without having read it.
-bare=$(grep -n 'in `[a-z-]*[.]md`' "$dir"/*.md | grep -v 'read `' | grep -v 'Zone capture, in `zone-capture.md`' | sed 's/:.*//' | sort -u | tr '\n' ' ')
+# A moved file a step sends the reader to ("Post on approval, in
+# `post-on-approval.md`") without a read instruction is one a run reaches
+# without having read it. A mention that only names where a section lives
+# reads "(Post on approval, `post-on-approval.md`)". Each mention is
+# checked on its own, so a read instruction or another mention on the same
+# line hides none.
+bare=$(grep -o -n 'in `[a-z-]*[.]md`' "$dir"/*.md | sed 's/^.*\///; s/:in .*//' | sort -u | tr '\n' ' ')
 check "no moved file is named without a read instruction" "" "$bare"
 
 # The common path stays inline.
