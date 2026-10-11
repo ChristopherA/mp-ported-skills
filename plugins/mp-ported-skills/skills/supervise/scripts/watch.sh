@@ -62,10 +62,10 @@
 # quotes a decision reads as a question to claude agents.
 #
 # Usage:
-#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--interval SECONDS] [--timeout SECONDS] [--stall SECONDS]
+#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--detail PATH [--capture]] [--interval SECONDS] [--timeout SECONDS] [--stall SECONDS]
 #       poll until a state other than working; on timeout print the last
 #       one and exit 124
-#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] --file PATH
+#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--detail PATH [--capture]] --file PATH
 #       classify one saved `claude agents --json --all` output
 #   watch.sh --dir DIR --snapshot
 #       print DIR's repo state for --since: take it before the launch
@@ -86,6 +86,25 @@
 # transcript at each poll, and returns `capture-due` once zone.sh calls it due; a
 # worker with no transcript found, or no reading, goes on working.
 #
+# With --detail PATH, the full result goes to PATH: every line above, then
+# a `message:` line and the worker's whole last message, built as
+# last-message.sh builds it (main chain, blocks merged by message id, and
+# with --after only text stamped at or after it). What it prints is cut to a
+# verdict, ending on a `detail PATH` line (#192):
+#   - a settled done prints the state, cwd and other lines, less any `note
+#     claude agents ...` line, and no message. Settled is: --since given,
+#     the session's cwd is DIR, DIR's HEAD has commits the snapshot's HEAD
+#     lacks, no background command or async agent the worker started is
+#     still running, and its last message does not end on a question.
+#   - any other done prints every line, an `unsettled: <reason>` line, and
+#     after the detail line `message:` and the last message, cut to 3000
+#     characters with a line saying so when it was cut.
+#   - every other state prints every line; a `blocked question` with no
+#     needs line also prints the message, as an unsettled done does.
+# With --capture, as on the watch of a worker's capture, whose report the
+# supervisor passes on, every state prints the message. Without --detail,
+# the output is as above, whole, and --capture changes nothing.
+#
 # Exits 1 when the list cannot be read, which is never reported as gone.
 
 set -u
@@ -97,6 +116,8 @@ SINCE=""
 SNAPSHOT=""
 AFTER=""
 ZONE=""
+DETAIL=""
+CAPTURE=""
 INTERVAL=30
 TIMEOUT=14400
 STALL=1800
@@ -111,11 +132,13 @@ while [ $# -gt 0 ]; do
         --snapshot) SNAPSHOT=1; shift ;;
         --after)    need_value "$@"; AFTER="$2"; shift 2 ;;
         --zone)     ZONE=1; shift ;;
+        --detail)   need_value "$@"; DETAIL="$2"; shift 2 ;;
+        --capture)  CAPTURE=1; shift ;;
         --interval) need_value "$@"; INTERVAL="$2"; shift 2 ;;
         --timeout)  need_value "$@"; TIMEOUT="$2"; shift 2 ;;
         --stall)    need_value "$@"; STALL="$2"; shift 2 ;;
         --help)
-            printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--interval S] [--timeout S] [--stall S] | watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] --file PATH | watch.sh --dir DIR --snapshot\n'
+            printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--detail PATH [--capture]] [--interval S] [--timeout S] [--stall S] | watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--detail PATH [--capture]] --file PATH | watch.sh --dir DIR --snapshot\n'
             printf 'Prints: working, moved, done, capture-due, hang, blocked <what>, stopped, gone or unknown <state>; then cwd, reading, needs, worktree, branch and commit lines.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
@@ -454,9 +477,105 @@ report() {
     printf '%s\n' "$out"
 }
 
+# FACTS_JQ: the session's last message, built as last-message.sh builds it
+# (with --after, from text stamped at or after it), and the background
+# commands and async agents it started that have not reported back, as
+# zone.sh reads them, as {text, running}.
+FACTS_JQ="$AFTER_JQ"'
+    [.[] | select((.isSidechain // false) | not)] as $main
+    | {text: ([$main | to_entries[] | select(.value.type == "assistant" and (.value | not_before))
+               | {key: (.value.message.id // "row \(.key)"),
+                  text: [.value.message.content[]? | objects | select(.type == "text") | .text // empty]}]
+              | reduce .[] as $r ([];
+                  if length > 0 and .[-1].key == $r.key then .[-1].text += $r.text else . + [$r] end)
+              | [.[] | select(.text | length > 0) | .text | join("\n\n")] | last // ""),
+       running: ([$main[] | select(.type == "user") | .toolUseResult? | objects
+                  | .backgroundTaskId // (select(.isAsync == true) | .agentId) // empty]
+                 - [.[] | if .type == "queue-operation" then .content
+                          elif .type == "user" and .origin.kind? == "task-notification" then .message.content
+                          else empty end
+                    | if type == "array" then map(.text? // empty) | join("\n") else . end
+                    | strings | scan("<task-id>([^<]*)</task-id>") | .[0]] | unique)}'
+
+# unsettled <report lines> <facts json>: why a done is not settled, or
+# empty when it is.
+unsettled() {
+    if [ -z "$SINCE" ]; then
+        echo "no snapshot given, so its commits are not counted"; return
+    fi
+    cwd=$(printf '%s\n' "$1" | sed -n 's/^cwd //p')
+    if [ "$cwd" != "$DIR" ]; then
+        echo "it runs in ${cwd:-no folder}, not $DIR"; return
+    fi
+    base=$(sed -n 's/^head //p' "$SINCE")
+    if ! n=$(git -C "$DIR" rev-list --count "$base..HEAD" 2>/dev/null); then
+        echo "its commits since $base were not read"; return
+    fi
+    if [ "$n" -eq 0 ]; then
+        echo "no new commits since $(printf '%.7s' "$base")"; return
+    fi
+    running=$(printf '%s' "$2" | jq -r '.running | join(" ")')
+    if [ -n "$running" ]; then
+        echo "background task $running still running at the turn end"; return
+    fi
+    text=$(printf '%s' "$2" | jq -r .text)
+    if [ -z "$text" ]; then
+        echo "no last message found"; return
+    fi
+    if jq -en --arg t "$text" "$QUESTION_JQ"'$t | asks' >/dev/null 2>&1; then
+        echo "its last message asks a question"; return
+    fi
+}
+
+# verdict <report lines> <agents json>: the report as it is without
+# --detail; with it, the report and the last message written to DETAIL and
+# the verdict printed, as the header says.
+verdict() {
+    [ -n "$DETAIL" ] || { printf '%s\n' "$1"; return; }
+    facts='{"text":"","running":[]}'
+    t=$(transcript_of "$(session_id_of "$2")")
+    if [ -n "$t" ]; then
+        facts=$(jq -s "$FACTS_JQ" --arg after "$AFTER" "$t" 2>/dev/null) ||
+            facts='{"text":"","running":[]}'
+    fi
+    if ! (: >"$DETAIL") 2>/dev/null; then
+        printf '%s\nnote the detail file %s was not written\n' "$1" "$DETAIL"
+        return
+    fi
+    { printf '%s\nmessage:\n' "$1"; printf '%s' "$facts" | jq -r .text; } >"$DETAIL"
+    message=""
+    case $1 in
+        done*)
+            if [ -z "$CAPTURE" ]; then
+                why=$(unsettled "$1" "$facts")
+                if [ -z "$why" ]; then
+                    printf '%s\n' "$1" | grep -v '^note claude agents '
+                    printf 'detail %s\n' "$DETAIL"
+                    return
+                fi
+                printf '%s\nunsettled: %s\n' "$1" "$why"
+            else
+                printf '%s\n' "$1"
+            fi
+            message=1 ;;
+        "blocked question"*)
+            printf '%s\n' "$1"
+            printf '%s\n' "$1" | grep -q '^needs ' || message=1 ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+    [ -z "$CAPTURE" ] || message=1
+    printf 'detail %s\n' "$DETAIL"
+    [ -n "$message" ] || return 0
+    printf 'message:\n'
+    printf '%s' "$facts" | jq -r '.text[0:3000],
+        if (.text | length) > 3000 then "(cut at 3000 characters; the whole message is in the detail file)" else empty end'
+}
+
 if [ -n "$FILE" ]; then
     [ -f "$FILE" ] || { printf 'Error: no such file: %s\n' "$FILE" >&2; exit 1; }
-    report "$(command cat "$FILE")" || { printf 'Error: not a JSON array: %s\n' "$FILE" >&2; exit 1; }
+    list=$(command cat "$FILE")
+    out=$(report "$list") || { printf 'Error: not a JSON array: %s\n' "$FILE" >&2; exit 1; }
+    verdict "$out" "$list"
     exit 0
 fi
 
@@ -484,10 +603,10 @@ while :; do
     esac
     case $out in
         working*) ;;
-        *) printf '%s\n' "$out"; exit 0 ;;
+        *) verdict "$out" "$list"; exit 0 ;;
     esac
     if [ $((now - start)) -ge "$TIMEOUT" ]; then
-        printf '%s\n' "$out"
+        verdict "$out" "$list"
         exit 124
     fi
     sleep "$INTERVAL"
