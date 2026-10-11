@@ -527,9 +527,10 @@ case "$1" in
         if [ -n "${FAKE_BG_OUT+x}" ]; then printf '%s\n' "$FAKE_BG_OUT"; exit 0; fi
         # A named session's line ends with its name, and with FORCE_COLOR
         # set the id is colored, as 2.1.288 printed for `claude --bg --name`.
-        asp=""; effort=""; name=""; add=""; prev=""
+        asp=""; effort=""; name=""; add=""; settings=""; prev=""
         for a in "$@"; do
             [ "$prev" = --append-system-prompt ] && asp=$a
+            [ "$prev" = --settings ] && settings=$a
             [ "$prev" = --add-dir ] && add=$a
             [ "$prev" = --effort ] && effort=$a
             [ "$prev" = --name ] && name=$a
@@ -546,9 +547,11 @@ case "$1" in
             # .name, as a live `claude --bg --name` job did on 2.1.288.
             mkdir -p "$CLAUDE_CONFIG_DIR/jobs/c2a368ee"
             # It records --add-dir, as a live `claude --bg --add-dir` job
-            # did on 2.1.292 (#125).
-            jq --arg cfg "$CLAUDE_CONFIG_DIR" --arg cwd "$(pwd -P)" --arg asp "$asp" --arg effort "$effort" --arg name "$name" --arg add "$add" \
+            # did on 2.1.292 (#125). It records the --settings value the
+            # launch passed, as live jobs did on 2.1.286 and 2.1.289.
+            jq --arg cfg "$CLAUDE_CONFIG_DIR" --arg cwd "$(pwd -P)" --arg asp "$asp" --arg effort "$effort" --arg name "$name" --arg add "$add" --arg settings "$settings" \
                 ".cwd = \$cwd | .providerEnv.CLAUDE_CONFIG_DIR = \$cfg
+                 | if \$settings != \"\" then .respawnFlags |= (index(\"--settings\") as \$i | if \$i then .[\$i + 1] = \$settings else . end) else . end
                  | if \$asp != \"\" then .respawnFlags = [\"--append-system-prompt\", \$asp] + .respawnFlags else . end
                  | if \$effort != \"\" then .respawnFlags += [\"--effort\", \$effort] else . end
                  | if \$name != \"\" then .respawnFlags += [\"--name\", \$name] | .name = \$name | .nameSource = \"user\" else . end
@@ -868,6 +871,31 @@ renamed() { # <name> <jq filter> <recorded name>
 renamed "name not recorded" '| .name = "mattpocock skills implementation"' "mattpocock skills implementation"
 renamed "no name recorded" '| del(.name)' "(none recorded)"
 command rm -f "$marker"
+
+# The profile's worker excludes (#133): each line of the file, relative to
+# the config dir unless absolute, joins bgIsolation in the worker's
+# --settings as claudeMdExcludes, and the job must record them.
+settings_of() { sed -n '/^--settings$/{n;p;}' "$fake/args"; }
+excludes="$cfg/mp-supervise-worker-excludes"
+mkdir -p "$cfg/rules"
+: >"$cfg/CLAUDE.md"; : >"$cfg/rules/asking-rule.md"
+printf '%s\n' '# rules only an attended session needs' 'CLAUDE.md' '' '  rules/asking-rule.md  ' 'rules/*-only.md' '/elsewhere/CLAUDE.md' >"$excludes"
+out=$(launch --ticket 56 2>&1)
+rc=$?
+check "launch excludes: exit 0" "0" "$rc"
+check "launch excludes: merged into the worker's settings" "{\"worktree\":{\"bgIsolation\":\"none\"},\"claudeMdExcludes\":[\"$cfg/CLAUDE.md\",\"$cfg/rules/asking-rule.md\",\"$cfg/rules/*-only.md\",\"/elsewhere/CLAUDE.md\"]}" "$(settings_of)"
+check "launch excludes: says so, and names a missing path" "note: /elsewhere/CLAUDE.md, listed in $excludes, does not exist
+note: the worker leaves out the 4 instruction paths listed in $excludes
+c2a368ee" "$out"
+command rm -f "$marker"
+mismatch "excludes not recorded" '| .respawnFlags |= (index("--settings") as $i | .[$i + 1] = "{\"worktree\":{\"bgIsolation\":\"none\"}}")' \
+    "note: /elsewhere/CLAUDE.md, listed in $excludes, does not exist
+note: the worker leaves out the 4 instruction paths listed in $excludes
+Error: session c2a368ee loads the profile instructions listed in $excludes: its settings hold no claudeMdExcludes with them (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
+printf '%s\n' '# nothing yet' '' >"$excludes"
+out=$(launch --ticket 56 2>&1)
+check "launch excludes: a file with no paths changes nothing" "0 {\"worktree\":{\"bgIsolation\":\"none\"}} c2a368ee" "$? $(settings_of) $out"
+command rm -f "$marker" "$excludes"
 
 out=$( (export FAKE_NO_STATE=1 MP_SUPERVISE_WAIT=1; launch --ticket 56 2>&1) )
 rc=$?

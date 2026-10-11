@@ -49,6 +49,16 @@
 # on main in the folder. --settings is used because it leaves the Project's
 # files alone and the job's respawnFlags record it, so it can be confirmed.
 #
+# The profile may list instruction files a worker does without (#133), such
+# as rules that govern only an attended or supervising session: one path or
+# glob per line in $CLAUDE_CONFIG_DIR/mp-supervise-worker-excludes, relative
+# to the config dir unless absolute. They join bgIsolation in --settings as
+# claudeMdExcludes, which a session's --settings adds to the profile's own
+# list rather than replacing (measured in #130, docs/research/worker-fixed-load.md),
+# and the job's respawnFlags must record them. The list comes from the
+# profile because the public plugin cannot name its private files; a missing
+# file, or one with no paths, leaves the settings as they were.
+#
 # An environment variable meant for the worker goes in an "env" block in
 # --settings, never in the shell before `claude --bg`: the background service
 # starts the session, so a variable set on the launching command does not
@@ -348,12 +358,42 @@ if [ "$(printf '%s' "$NAME" | LC_ALL=en_US.UTF-8 wc -m)" -gt "$NAME_MAX" ]; then
     NAME="$(printf '%s' "$NAME" | LC_ALL=en_US.UTF-8 cut -c1-$((NAME_MAX - 3)) | sed 's/ *$//')..."
 fi
 
+# The profile's worker excludes (#133), one path or glob per line, relative
+# to the config dir unless absolute; blank lines and # comments are skipped.
+# claudeMdExcludes takes absolute paths, so each is made absolute here. A
+# literal path that names no file is noted, since it excludes nothing.
+SETTINGS=$GUARD_OFF
+EXCLUDES_FILE="$CONFIG/mp-supervise-worker-excludes"
+excludes=""
+if [ -f "$EXCLUDES_FILE" ]; then
+    while IFS= read -r p || [ -n "$p" ]; do
+        p=$(printf '%s' "$p" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        case $p in
+            '' | '#'*) continue ;;
+            /*) ;;
+            *) p="$CONFIG/$p" ;;
+        esac
+        case $p in
+            *[*?[]*) ;;
+            *) [ -e "$p" ] || printf 'note: %s, listed in %s, does not exist\n' "$p" "$EXCLUDES_FILE" >&2 ;;
+        esac
+        excludes="$excludes$p
+"
+    done <"$EXCLUDES_FILE"
+fi
+if [ -n "$excludes" ]; then
+    SETTINGS=$(jq -cn --arg x "$excludes" '{worktree: {bgIsolation: "none"}, claudeMdExcludes: ($x | rtrimstr("\n") | split("\n"))}') ||
+        fail "jq could not build the worker's settings from $EXCLUDES_FILE; not launched"
+    printf 'note: the worker leaves out the %s instruction paths listed in %s\n' \
+        "$(printf '%s' "$excludes" | grep -c '^')" "$EXCLUDES_FILE" >&2
+fi
+
 set -- --model "$MODEL"
 [ -z "$EFFORT" ] || set -- "$@" --effort "$EFFORT"
 # --add-dir takes a list, so another option follows it.
 [ -z "$DIST" ] || set -- "$@" --add-dir "$DIST"
 out=$(cd "$DIR" && CLAUDE_CONFIG_DIR="$CONFIG" claude --bg "$@" \
-    --disallowedTools "$DENY" --no-chrome --settings "$GUARD_OFF" \
+    --disallowedTools "$DENY" --no-chrome --settings "$SETTINGS" \
     --append-system-prompt "$GRANTS" --name "$NAME" --permission-mode auto \
     "$PROMPT" </dev/null 2>&1)
 esc=$(printf '\033')
@@ -400,6 +440,12 @@ jq -e '.respawnFlags as $f | [range(0; ($f | length) - 1)]
         | any(. as $i | $f[$i] == "--settings"
               and (($f[$i + 1] | try fromjson catch null) | .worktree.bgIsolation? == "none"))' "$job" >/dev/null ||
     reject "has the background worktree guard on, so its edits in $DIR would be refused: bgIsolation none is not in its settings (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
+if [ -n "$excludes" ]; then
+    jq -e --argjson s "$SETTINGS" '.respawnFlags as $f | [range(0; ($f | length) - 1)]
+            | any(. as $i | $f[$i] == "--settings"
+                  and (($f[$i + 1] | try fromjson catch null) | .claudeMdExcludes? == $s.claudeMdExcludes))' "$job" >/dev/null ||
+        reject "loads the profile instructions listed in $EXCLUDES_FILE: its settings hold no claudeMdExcludes with them (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"
+fi
 jq -e --arg g "$GRANTS" '.respawnFlags as $f | [range(0; ($f | length) - 1)]
         | any(. as $i | $f[$i] == "--append-system-prompt" and $f[$i + 1] == $g)' "$job" >/dev/null ||
     reject "was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: $(jq -r '.respawnFlags // [] | join(" ")' "$job"))"

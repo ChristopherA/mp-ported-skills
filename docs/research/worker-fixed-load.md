@@ -52,6 +52,8 @@ A probe with all five removed read **45,328**, down 19,501 (30%) from 64,829. Th
 
 **Filed as its own ticket: a worker rule set.** The interactive-only text is 5,048 tokens, and `claudeMdExcludes` in the worker's `--settings` is shown above to drop it for the worker alone. The public plugin cannot name the profile's private rule files, so the list has to come from the profile (for example a file under `$CLAUDE_CONFIG_DIR` that `launch.sh` merges into its `--settings`), and which rules are interactive-only is the same call #118's lighter-supervisor option makes. The draft is below.
 
+Built in #133: `launch.sh` reads the list from `$CLAUDE_CONFIG_DIR/mp-supervise-worker-excludes` and confirms it in the job's `respawnFlags`. With Claude Code 2.1.296, two probes started as `launch.sh` starts a worker (the deny list, `--no-chrome`, Opus 5.5, the prompt above) read **50,243** at the first call with the plain setting and **44,248** with the profile's `CLAUDE.md` and its asking, Remote Control, profile-settings and supervise-runs rules in `claudeMdExcludes`, down 5,995. The rules had grown since the 5,048 measured here.
+
 **Rejected: cut the environment rule.** At 6,656 tokens it is the largest single rule, but a worker runs shell commands all through a ticket, and the rule's traps (zsh word-splitting, BSD tools, pathless `rg` hangs, `-i` aliases) are written for exactly that. Shortening it is a change to the maintainer's shared rules, which this profile copies.
 
 **Rejected: a shorter grants text.** The grants text, `/implement`'s skill and the prompt come to 481 tokens together, by difference.
