@@ -548,7 +548,8 @@ case "$1" in
             mkdir -p "$CLAUDE_CONFIG_DIR/jobs/c2a368ee"
             # It records --add-dir, as a live `claude --bg --add-dir` job
             # did on 2.1.292 (#125). It records the --settings value the
-            # launch passed, as live jobs did on 2.1.286 and 2.1.289.
+            # launch passed, claudeMdExcludes included, as a live job with
+            # them in its settings did on 2.1.296 (#133).
             jq --arg cfg "$CLAUDE_CONFIG_DIR" --arg cwd "$(pwd -P)" --arg asp "$asp" --arg effort "$effort" --arg name "$name" --arg add "$add" --arg settings "$settings" \
                 ".cwd = \$cwd | .providerEnv.CLAUDE_CONFIG_DIR = \$cfg
                  | if \$settings != \"\" then .respawnFlags |= (index(\"--settings\") as \$i | if \$i then .[\$i + 1] = \$settings else . end) else . end
@@ -892,6 +893,13 @@ mismatch "excludes not recorded" '| .respawnFlags |= (index("--settings") as $i 
     "note: /elsewhere/CLAUDE.md, listed in $excludes, does not exist
 note: the worker leaves out the 4 instruction paths listed in $excludes
 Error: session c2a368ee loads the profile instructions listed in $excludes: its settings hold no claudeMdExcludes with them (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
+printf '%s\n' '~/nowhere/rule.md' >"$excludes"
+out=$( (export HOME="$work/home"; launch --ticket 56 2>&1) )
+check "launch excludes: a ~/ line is under HOME" "0 {\"worktree\":{\"bgIsolation\":\"none\"},\"claudeMdExcludes\":[\"$work/home/nowhere/rule.md\"]}" "$? $(settings_of)"
+check "launch excludes: one path is counted as one" "note: $work/home/nowhere/rule.md, listed in $excludes, does not exist
+note: the worker leaves out the 1 instruction path listed in $excludes
+c2a368ee" "$out"
+command rm -f "$marker"
 printf '%s\n' '# nothing yet' '' >"$excludes"
 out=$(launch --ticket 56 2>&1)
 check "launch excludes: a file with no paths changes nothing" "0 {\"worktree\":{\"bgIsolation\":\"none\"}} c2a368ee" "$? $(settings_of) $out"

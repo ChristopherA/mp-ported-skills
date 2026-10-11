@@ -52,7 +52,7 @@
 # The profile may list instruction files a worker does without (#133), such
 # as rules that govern only an attended or supervising session: one path or
 # glob per line in $CLAUDE_CONFIG_DIR/mp-supervise-worker-excludes, relative
-# to the config dir unless absolute. They join bgIsolation in --settings as
+# to $CLAUDE_CONFIG_DIR unless absolute or starting ~/. They join bgIsolation in --settings as
 # claudeMdExcludes, which a session's --settings adds to the profile's own
 # list rather than replacing (measured in #130, docs/research/worker-fixed-load.md),
 # and the job's respawnFlags must record them. The list comes from the
@@ -359,7 +359,8 @@ if [ "$(printf '%s' "$NAME" | LC_ALL=en_US.UTF-8 wc -m)" -gt "$NAME_MAX" ]; then
 fi
 
 # The profile's worker excludes (#133), one path or glob per line, relative
-# to the config dir unless absolute; blank lines and # comments are skipped.
+# to $CLAUDE_CONFIG_DIR unless absolute or starting ~/; blank lines and #
+# comments are skipped.
 # claudeMdExcludes takes absolute paths, so each is made absolute here. A
 # literal path that names no file is noted, since it excludes nothing.
 SETTINGS=$GUARD_OFF
@@ -371,6 +372,7 @@ if [ -f "$EXCLUDES_FILE" ]; then
         case $p in
             '' | '#'*) continue ;;
             /*) ;;
+            '~/'*) p="$HOME/${p#'~/'}" ;;
             *) p="$CONFIG/$p" ;;
         esac
         case $p in
@@ -382,10 +384,11 @@ if [ -f "$EXCLUDES_FILE" ]; then
     done <"$EXCLUDES_FILE"
 fi
 if [ -n "$excludes" ]; then
-    SETTINGS=$(jq -cn --arg x "$excludes" '{worktree: {bgIsolation: "none"}, claudeMdExcludes: ($x | rtrimstr("\n") | split("\n"))}') ||
+    SETTINGS=$(jq -cn --argjson g "$GUARD_OFF" --arg x "$excludes" '$g + {claudeMdExcludes: ($x | rtrimstr("\n") | split("\n"))}') ||
         fail "jq could not build the worker's settings from $EXCLUDES_FILE; not launched"
-    printf 'note: the worker leaves out the %s instruction paths listed in %s\n' \
-        "$(printf '%s' "$excludes" | grep -c '^')" "$EXCLUDES_FILE" >&2
+    n=$(printf '%s' "$excludes" | grep -c '^')
+    [ "$n" = 1 ] && paths=path || paths=paths
+    printf 'note: the worker leaves out the %s instruction %s listed in %s\n' "$n" "$paths" "$EXCLUDES_FILE" >&2
 fi
 
 set -- --model "$MODEL"
