@@ -27,6 +27,8 @@ Tell the maintainer, with the watch command (`tmux attach -t mp-supervise`, or `
 
 ## Closing the viewer
 
+At the end of a settled run, `finish.sh` (Finishing, in `SKILL.md`) closes the viewer when given `--tmux` or `--pane '<session> <window> <tab>'`, and reports a `viewer not closed:` line when it could not; the commands below are for every other stop.
+
 With `--watch tmux`, once the worker is stopped or gone, remove the tmux session too, so the run leaves none behind:
 
 ```sh

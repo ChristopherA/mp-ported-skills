@@ -72,15 +72,27 @@ sh "${CLAUDE_SKILL_DIR}/scripts/actions.sh" --id ID --dir "<cwd>" --start <start
 
 It prints one line for each PR or issue in the worker's job, each remote branch holding its commits, and each push, PR or issue command in its transcript or a subagent's, with whether it `succeeded`, was `refused`, `failed` or has `no result`. A command counts when the #66 hook would refuse it, when it runs a `gh pr` or `gh issue` subcommand that is not read-only, or when Claude Code recorded a push or PR on its result. It prints `none` only when it found nothing and read every source. A branch or command line is marked `granted (<citation>)` when a standing grant in `docs/agents/supervision.md` covers it, read only from the default branch as committed on origin (#58); otherwise `ungranted`. A branch line reads `pushed by the supervisor on the maintainer's approval` instead when `push.sh` pushed it for this worker (Push on approval, `push-on-approval.md`). An `issue-comment` or `issue-create` line `posted by the supervisor on the maintainer's approval` is a post `post.sh` made for this worker (Post on approval, `post-on-approval.md`). It reads `pushed by someone else`, neither granted nor ungranted, when no call in the worker's transcripts that succeeded or has no result pushed to it, such as a branch the maintainer pushed from their own terminal; a refused or failed push of the worker's does not count (#98). When a transcript could not be read, the branch is read as the worker's. Report a `granted` line too -- it is what the maintainer's standing grant already approved, not something to re-approve -- report every `ungranted` line as a shared action the maintainer did not approve, a `pushed by someone else` line as no action of the worker's, and every `note` line as a source that was not read, never as no actions.
 
-- **`done`**: the ticket and its commits, `git -C <cwd> log --oneline <start>..HEAD`, the shared actions, and whether the ticket is closed (`gh issue view N --json state`). `done` means only that the worker's turn ended: with no commits and the ticket open, read its last output (below), since it may have ended on a question asked in plain text, and report that as blocked with `claude attach ID`. Otherwise the work is settled: send the capture first (Capture, below), unless this `done` is the capture's own. Then stop the worker, which is still live, and release its marker, with `stop.sh` (Stopping, below). When `cwd` is not the Project folder, say the commits sit in that checkout, on a branch nobody pushes, and send no capture: the worker is out of its folder, as for `moved`.
+- **`done`**: the ticket and its commits, `git -C <cwd> log --oneline <start>..HEAD`, the shared actions, and whether the ticket is closed (`gh issue view N --json state`). `done` means only that the worker's turn ended: an unsettled `done` prints the worker's last message after its `unsettled:` line; with no commits and the ticket open, read that message, since the worker may have ended on a question asked in plain text, and report that as blocked with `claude attach ID`. A background command still running is reported with the message too, the worker left running. Otherwise the work is settled: send the capture first (Capture, below), unless this `done` is the capture's own. Then end the run with `finish.sh` (Finishing, below), which stops the worker, still live, and does the rest of this report's closing steps. When `cwd` is not the Project folder, say the commits sit in that checkout, on a branch nobody pushes, and send no capture: the worker is out of its folder, as for `moved`.
 - **`capture-due`**: the worker's context passed its capture threshold mid-ticket: read `${CLAUDE_SKILL_DIR}/zone-capture.md` and follow it instead of the rest of this step.
 - **`blocked input needed`** whose `needs` line is a `git push` no grant covers: the work is settled. Send the capture first (Capture, below), unless this block is the capture's own, then read `${CLAUDE_SKILL_DIR}/push-on-approval.md` and follow it instead of the rest of this item. Do not tell the maintainer to push from a terminal, with a `!` command, or by telling the worker: the first two do not work from a remote client, and the hook refuses the third.
 - **`blocked input needed`** whose `needs` line is a `gh issue comment` or `gh issue create` no grant covers, when the block is the capture's own (Capture, below): the work is settled. Read `${CLAUDE_SKILL_DIR}/post-on-approval.md` and follow it, after Push on approval when a push also waits (Capture's step 3), instead of the rest of this item. The same block before a capture, from the build, is reported as the other states are.
 - **Any other state** (`moved`; `blocked permission prompt`, `blocked input needed` or `blocked question` that none of the above takes; `hang`; `stopped`; `gone`; `unknown ...`; exit 124 or 1): read `${CLAUDE_SKILL_DIR}/report-states.md` and report it as that file says.
 
+### Finishing
+
+A settled run (`done` after its capture and any push, the end of Push on approval or Post on approval, and Zone capture's step 4) ends with one call, run in the Project folder, with `<cwd>` from `watch.sh` and `<start>` from step 1. Add `--tmux` with `--watch tmux`, or `--pane '<session> <window> <tab>'` with `--watch iterm`, unless the viewer is already closed:
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/finish.sh" --dir "<project folder>" --cwd "<cwd>" --id ID --start <start> --ticket N --record "<scratchpad>/run-record.md" --session "${CLAUDE_SESSION_ID}" --session-dir "$PWD" </dev/null
+```
+
+It runs, in order, `stop.sh`, `view.sh --close`, `actions.sh`, the glance, `record.sh` to the record file and `gh issue comment` posting it, each as the passages below describe, and writes their full output to the `detail` file it names. When nothing needs the maintainer it prints one `clean <url>; shared actions: ...; glance: <reading>` line: report the URL as the run record's comment, the shared actions (`none`, or the ones the record lists), and the glance line as it reads. Otherwise it prints one line per item, each reported as the passages below say: an `ungranted`, `pushed by someone else` or `note` line from `actions.sh`, `viewer not closed:`, `actions not read:`, `record failed:`, or `post failed: ...` with the record's path; then `record <url>`, the shared-actions count and `glance:`. Read the detail file only for an item whose line does not say enough. A `stop failed:` line, with the `finish with:` line after it, exits 1 before anything past the stop: read `${CLAUDE_SKILL_DIR}/stop-refused.md` and follow it. On a worker that Push on approval or Post on approval already stopped, `stop.sh` finds it stopped and the rest runs as usual.
+
+The passages below are for what `finish.sh` does not cover: `moved`, `stopped`, `gone`, and a worker left running.
+
 ### Stopping
 
-Stop a live worker the policy says to stop (after `done`, `moved`, and in Push on approval and Post on approval) with `stop.sh`, never a bare `claude stop ID`, and pass the Project folder, not the worker's `<cwd>`, since the folder's repo holds the marker even when the worker has moved:
+Stop a live worker the policy says to stop (`moved`, and step 1 of Push on approval and Post on approval; after `done`, through `finish.sh`) with `stop.sh`, never a bare `claude stop ID`, and pass the Project folder, not the worker's `<cwd>`, since the folder's repo holds the marker even when the worker has moved:
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/stop.sh" --dir "<project folder>" --id ID </dev/null
@@ -110,7 +122,7 @@ It prints `released ID`, or `no marker in <folder>`, then `released ID in <path>
 
 With `--watch tmux` or `--watch iterm`, once the worker is stopped or gone, close its viewer: read `${CLAUDE_SKILL_DIR}/watching.md`, Closing the viewer. While the worker is left running (`blocked`, `hang`), leave its viewer open, in either mode: it is where the maintainer answers.
 
-At each worker's report, whatever the outcome (for a settled run, after the capture and any push, with the record below), run the glance for this supervisor session and put the line it prints in that worker's report. It is how a maintainer on a remote client, with no status line, sees the supervisor approach its zone, which with `--loop` stops the loop (Zone stop, `loop.md`):
+At each worker's report, whatever the outcome, run the glance (for a settled run, `finish.sh` runs it, after the capture and any push) for this supervisor session and put the line it prints in that worker's report. It is how a maintainer on a remote client, with no status line, sees the supervisor approach its zone, which with `--loop` stops the loop (Zone stop, `loop.md`):
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/../glance/scripts/glance.sh" "$PWD" "${CLAUDE_SESSION_ID}" </dev/null
@@ -118,7 +130,7 @@ sh "${CLAUDE_SKILL_DIR}/../glance/scripts/glance.sh" "$PWD" "${CLAUDE_SESSION_ID
 
 Pass this session's own folder, `$PWD`, not the Project folder: the reading is kept under the folder the session started in, matched exactly, so from the Hub the Project folder finds none. It prints this session's reading (`63% of zone`), or one line naming why there is none (`No reading: ...`, `No reading yet: ...`). For a session with no reading, report that line as it reads, never a number in its place.
 
-Then record the run, whatever the outcome, with the same `<cwd>` and `<start>` and the ticket's number. For a settled run, record it after the capture and any push, once the worker is stopped, so its `captures and clears` field counts the capture and its shared actions show the push:
+Then record the run, whatever the outcome, with the same `<cwd>` and `<start>` and the ticket's number. For a settled run, `finish.sh` records and posts it after the capture and any push, once the worker is stopped, so its `captures and clears` field counts the capture and its shared actions show the push:
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/record.sh" --id ID --dir "<cwd>" --start <start> --ticket N > "<scratchpad>/run-record.md" </dev/null
@@ -155,7 +167,7 @@ Capturing after the push cost a second round of Push on approval each time the c
    sh "${CLAUDE_SKILL_DIR}/scripts/resume.sh" --id ID --dir "<project folder>" --prompt "/mp-ported-skills:capturing" </dev/null
    ```
 
-3. Watch it as in Watch (section 3), with `--since "<scratchpad>/snapshot-capture.txt"` and `--after <epoch>` from the `after` line `resume.sh` printed, and go on by its first line:
+3. Watch it as in Watch (section 3), with `--since "<scratchpad>/snapshot-capture.txt"`, `--after <epoch>` from the `after` line `resume.sh` printed, `--capture` in place of `--zone`, and `--detail "<scratchpad>/watch-capture-ID.txt"`, so it prints the capture's last message, its report, in every state; and go on by its first line:
    - **`done`**, with nothing waiting on a push: the Report step for `done`, with no second capture.
    - **`blocked input needed`** on a `git push` no grant covers: the capture committed, or the work was already waiting on the push. Push on approval, once, over everything from `<start>` to HEAD: read `${CLAUDE_SKILL_DIR}/push-on-approval.md` and follow it.
    - **`blocked input needed`** on a `gh issue comment` or `gh issue create` no grant covers: the capture found something it could not post. When a `git push` also waits (its report lists one, or `git -C "<project folder>" status -sb` shows the branch ahead), Push on approval first (read `${CLAUDE_SKILL_DIR}/push-on-approval.md` and follow it); then Post on approval: read `${CLAUDE_SKILL_DIR}/post-on-approval.md` and follow it.
@@ -167,7 +179,7 @@ Capturing after the push cost a second round of Push on approval each time the c
 
    - **`blocked question`** with no `Waiting on:` line: the capture's last text ends on a question to the maintainer; report it as the Report step says for `blocked question`. A capture that only lists its unposted findings, one ending on a decision, returns as `done` with `note claude agents said blocked` (#114), and goes on as for `done`.
    - **Any other state**: the Report step for that state.
-4. Pass on the capture's report, from its last output, in this run's report:
+4. Pass on the capture's report, from the message its watch printed (the detail file holds it whole when the watch cut it), in this run's report:
    - its unposted findings, and its ungranted before-clear jobs, as items for the maintainer, leaving out any the supervisor then does itself (the push, a plugin update, a post on approval). Each issue comment or new issue among them goes through Post on approval after any push, however the capture ended: read `${CLAUDE_SKILL_DIR}/post-on-approval.md` and follow it; a capture that lists one and ends on a statement returns `done` (#144);
    - its next step, and when that differs from what `step.sh` now prints for the folder, say so and give `step.sh`'s;
    - push state as it stands after Push on approval, not as the capture described it: the capture wrote before the push.

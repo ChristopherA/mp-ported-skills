@@ -13,11 +13,11 @@ A worker whose zone reading passes the threshold while it is still building gets
    sh "${CLAUDE_SKILL_DIR}/scripts/resume.sh" --id ID --dir "<project folder>" --prompt "/mp-ported-skills:capturing next: a fresh worker continues #N from this session's commits; commit the work so far, and record what is left on #N, not in a new ticket" </dev/null
    ```
 
-3. Watch it as Capture's step 3 in `SKILL.md` does, with `--since "<scratchpad>/snapshot-zone.txt"`, `--after` and no `--zone`, and go on by its first line:
+3. Watch it as Capture's step 3 in `SKILL.md` does, with `--since "<scratchpad>/snapshot-zone.txt"`, `--after`, `--capture` and `--detail`, and no `--zone`, and go on by its first line:
    - **`done`**, or **`blocked input needed`** on a `git push`: go on to step 4. Push nothing: the ticket is not finished, and the continuation reaches its own push.
    - **`blocked input needed`** on a `gh issue comment` or `gh issue create` no grant covers: Post on approval: read `${CLAUDE_SKILL_DIR}/post-on-approval.md` and follow it, then step 4.
    - **Any other state**: `SKILL.md`'s Report step for that state, with no continuation.
-4. Stop the worker and release its marker with `stop.sh` (Stopping, in `SKILL.md`). Take its shared actions with `actions.sh` and its run record with `record.sh` (Report, in `SKILL.md`), and post the record on the ticket, as for any worker. When `git -C "<project folder>" status --porcelain` prints anything, the capture left work uncommitted: report it and the worker's id, and launch nothing.
+4. End the first worker's run with `finish.sh` (Finishing, in `SKILL.md`), with the viewer flag when a viewer is open: it stops the worker, releases its marker, reads its shared actions, takes the glance, and writes and posts its run record, as for any worker. A `stop failed:` line goes to `stop-refused.md` as there, and launches nothing until the stop goes through. When `git -C "<project folder>" status --porcelain` prints anything, the capture left work uncommitted: report it and the worker's id, and launch nothing.
 5. Continue the ticket in a fresh worker: `SKILL.md`'s step 1 snapshot command again, to `<scratchpad>/snapshot.txt`, then Launch with `--continue <start>`, the same `--model` and `--effort`:
 
    ```sh
