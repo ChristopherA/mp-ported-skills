@@ -54,7 +54,7 @@ check "the reading goes in the worker's report" yes \
 check "a session with no reading reports the reason" yes \
     "$(contains "$supervise" "report that line as it reads, never a number in its place")"
 check "Push on approval's report carries the glance" yes \
-    "$(contains "$push" "the capture's report, the glance and the run record")"
+    "$(contains "$push" "for the shared actions, the glance and the run record")"
 # The Loop's final report lists the reading for each ticket.
 check "the final report lists each ticket's reading" yes \
     "$(contains "$loop" "its outcome, the supervisor's glance line at its end, its commits")"
