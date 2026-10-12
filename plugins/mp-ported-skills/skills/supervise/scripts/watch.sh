@@ -508,6 +508,9 @@ unsettled() {
         echo "it runs in ${cwd:-no folder}, not $DIR"; return
     fi
     base=$(sed -n 's/^head //p' "$SINCE")
+    if [ -z "$base" ]; then
+        echo "the snapshot holds no head line, so its commits are not counted"; return
+    fi
     if ! n=$(git -C "$DIR" rev-list --count "$base..HEAD" 2>/dev/null); then
         echo "its commits since $base were not read"; return
     fi

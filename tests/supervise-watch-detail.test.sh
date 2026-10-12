@@ -170,6 +170,12 @@ detail $detail
 message:
 Which name should the option take?" "$(watch_as blocked)"
 
+# A snapshot with no head line counts no commits, and says why.
+grep -v '^head ' "$work/snap" >"$work/snap-nohead"
+check "no head line: unsettled, saying why" "unsettled: the snapshot holds no head line, so its commits are not counted" \
+    "$(sh "$scripts/watch.sh" --id 9121ff49 --dir "$repo" --since "$work/snap-nohead" --file "$work/done.json" \
+        --detail "$detail" </dev/null 2>&1 | grep '^unsettled')"
+
 # A detail file that cannot be written leaves the report whole, with a note.
 check "unwritable detail: the report and a note" "blocked question
 cwd $repo

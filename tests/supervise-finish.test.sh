@@ -32,7 +32,7 @@ check() { # <name> <expected> <actual>
 
 # Every variable the scripts read, set or unset here, so the result does not
 # depend on the session running the test.
-unset MP_SMART_ZONE_K CLAUDE_CODE_SESSION_ID FAKE_AGENTS FAKE_GH_FAIL WORKSTREAM_KIT_CONTEXT_DIR CLAUDE_CODE_SESSION_ATTENDED TMUX MP_SESSION_TITLE
+unset MP_SMART_ZONE_K CLAUDE_CODE_SESSION_ID FAKE_AGENTS FAKE_GH_FAIL FAKE_GH_NOURL WORKSTREAM_KIT_CONTEXT_DIR CLAUDE_CODE_SESSION_ATTENDED TMUX MP_SESSION_TITLE
 cfg="$work/config"
 mkdir -p "$cfg"
 export CLAUDE_CONFIG_DIR="$cfg"
@@ -57,6 +57,7 @@ case "\$1 \$2" in
     *) echo "fake gh: unexpected \$*" >&2; exit 1 ;;
 esac
 [ -n "\${FAKE_GH_FAIL:-}" ] && { echo "gh: HTTP 404: Not Found" >&2; exit 1; }
+[ -n "\${FAKE_GH_NOURL:-}" ] && exit 0
 [ "\$4" = --body-file ] || { echo "fake gh: unexpected \$*" >&2; exit 1; }
 [ -f "\$5" ] || { echo "open \$5: no such file or directory" >&2; exit 1; }
 [ -s "\$5" ] || { echo "Body cannot be blank" >&2; exit 1; }
@@ -160,6 +161,23 @@ check "finish: a failed post says so, and where the record is" "post failed: gh:
 shared actions: 2, listed in the record
 glance: $glance
 detail $work/out/finish-c2a368ee.txt" "$out"
+
+# A post that prints no URL is not clean.
+worker granted
+out=$( (export FAKE_GH_NOURL=1; finish granted 2>&1) )
+check "finish: a post with no URL says so" "post printed no URL; the record is in $work/out/run-record-56.md" \
+    "$(printf '%s\n' "$out" | head -n 1)"
+
+# Relative record and detail paths still name the files the post and the
+# detail file use, though the post runs in the Project folder.
+worker granted
+out=$( (cd "$work" && sh "$scripts/finish.sh" --dir "$work/granted" --id c2a368ee --start "$(start_of granted)" \
+    --ticket 56 --record out/rel.md --session "$sid" --session-dir "$work" --settle 0 --interval 0 </dev/null 2>&1) )
+check "finish: a relative record posts" "$work/granted issue comment 56 --body-file $work/out/rel.md" \
+    "$(command cat "$work/gh-posts" 2>/dev/null)"
+check "finish: a relative record keeps the detail file beside it" "detail $work/out/finish-c2a368ee.txt" \
+    "$(printf '%s\n' "$out" | tail -n 1)"
+check "finish: no detail file in the Project folder" "no" "$([ -e "$work/granted/out" ] && echo yes || echo no)"
 
 # --- a stop that fails -----------------------------------------------------
 # The worker never shows stopped: the record waits on the stop, since the

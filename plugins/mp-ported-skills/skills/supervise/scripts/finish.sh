@@ -27,6 +27,8 @@
 #   actions not read: <error>          actions.sh exited non-zero
 #   record failed: <error>             record.sh exited non-zero; no post
 #   post failed: <error>; the record is in RECORD
+#   post printed no URL; the record is in RECORD
+#                                      gh exited 0 with no https: line
 # then `record <url>` when the record was posted, `shared actions: none` or
 # `shared actions: N, listed in the record`, and `glance: <reading>`.
 # When there is none of those, it prints one line instead:
@@ -103,6 +105,9 @@ case $TICKET in *[!0-9]*) fail "--ticket needs an issue number, not '$TICKET'" ;
 [ -d "$DIR" ] || fail "not a directory: $DIR"
 [ -n "$CWD" ] || CWD=$DIR
 [ -n "$DETAIL" ] || DETAIL="$(dirname -- "$RECORD")/finish-$ID.txt"
+# The post runs in DIR, so keep the record and detail paths absolute.
+case $RECORD in /*) ;; *) RECORD="$PWD/$RECORD" ;; esac
+case $DETAIL in /*) ;; *) DETAIL="$PWD/$DETAIL" ;; esac
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 
 tmp=$(mktemp -d) || fail "mktemp failed"
@@ -175,6 +180,7 @@ if run record.sh sh "$here/record.sh" --id "$ID" --dir "$CWD" --start "$START" -
     if command cp "$tmp/out" "$RECORD" 2>"$tmp/err"; then
         if (cd "$DIR" && run post gh issue comment "$TICKET" --body-file "$RECORD"); then
             url=$(sed -n '/^https:/p' "$tmp/out" | tail -n 1)
+            [ -n "$url" ] || flag "post printed no URL; the record is in $RECORD"
         else
             flag "post failed: $(why); the record is in $RECORD"
         fi
