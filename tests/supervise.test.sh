@@ -679,6 +679,48 @@ check "poll --stall: the timeout still reports working, not hang" "working
 cwd /work/project" "$out"
 command rm -rf "$cfg/projects"
 
+# --wait-blocked (#87): once the maintainer answers a blocked worker in
+# claude attach, the list can go on saying blocked while the worker reads the
+# answer. The watch goes on while the turn has not ended, and returns at the
+# worker's next state; a block whose turn has ended is returned at once, with
+# its needs line and how long it has waited, not waited on in silence.
+wait_blocked() { # <timeout> <fixture>... -- watch.sh --wait-blocked over that sequence for c2a368ee
+    t=$1; shift
+    reset_fake
+    mkdir -p "$cfg/jobs/c2a368ee"
+    jq '.needs = "clarify: push now?"' "$fixtures/job-state.json" >"$cfg/jobs/c2a368ee/state.json"
+    for f in "$@"; do echo "$fixtures/$f.json"; done >"$fake/seq"
+    PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id c2a368ee --wait-blocked --interval 0 --timeout "$t" </dev/null
+}
+blocked_c2=c2a368ee-c513-484c-83d3-581830e209a5
+transcript mid-turn -work-project "$blocked_c2"
+check "poll --wait-blocked: an answered worker is watched to its next state" "stopped
+cwd /work/project" "$(wait_blocked 30 blocked-input-needed blocked-input-needed working-busy stopped)"
+check "poll --wait-blocked: read the list each round" "4" "$(command cat "$fake/count")"
+out=$(wait_blocked 0 blocked-input-needed)
+rc=$?
+check "poll --wait-blocked: a block mid-turn waits to the timeout" "124" "$rc"
+check "poll --wait-blocked: the timeout prints the block" "blocked input needed
+cwd /work/project
+needs clarify: push now?" "$out"
+stamped 2026-09-21T14:13:19.950Z turn-ended . "" "$blocked_c2"
+out=$(wait_blocked 30 blocked-input-needed working-busy)
+check "poll --wait-blocked: a block whose turn ended returns at once" "1" "$(command cat "$fake/count")"
+check "poll --wait-blocked: with its needs line" "blocked input needed
+cwd /work/project
+needs clarify: push now?" "$(printf '%s\n' "$out" | sed -n '1,3p')"
+check "poll --wait-blocked: and how long it has waited" "1" \
+    "$(printf '%s\n' "$out" | sed -n '4,$p' | grep -cE '^note waiting since its turn ended at 2026-09-21T14:13:19Z, [0-9]+h [0-9]+m ago$')"
+check "poll --wait-blocked: no other lines" "4" "$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
+check "watch --wait-blocked --file: a block whose turn ended has the note" "1" \
+    "$(sh "$scripts/watch.sh" --id c2a368ee --wait-blocked --file "$fixtures/blocked-input-needed.json" </dev/null | grep -c '^note waiting since its turn ended at ')"
+check "watch --file: no note without --wait-blocked" "0" \
+    "$(sh "$scripts/watch.sh" --id c2a368ee --file "$fixtures/blocked-input-needed.json" </dev/null | grep -c '^note waiting')"
+transcript turn-ended -work-project "$blocked_c2"
+check "poll --wait-blocked: a turn end with no time recorded says so" "note waiting since its turn ended, at a time its transcript does not record" \
+    "$(wait_blocked 30 blocked-input-needed | sed -n 4p)"
+command rm -rf "$cfg/projects" "$cfg/jobs/c2a368ee"
+
 for bad in "--id c2a368ee --stall x" "--id c2a368ee --stall -1" "--id c2a368ee --stall"; do
     # shellcheck disable=SC2086
     sh "$scripts/watch.sh" $bad </dev/null >/dev/null 2>&1

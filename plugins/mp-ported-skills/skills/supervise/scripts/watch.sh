@@ -61,11 +61,21 @@
 # line `note claude agents said blocked` (#114): a finished report that
 # quotes a decision reads as a question to claude agents.
 #
+# With --wait-blocked, as on the watch after the maintainer answers a
+# blocked worker in `claude attach` (#87), a blocked session whose turn has
+# not ended keeps the watch polling: the list can go on saying blocked while
+# the worker reads the answer. One whose transcript shows its turn ended is
+# returned at once, with a last line `note waiting since its turn ended at
+# <time>, <N>h <M>m ago`: claude agents keeps a worker that ended on a
+# question blocked until someone answers, and a watch that waited for it to
+# leave blocked sat silent for hours (#58).
+#
 # Usage:
-#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--detail PATH [--capture]] [--interval SECONDS] [--timeout SECONDS] [--stall SECONDS]
-#       poll until a state other than working; on timeout print the last
+#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--wait-blocked] [--detail PATH [--capture]] [--interval SECONDS] [--timeout SECONDS] [--stall SECONDS]
+#       poll until a state other than working (or, with --wait-blocked,
+#       a blocked one whose turn has not ended); on timeout print the last
 #       one and exit 124
-#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--detail PATH [--capture]] --file PATH
+#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--wait-blocked] [--detail PATH [--capture]] --file PATH
 #       classify one saved `claude agents --json --all` output
 #   watch.sh --dir DIR --snapshot
 #       print DIR's repo state for --since: take it before the launch
@@ -116,6 +126,7 @@ SINCE=""
 SNAPSHOT=""
 AFTER=""
 ZONE=""
+WAIT_BLOCKED=""
 DETAIL=""
 CAPTURE=""
 INTERVAL=30
@@ -132,13 +143,14 @@ while [ $# -gt 0 ]; do
         --snapshot) SNAPSHOT=1; shift ;;
         --after)    need_value "$@"; AFTER="$2"; shift 2 ;;
         --zone)     ZONE=1; shift ;;
+        --wait-blocked) WAIT_BLOCKED=1; shift ;;
         --detail)   need_value "$@"; DETAIL="$2"; shift 2 ;;
         --capture)  CAPTURE=1; shift ;;
         --interval) need_value "$@"; INTERVAL="$2"; shift 2 ;;
         --timeout)  need_value "$@"; TIMEOUT="$2"; shift 2 ;;
         --stall)    need_value "$@"; STALL="$2"; shift 2 ;;
         --help)
-            printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--detail PATH [--capture]] [--interval S] [--timeout S] [--stall S] | watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--detail PATH [--capture]] --file PATH | watch.sh --dir DIR --snapshot\n'
+            printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--wait-blocked] [--detail PATH [--capture]] [--interval S] [--timeout S] [--stall S] | watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--wait-blocked] [--detail PATH [--capture]] --file PATH | watch.sh --dir DIR --snapshot\n'
             printf 'Prints: working, moved, done, capture-due, hang, blocked <what>, stopped, gone or unknown <state>; then cwd, reading, needs, worktree, branch and commit lines.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
@@ -234,6 +246,22 @@ turn_ended() {
     jq -e -s "$AFTER_JQ"'[.[] | select(.type == "user" or .type == "assistant" or .type == "system")] | last
         | .type == "system" and .subtype == "turn_duration"
           and (.pendingBackgroundAgentCount // 0) == 0 and not_before' --arg after "$AFTER" "$t" >/dev/null 2>&1
+}
+
+# waited_note <session id>: the note on how long a blocked session whose
+# turn ended has waited, from its last turn_duration row's time.
+waited_note() {
+    t=$(transcript_of "$1")
+    at=""
+    [ -z "$t" ] || at=$(jq -r -s '[.[] | select(.type == "system" and .subtype == "turn_duration")] | last
+        | .timestamp // "" | sub("\\.[0-9]+Z$"; "Z")' "$t" 2>/dev/null)
+    if ! ended=$(jq -en --arg at "$at" '$at | fromdateiso8601' 2>/dev/null); then
+        echo "note waiting since its turn ended, at a time its transcript does not record"
+        return
+    fi
+    waited=$(( $(date +%s) - ended ))
+    [ "$waited" -ge 0 ] || waited=0
+    printf 'note waiting since its turn ended at %s, %dh %dm ago\n' "$at" $((waited / 3600)) $((waited % 3600 / 60))
 }
 
 # stale_since <session id> <jq row test>: whether what the list says is the
@@ -457,6 +485,14 @@ report() {
                 fi ;;
         esac
     fi
+    if [ -n "$WAIT_BLOCKED" ]; then
+        case $out in
+            blocked*)
+                if turn_ended "$(session_id_of "$1")"; then
+                    out=$(printf '%s\n%s' "$out" "$(waited_note "$(session_id_of "$1")")")
+                fi ;;
+        esac
+    fi
     if [ -n "$SINCE" ]; then
         made=$(made_since "$DIR" "$(command cat "$SINCE")")
         dist=$(sed -n 's/^distribution //p' "$SINCE")
@@ -606,6 +642,12 @@ while :; do
     esac
     case $out in
         working*) ;;
+        blocked*)
+            # With --wait-blocked, a block whose turn has not ended (no
+            # waited note) is waited on; any other block returns.
+            if [ -z "$WAIT_BLOCKED" ] || printf '%s\n' "$out" | grep -q '^note waiting since '; then
+                verdict "$out" "$list"; exit 0
+            fi ;;
         *) verdict "$out" "$list"; exit 0 ;;
     esac
     if [ $((now - start)) -ge "$TIMEOUT" ]; then
