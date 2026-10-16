@@ -62,18 +62,23 @@
 # quotes a decision reads as a question to claude agents.
 #
 # With --wait-blocked, as on the watch after the maintainer answers a
-# blocked worker in `claude attach` (#87), a blocked session whose turn has
-# not ended keeps the watch polling: the list can go on saying blocked while
-# the worker reads the answer. One whose transcript shows its turn ended is
-# returned at once, with a last line `note waiting since its turn ended at
-# <time>, <N>h <M>m ago`: claude agents keeps a worker that ended on a
+# blocked worker in `claude attach` (#87), a blocked session keeps the watch
+# polling while its transcript grows: the list can go on saying blocked
+# while the worker reads the answer and goes on. A blocked session is
+# returned, not waited on in silence, when its transcript shows its turn
+# ended, at once, with a last line `note waiting since its turn ended at
+# <time>, <N>h <M>m ago` (claude agents keeps a worker that ended on a
 # question blocked until someone answers, and a watch that waited for it to
-# leave blocked sat silent for hours (#58).
+# leave blocked sat silent for hours, #58); or when its turn has not ended
+# (a permission prompt, or a question asked through a tool) and its
+# transcript did not grow between two polls, with a last line `note still
+# blocked; its transcript has not grown in <N>s`. --file sees one snapshot,
+# so it adds only the first note.
 #
 # Usage:
 #   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--wait-blocked] [--detail PATH [--capture]] [--interval SECONDS] [--timeout SECONDS] [--stall SECONDS]
-#       poll until a state other than working (or, with --wait-blocked,
-#       a blocked one whose turn has not ended); on timeout print the last
+#       poll while working (and, with --wait-blocked, while blocked as
+#       above); on timeout print the last
 #       one and exit 124
 #   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--wait-blocked] [--detail PATH [--capture]] --file PATH
 #       classify one saved `claude agents --json --all` output
@@ -488,8 +493,9 @@ report() {
     if [ -n "$WAIT_BLOCKED" ]; then
         case $out in
             blocked*)
-                if turn_ended "$(session_id_of "$1")"; then
-                    out=$(printf '%s\n%s' "$out" "$(waited_note "$(session_id_of "$1")")")
+                sid=$(session_id_of "$1")
+                if turn_ended "$sid"; then
+                    out=$(printf '%s\n%s' "$out" "$(waited_note "$sid")")
                 fi ;;
         esac
     fi
@@ -621,6 +627,9 @@ fi
 start=$(date +%s)
 stall_size=""
 stall_since=$start
+block_seen=""
+block_size=""
+block_since=$start
 while :; do
     if ! list=$(claude agents --json --all </dev/null); then
         printf 'Error: claude agents --json --all failed\n' >&2
@@ -643,11 +652,18 @@ while :; do
     case $out in
         working*) ;;
         blocked*)
-            # With --wait-blocked, a block whose turn has not ended (no
-            # waited note) is waited on; any other block returns.
-            if [ -z "$WAIT_BLOCKED" ] || printf '%s\n' "$out" | grep -q '^note waiting since '; then
+            # With --wait-blocked, a block mid-turn is waited on while its
+            # transcript grows; report() added the note to one whose turn
+            # ended.
+            [ -n "$WAIT_BLOCKED" ] || { verdict "$out" "$list"; exit 0; }
+            sid=$(session_id_of "$list")
+            turn_ended "$sid" && { verdict "$out" "$list"; exit 0; }
+            size=$(transcript_size "$sid")
+            if [ -n "$block_seen" ] && [ "$size" = "$block_size" ]; then
+                out=$(printf '%s\nnote still blocked; its transcript has not grown in %ss' "$out" "$((now - block_since))")
                 verdict "$out" "$list"; exit 0
-            fi ;;
+            fi
+            block_seen=1 block_size=$size block_since=$now ;;
         *) verdict "$out" "$list"; exit 0 ;;
     esac
     if [ $((now - start)) -ge "$TIMEOUT" ]; then

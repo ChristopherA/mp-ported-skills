@@ -39,7 +39,7 @@ check() { # <name> <expected> <actual>
 
 # Every variable the scripts read, set or unset here, so the result does not
 # depend on the session running the test.
-unset MP_SUPERVISE_WAIT MP_RESUME_BUDGET CLAUDE_PROJECT_DIR FAKE_AGENTS_FAIL FAKE_BG_OUT FAKE_NO_STATE FAKE_STATE_FILTER FAKE_RM_FAIL FAKE_GH_TITLE FAKE_GH_FAIL CLAUDE_CODE_SESSION_ATTENDED
+unset FAKE_GROW MP_SUPERVISE_WAIT MP_RESUME_BUDGET CLAUDE_PROJECT_DIR FAKE_AGENTS_FAIL FAKE_BG_OUT FAKE_NO_STATE FAKE_STATE_FILTER FAKE_RM_FAIL FAKE_GH_TITLE FAKE_GH_FAIL CLAUDE_CODE_SESSION_ATTENDED
 cfg="$work/config"
 mkdir -p "$cfg/plugins/cache/mkt/mattpocock-skills/1.2.3/skills/engineering/implement"
 touch "$cfg/plugins/cache/mkt/mattpocock-skills/1.2.3/skills/engineering/implement/SKILL.md"
@@ -499,6 +499,7 @@ case "$1" in
     agents)
         n=$(command cat "$fake/count" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" >"$fake/count"
         [ -n "${FAKE_AGENTS_FAIL:-}" ] && { echo "daemon unreachable" >&2; exit 1; }
+        [ -z "${FAKE_GROW:-}" ] || echo '{}' >>"$FAKE_GROW"
         f=$(sed -n "${n}p" "$fake/seq"); [ -n "$f" ] || f=$(tail -n 1 "$fake/seq")
         command cat "$f" ;;
     stop) echo "stop $2" >>"$fake/calls"; echo "stopped $2" ;;
@@ -681,32 +682,40 @@ command rm -rf "$cfg/projects"
 
 # --wait-blocked (#87): once the maintainer answers a blocked worker in
 # claude attach, the list can go on saying blocked while the worker reads the
-# answer. The watch goes on while the turn has not ended, and returns at the
-# worker's next state; a block whose turn has ended is returned at once, with
-# its needs line and how long it has waited, not waited on in silence.
-wait_blocked() { # <timeout> <fixture>... -- watch.sh --wait-blocked over that sequence for c2a368ee
-    t=$1; shift
+# answer. The watch goes on while the worker's transcript grows, and returns
+# at its next state. A block is not waited on in silence: one whose turn has
+# ended returns at once, with its needs line and how long it has waited, and
+# one mid-turn (a permission prompt, a question asked through a tool) returns
+# once its transcript holds still between two polls.
+wait_blocked() { # <fixture>... -- watch.sh --wait-blocked over that sequence for c2a368ee
     reset_fake
     mkdir -p "$cfg/jobs/c2a368ee"
     jq '.needs = "clarify: push now?"' "$fixtures/job-state.json" >"$cfg/jobs/c2a368ee/state.json"
     for f in "$@"; do echo "$fixtures/$f.json"; done >"$fake/seq"
-    PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id c2a368ee --wait-blocked --interval 0 --timeout "$t" </dev/null
+    PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id c2a368ee --wait-blocked --interval 0 --timeout 30 </dev/null
 }
 blocked_c2=c2a368ee-c513-484c-83d3-581830e209a5
 transcript mid-turn -work-project "$blocked_c2"
 check "poll --wait-blocked: an answered worker is watched to its next state" "stopped
-cwd /work/project" "$(wait_blocked 30 blocked-input-needed blocked-input-needed working-busy stopped)"
+cwd /work/project" "$( (export FAKE_GROW="$cfg/projects/-work-project/$blocked_c2.jsonl"; wait_blocked blocked-input-needed blocked-input-needed working-busy stopped) )"
 check "poll --wait-blocked: read the list each round" "4" "$(command cat "$fake/count")"
-out=$(wait_blocked 0 blocked-input-needed)
-rc=$?
-check "poll --wait-blocked: a block mid-turn waits to the timeout" "124" "$rc"
-check "poll --wait-blocked: the timeout prints the block" "blocked input needed
-cwd /work/project
-needs clarify: push now?" "$out"
-stamped 2026-09-21T14:13:19.950Z turn-ended . "" "$blocked_c2"
-out=$(wait_blocked 30 blocked-input-needed working-busy)
-check "poll --wait-blocked: a block whose turn ended returns at once" "1" "$(command cat "$fake/count")"
+transcript mid-turn -work-project "$blocked_c2"
+out=$(wait_blocked blocked-input-needed blocked-input-needed working-busy)
+check "poll --wait-blocked: a block mid-turn that holds still returns at the second poll" "2" "$(command cat "$fake/count")"
 check "poll --wait-blocked: with its needs line" "blocked input needed
+cwd /work/project
+needs clarify: push now?" "$(printf '%s\n' "$out" | sed -n '1,3p')"
+check "poll --wait-blocked: and a note that it held still" "1" \
+    "$(printf '%s\n' "$out" | sed -n '4,$p' | grep -cE '^note still blocked; its transcript has not grown in [0-9]+s$')"
+reset_fake
+echo "$fixtures/blocked-permission-prompt.json" >"$fake/seq"
+check "poll --wait-blocked: a permission prompt with no transcript found returns at the second poll" "blocked permission prompt" \
+    "$(PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id 91a06a74 --wait-blocked --interval 0 --timeout 30 </dev/null | sed -n 1p)"
+check "poll --wait-blocked: read the list twice" "2" "$(command cat "$fake/count")"
+stamped 2026-09-21T14:13:19.950Z turn-ended . "" "$blocked_c2"
+out=$(wait_blocked blocked-input-needed working-busy)
+check "poll --wait-blocked: a block whose turn ended returns at once" "1" "$(command cat "$fake/count")"
+check "poll --wait-blocked: with its needs line, turn ended" "blocked input needed
 cwd /work/project
 needs clarify: push now?" "$(printf '%s\n' "$out" | sed -n '1,3p')"
 check "poll --wait-blocked: and how long it has waited" "1" \
@@ -718,7 +727,7 @@ check "watch --file: no note without --wait-blocked" "0" \
     "$(sh "$scripts/watch.sh" --id c2a368ee --file "$fixtures/blocked-input-needed.json" </dev/null | grep -c '^note waiting')"
 transcript turn-ended -work-project "$blocked_c2"
 check "poll --wait-blocked: a turn end with no time recorded says so" "note waiting since its turn ended, at a time its transcript does not record" \
-    "$(wait_blocked 30 blocked-input-needed | sed -n 4p)"
+    "$(wait_blocked blocked-input-needed | sed -n 4p)"
 command rm -rf "$cfg/projects" "$cfg/jobs/c2a368ee"
 
 for bad in "--id c2a368ee --stall x" "--id c2a368ee --stall -1" "--id c2a368ee --stall"; do
