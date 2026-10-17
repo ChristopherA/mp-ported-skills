@@ -80,6 +80,12 @@
 # only that text held, and its job's respawnFlags began with the flag and its
 # text, so it can be confirmed.
 #
+# The same text tells the worker how to read files without paying for them
+# twice (#134): the #132 worker printed a 34KB SKILL.md with two scripts in
+# one cat, which came back saved to a file over the output limit, and read it
+# twice more; it printed resume.sh in three calls. The state.json check
+# covers this line with the grants.
+#
 # Usage:
 #   launch.sh --dir DIR --ticket N [--model MODEL] [--effort LEVEL] [--continue START]
 #
@@ -339,7 +345,8 @@ else
     GRANTS="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/$default, holds no standing grant."
 fi
 GRANTS="$GRANTS
-A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin $default\`."
+A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin $default\`.
+Read each file once: read a large file (over about 20KB, or a long one such as a SKILL.md or a test file) with Read in ranges, or grep -n it first and read the range you need, never whole with cat; read one file per call, since a result over the output limit is saved to a file and has to be read again; and do not print a file you have already read in this session unless it has changed since."
 [ -z "$DIST" ] || GRANTS="$GRANTS
 This Project's code lives in its Distribution repo, $DIST, named in docs/agents/distribution-repo.md. Make the ticket's code changes and commits there, by path (\`git -C $DIST\`), on its current branch, with no new branch or worktree; read the ticket and the Project's docs from this folder.
 A push in the Distribution repo is covered only by a distribution-push grant, never by push (#141). With none, do not push it: end your turn on \`Waiting on: git -C $DIST push origin $dist_default\`, or, when this Project's push waits too, on \`Waiting on: git push origin $default; git -C $DIST push origin $dist_default\`."
