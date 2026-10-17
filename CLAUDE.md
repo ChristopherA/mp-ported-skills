@@ -80,6 +80,10 @@ A stub that stands in for a real command refuses what the real one refuses, with
 
 A new grant action, or a change to what one covers, goes into every list of the actions, not only the scripts that enforce it: `grant.sh`, the classifier `shared-action-classify.sh` (`grant_action`), `launch.sh`'s grants text, `actions.sh`, `answer.sh`, `capturing`'s `before-clear.sh` and its `SKILL.md`, the template in `setup-mp-ported-skills`' `setup.sh`, `docs/agents/supervision.md`, and ADR 0005. Find them with `rg -l 'issue-create' plugins docs`. A list left behind still accepts the old set: in #141, `before-clear.sh` would have reported a Distribution repo push as covered by the `push` grant, and the hook would then have refused it.
 
+## Writing about shared actions from a worker
+
+The deny-shared-actions hook scans the whole text of a Bash command, quoted text included. So in a background session, a `git commit -m` body or a heredoc that quotes a gh api write, or any other form the hook refuses, is itself refused as that action, although it only names it. Write such text with the Write tool to a file in `/tmp` and pass the file (`git commit -F`, `gh issue comment --body-file`), and make edits that quote one with the Edit tool. In #162, a heredoc and a commit message that quoted the sub-issue PATCH were each refused as `gh api PATCH`.
+
 ## Calling claude from scripts
 
 A `claude` option that takes a list (`--allowedTools`, `--disallowedTools`, and any other `claude --help` shows as `<tools...>` or `<values...>`) goes before another option, never right before the prompt, as `launch.sh` places `--disallowedTools`. A list option reads every word after it that does not start with `-`, so the prompt becomes an entry in the list: `claude -p --disallowedTools EnterWorktree 'Reply OK'` warns that the deny rule "Reply" matches no known tool, then fails with `Input must be provided`.
