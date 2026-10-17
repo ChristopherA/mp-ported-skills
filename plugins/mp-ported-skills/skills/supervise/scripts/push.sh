@@ -62,6 +62,7 @@
 # with nothing pushed; 3 when a push itself failed.
 
 set -u
+. "$(dirname -- "$0")/marker.sh"
 
 DIR=""
 ID=""
@@ -157,7 +158,7 @@ check_repo() {
     echo "push $label$branch to $upname: $range"
     git -C "$repo" log --format="commit $label%h %s" "$up..$tip"
 
-    marker=$(git -C "$repo" rev-parse --path-format=absolute --git-path mp-supervise-worker)
+    marker=$(marker_path "$repo")
     if [ -f "$marker" ]; then
         bad "marker: worker $(head -n 1 "$marker") still holds the checkout; stop it and release its marker first"
     else

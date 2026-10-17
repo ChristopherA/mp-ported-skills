@@ -22,6 +22,7 @@
 # marker; 1 not released.
 
 set -u
+. "$(dirname -- "$0")/marker.sh"
 
 DIR=""
 ID=""
@@ -44,7 +45,7 @@ fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 [ -d "$DIR" ] || fail "not a directory: $DIR"
 DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
 
-marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker 2>/dev/null) ||
+marker=$(marker_path "$DIR" 2>/dev/null) ||
     fail "$DIR is not a git checkout"
 dist=""
 if [ -f "$marker" ]; then
@@ -54,7 +55,7 @@ if [ -f "$marker" ]; then
 fi
 [ -n "$dist" ] || dist=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null 2>/dev/null)
 dist_released=""
-if [ -n "$dist" ] && dist_marker=$(git -C "$dist" rev-parse --path-format=absolute --git-path mp-supervise-worker 2>/dev/null) &&
+if [ -n "$dist" ] && dist_marker=$(marker_path "$dist" 2>/dev/null) &&
     [ -f "$dist_marker" ]; then
     dist_held=$(head -n 1 "$dist_marker")
     [ "$dist_held" = "$ID" ] ||

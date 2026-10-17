@@ -1,0 +1,68 @@
+#!/bin/sh
+# settle.sh -- stop a background session and wait until it has settled, for
+# stop.sh and resume.sh to source (#137).
+#
+# Runs `claude stop ID`, then reads `claude agents --json --all` every
+# INTERVAL seconds and hands each list to VERDICT, a function that prints
+# one word for the session: `pid` (its row shows a pid), `nopid` (it shows
+# none), or any other word, which ends the wait with that word. Settled is
+# the first of:
+#   - VERDICT prints a word other than `pid` and `nopid`, such as
+#     `stopped` or `gone`;
+#   - the row has shown no pid for SETTLE seconds, which ends the wait with
+#     `stopped`. `stopped` may never show (#77 saw it missing 30 seconds
+#     after a stop that had finished), and a resume issued the moment the
+#     pid went started a copy, while the same resume 47 seconds later woke
+#     the original. A pid showing again starts the settle time over.
+# The stop's own status is not read, since stopping a stopped session may
+# fail; the wait is what decides.
+#
+# Usage:
+#   . "$(dirname -- "$0")/settle.sh"
+#   v=$(stop_and_settle ID SETTLE INTERVAL TIMEOUT VERDICT) || fail "$v"
+#
+# On settling, prints the word that ended the wait and returns 0. When the
+# list cannot be read, VERDICT fails, or TIMEOUT seconds pass, prints why
+# and returns 1; the caller adds what it did not do.
+#
+# settle_row is the plain VERDICT: `gone` when the list no longer holds the
+# session, else `stopped`, `pid` or `nopid` from its row.
+
+settle_row() {
+    printf '%s' "$1" | jq -er --arg id "$settle_id" '
+        ([.[] | select(.kind == "background" and .id == $id)] | first) as $row
+        | if $row == null then "gone"
+          elif $row.state == "stopped" then "stopped"
+          elif $row.pid == null then "nopid"
+          else "pid" end' 2>/dev/null
+}
+
+stop_and_settle() {
+    settle_id=$1
+    claude stop "$1" </dev/null >/dev/null 2>&1
+    settle_begin=$(date +%s)
+    settle_since=""
+    while :; do
+        settle_list=$(claude agents --json --all </dev/null) || {
+            echo "claude agents --json --all failed, so session $1's state is unknown"
+            return 1
+        }
+        settle_v=$("$5" "$settle_list") || {
+            echo "claude agents --json --all printed no list jq could read, so session $1's state is unknown"
+            return 1
+        }
+        settle_now=$(date +%s)
+        case $settle_v in
+            pid) settle_since="" ;;
+            nopid)
+                [ -n "$settle_since" ] || settle_since=$settle_now
+                [ $((settle_now - settle_since)) -lt "$2" ] || { echo stopped; return 0; } ;;
+            *) echo "$settle_v"; return 0 ;;
+        esac
+        [ $((settle_now - settle_begin)) -lt "$4" ] || {
+            echo "session $1 was not stopped ${4}s after claude stop"
+            return 1
+        }
+        sleep "$3"
+    done
+}

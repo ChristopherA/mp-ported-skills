@@ -65,6 +65,7 @@ set -u
 ZONE_STOP=90
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/marker.sh"
 DIR=""
 SESSION=""
 HAS_SESSION=""
@@ -110,7 +111,7 @@ fi
 DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
 git -C "$DIR" rev-parse --git-dir >/dev/null 2>&1 || fail "$DIR is not a git checkout"
 
-marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker)
+marker=$(marker_path "$DIR")
 if [ -f "$marker" ]; then
     halt "held: the checkout's marker still names worker $(head -n 1 "$marker"), so it is read-only; finish its stop first"
 fi

@@ -45,6 +45,7 @@
 # with nothing posted; 3 when gh itself failed.
 
 set -u
+. "$(dirname -- "$0")/marker.sh"
 
 DIR=""
 ID=""
@@ -148,7 +149,7 @@ echo "post $action: $shown"
 echo "body:"
 sed '/./s/^/  /' "$BODY"
 
-marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker)
+marker=$(marker_path "$DIR")
 if [ -f "$marker" ]; then
     bad "marker: worker $(head -n 1 "$marker") still holds the checkout; stop it and release its marker first"
 else

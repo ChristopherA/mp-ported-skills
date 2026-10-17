@@ -153,6 +153,7 @@
 # and stopped.
 
 set -u
+. "$(dirname -- "$0")/marker.sh"
 
 DIR=""
 TICKET=""
@@ -310,8 +311,8 @@ if [ -n "$DIST" ]; then
 fi
 # The marker the read-only hook reads. One left by a worker that is no
 # longer live (the check above found none) is stale and is replaced below.
-marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker)
-[ -z "$DIST" ] || dist_marker=$(git -C "$DIST" rev-parse --path-format=absolute --git-path mp-supervise-worker)
+marker=$(marker_path "$DIR")
+[ -z "$DIST" ] || dist_marker=$(marker_path "$DIST")
 
 # The standing grants, each as grant.sh cites it, from its source alone.
 # grant.sh exits 1 both for "not granted" and for an error, so its stderr

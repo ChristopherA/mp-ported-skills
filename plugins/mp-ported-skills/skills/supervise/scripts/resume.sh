@@ -83,6 +83,8 @@ done
 [ "$TRIES" -gt 0 ] || fail "--tries needs at least 1"
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the session's job is unknown"
 DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
+. "$(dirname -- "$0")/marker.sh"
+. "$(dirname -- "$0")/settle.sh"
 
 job="$CLAUDE_CONFIG_DIR/jobs/$ID/state.json"
 sid=$(jq -r '.sessionId // empty' "$job" 2>/dev/null)
@@ -111,43 +113,26 @@ verdict() {
           end' 2>/dev/null
 }
 
-# wait_safe: poll until the session is stopped, or has shown no pid for
-# SETTLE seconds (a pid showing again starts that over), or exit 1.
-wait_safe() {
-    since=""
-    begin=$(date +%s)
-    while :; do
-        list=$(claude agents --json --all </dev/null) ||
-            fail "claude agents --json --all failed, so session $ID's state is unknown; not resumed"
-        v=$(verdict "$list") ||
-            fail "claude agents --json --all printed no list jq could read, so session $ID's state is unknown; not resumed"
-        now=$(date +%s)
-        case $v in
-            gone) fail "session $ID is not in claude agents; not resumed" ;;
-            others\ *) fail "another live background session in ${v#others }; not resumed" ;;
-            stopped) return 0 ;;
-            pid) since="" ;;
-            nopid)
-                [ -n "$since" ] || since=$now
-                [ $((now - since)) -lt "$SETTLE" ] || return 0 ;;
-            *) fail "unexpected verdict '$v' on session $ID; not resumed" ;;
-        esac
-        [ $((now - begin)) -lt "$TIMEOUT" ] ||
-            fail "session $ID was not stopped ${TIMEOUT}s after claude stop; not resumed"
-        sleep "$INTERVAL"
-    done
+# stop_safe: stop the session and wait, with settle.sh's rule (shared with
+# stop.sh), until it is safe to resume, or exit 1.
+stop_safe() {
+    v=$(stop_and_settle "$ID" "$SETTLE" "$INTERVAL" "$TIMEOUT" verdict) || fail "$v; not resumed"
+    case $v in
+        gone) fail "session $ID is not in claude agents; not resumed" ;;
+        others\ *) fail "another live background session in ${v#others }; not resumed" ;;
+        stopped) ;;
+        *) fail "unexpected verdict '$v' on session $ID; not resumed" ;;
+    esac
 }
 
 # The stop is repeated before each retry: a copy means the original was
-# live again, as when `claude attach` woke it. Its status is not read, since
-# stopping a stopped session may fail; the wait is what decides.
+# live again, as when `claude attach` woke it.
 copies=""
 kept=""
 try=0
 while [ "$try" -lt "$TRIES" ]; do
     try=$((try + 1))
-    claude stop "$ID" </dev/null >/dev/null 2>&1
-    wait_safe
+    stop_safe
     resumed_at=$(date +%s)
     out=$(cd "$DIR" && claude --bg --resume "$sid" "$PROMPT" </dev/null 2>&1)
     copy=$(printf '%s\n' "$out" | sed -n 's/.*started a copy as \([0-9a-f][0-9a-f]*\).*/\1/p' | head -n 1)
@@ -169,20 +154,20 @@ while [ "$try" -lt "$TRIES" ]; do
         # the other repo, as launch.sh writes them. The repo is the one the
         # launch recorded in DIR's marker, while that is still there, so a
         # fetch since cannot repoint it; once released, it is read again.
-        marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker 2>/dev/null)
+        marker=$(marker_path "$DIR" 2>/dev/null)
         dist=""
         [ -z "$marker" ] || [ ! -f "$marker" ] || [ "$(head -n 1 "$marker")" != "$ID" ] ||
             dist=$(sed -n 's/^distribution //p' "$marker")
         [ -n "$dist" ] || dist=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null 2>/dev/null)
         if [ -n "$dist" ]; then
-            dist_marker=$(git -C "$dist" rev-parse --path-format=absolute --git-path mp-supervise-worker 2>/dev/null) &&
+            dist_marker=$(marker_path "$dist" 2>/dev/null) &&
                 printf '%s\nproject %s\n' "$ID" "$DIR" >"$dist_marker" ||
                 echo "note the marker for $ID was not written in Distribution repo $dist, so it is not held read-only"
             line="distribution $dist"
         else
             line=""
         fi
-        marker=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-worker 2>/dev/null) &&
+        marker=$(marker_path "$DIR" 2>/dev/null) &&
             printf '%s\n%s' "$ID" "${line:+$line
 }" >"$marker" ||
             echo "note the marker for $ID was not written in $DIR, so the checkout is not held read-only"
