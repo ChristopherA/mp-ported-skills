@@ -344,6 +344,16 @@ check "a sub-issue grant does not cover an issue create" "deny" \
     "$(decision 0 auto 'gh issue create --title x --body y' "$granted")"
 check "a GraphQL addSubIssue is not the sub-issue grant" "deny" \
     "$(decision 0 auto "gh api graphql -f query='mutation { addSubIssue(input: {issueId: \"I_1\", subIssueId: \"I_2\"}) { issue { number } } }'" "$granted")"
+# A ? or # in the owner or repo would send the call to the repo itself, and
+# a .. segment could step out of the granted path.
+check "a sub-issue grant does not cover a query hiding a repo PATCH" "deny" \
+    "$(decision 0 auto "gh api -X PATCH 'repos/o/r?x=/issues/1/sub_issues/priority' -f private=false" "$granted")"
+check "a sub-issue grant does not cover a fragment hiding the path" "deny" \
+    "$(decision 0 auto "gh api 'repos/o/r#/issues/1/sub_issues' -F sub_issue_id=9" "$granted")"
+check "a sub-issue grant does not cover a .. segment" "deny" \
+    "$(decision 0 auto 'gh api -X PATCH repos/o/../issues/1/sub_issues/priority -F sub_issue_id=9' "$granted")"
+check "a granted sub-issue link to a dotted repo name goes through" "" \
+    "$(decision 0 auto 'gh api repos/o/.github/issues/40/sub_issues -F sub_issue_id=9' "$granted")"
 # gh pr new is gh's alias for gh pr create (#120): the same grant covers it.
 printf '## Grants\n\n- pr-create\n' >"$granted/docs/agents/supervision.md"
 git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "pr-create only"

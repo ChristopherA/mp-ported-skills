@@ -272,6 +272,13 @@ last_says "Waiting on: $reorder"
 run_as 'blocked input needed'
 check "a granted sub-issue reorder" "0 rule grant sub-issue: tickets a capture files, under the parent" \
     "$(rc) $(sed -n 2p "$work/out")"
+# With no method and no field, gh sends a GET: a read, not the link.
+last_says 'Waiting on: gh api repos/o/r/issues/40/sub_issues'
+run_as 'blocked input needed'
+not_routine "a sub-issue read under the grant" "it waits on an action no grant can cover"
+last_says "Waiting on: gh api -X PATCH 'repos/o/r?x=/issues/40/sub_issues/priority' -f private=false"
+run_as 'blocked input needed'
+not_routine "a query hiding a repo PATCH under the grant" "it waits on an action no grant can cover"
 
 # --- errors ----------------------------------------------------------------
 last_says 'Proceed with #90?'

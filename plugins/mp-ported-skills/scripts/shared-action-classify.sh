@@ -164,13 +164,19 @@ classify_gh() {
             graphql) _cgraphql=yes ;;
             *pulls* | *issues* | *merges* | *contents* | */git/*)
                 _ctarget=yes
-                if printf '%s\n' "$1" | grep -Eqx '/?repos/[^/]+/[^/]+/issues/[0-9]+/comments/?'; then
+                # Owner and repo are GitHub's name characters, or gh's
+                # {owner} and {repo}: a ? or # there would hide another
+                # endpoint behind a granted form, and a . or .. segment could
+                # step out of it.
+                if printf '%s\n' "$1" | grep -Eq '(^|/)\.\.?(/|$)'; then
+                    :
+                elif printf '%s\n' "$1" | grep -Eqx '/?repos/[A-Za-z0-9._{}-]+/[A-Za-z0-9._{}-]+/issues/[0-9]+/comments/?'; then
                     _cissue=comment
-                elif printf '%s\n' "$1" | grep -Eqx '/?repos/[^/]+/[^/]+/issues/?'; then
+                elif printf '%s\n' "$1" | grep -Eqx '/?repos/[A-Za-z0-9._{}-]+/[A-Za-z0-9._{}-]+/issues/?'; then
                     _cissue=create
-                elif printf '%s\n' "$1" | grep -Eqx '/?repos/[^/]+/[^/]+/issues/[0-9]+/sub_issues/?'; then
+                elif printf '%s\n' "$1" | grep -Eqx '/?repos/[A-Za-z0-9._{}-]+/[A-Za-z0-9._{}-]+/issues/[0-9]+/sub_issues/?'; then
                     _cissue=sub-link
-                elif printf '%s\n' "$1" | grep -Eqx '/?repos/[^/]+/[^/]+/issues/[0-9]+/sub_issues/priority/?'; then
+                elif printf '%s\n' "$1" | grep -Eqx '/?repos/[A-Za-z0-9._{}-]+/[A-Za-z0-9._{}-]+/issues/[0-9]+/sub_issues/priority/?'; then
                     _cissue=sub-reorder
                 fi
                 ;;

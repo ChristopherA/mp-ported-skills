@@ -16,10 +16,9 @@
 # default branch, in which case this hook lets the command through. A `git
 # push` or gh write whose action grant.sh cannot name (a gh api form other
 # than an issue comment, a new issue, or a sub-issue link or reorder (#162),
-# or a command piped into a shell) is
-# never granted: a grant covers a form this
-# hook can tell apart from the others, and those cannot be told apart from
-# each other, so they stay refused on purpose.
+# or a command piped into a shell) is never granted: a grant covers a form
+# this hook can tell apart from the others, and those cannot be told apart
+# from each other, so they stay refused on purpose.
 #
 # Detection: Claude Code sets CLAUDE_CODE_SESSION_ATTENDED=0 in a
 # background session's own process env (seen in CLI 2.1.284 by reading
