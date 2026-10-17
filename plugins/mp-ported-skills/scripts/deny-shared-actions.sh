@@ -15,7 +15,8 @@
 # `grant.sh` finds a standing grant for that same action on the committed
 # default branch, in which case this hook lets the command through. A `git
 # push` or gh write whose action grant.sh cannot name (a gh api form other
-# than an issue comment or a new issue, or a command piped into a shell) is
+# than an issue comment, a new issue, or a sub-issue link or reorder (#162),
+# or a command piped into a shell) is
 # never granted: a grant covers a form this
 # hook can tell apart from the others, and those cannot be told apart from
 # each other, so they stay refused on purpose.

@@ -114,6 +114,8 @@ check "gh issue create" "deny" "$(decision 0 auto 'gh issue create --title x --b
 check "gh -R before issue comment" "deny" "$(decision 0 auto 'gh -R o/r issue comment 3 --body y')"
 check "gh api implicit POST of an issue comment" "deny" "$(decision 0 auto 'gh api repos/o/r/issues/104/comments -f body=x')"
 check "gh api implicit POST of a new issue" "deny" "$(decision 0 auto 'gh api repos/o/r/issues -f title=x')"
+check "gh api POST of a sub-issue link" "deny" "$(decision 0 auto 'gh api --method POST repos/o/r/issues/40/sub_issues -F sub_issue_id=9')"
+check "gh api PATCH of a sub-issue reorder" "deny" "$(decision 0 auto 'gh api -X PATCH repos/o/r/issues/40/sub_issues/priority -F sub_issue_id=9 -F after_id=8')"
 check "gh issue comment piped into bash" "deny" "$(decision 0 auto 'printf "gh issue comment 3 --body y" | bash')"
 check "gh issue create piped into sh" "deny" "$(decision 0 auto 'echo gh issue create --fill | sh')"
 
@@ -315,6 +317,33 @@ check "an ungranted issue comment beside an issue-create grant refuses" "deny" \
     "$(decision 0 auto 'gh issue comment 104 --body y' "$granted")"
 check "a GraphQL createIssue is not the issue-create grant" "deny" \
     "$(decision 0 auto "gh api graphql -f query='mutation { createIssue(input: {repositoryId: \"R_1\", title: \"x\"}) { issue { number } } }'" "$granted")"
+check "a sub-issue link is not the issue-create grant" "deny" \
+    "$(decision 0 auto 'gh api --method POST repos/o/r/issues/40/sub_issues -F sub_issue_id=9' "$granted")"
+# The sub-issue grant (#162) covers linking a child and reordering a
+# parent's sub-issues, and no other gh api write to an issue.
+printf '## Grants\n\n- sub-issue\n' >"$granted/docs/agents/supervision.md"
+git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "sub-issue only"
+git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+check "a granted sub-issue link goes through" "" \
+    "$(decision 0 auto 'gh api --method POST repos/{owner}/{repo}/issues/40/sub_issues -F sub_issue_id=9' "$granted")"
+check "a granted sub-issue link with an implicit POST goes through" "" \
+    "$(decision 0 auto 'gh api repos/o/r/issues/40/sub_issues -F sub_issue_id=9' "$granted")"
+check "a granted sub-issue reorder goes through" "" \
+    "$(decision 0 auto 'gh api -X PATCH repos/o/r/issues/40/sub_issues/priority -F sub_issue_id=9 -F after_id=8' "$granted")"
+check "a sub-issue grant does not cover a PATCH of the issue" "deny" \
+    "$(decision 0 auto 'gh api -X PATCH repos/o/r/issues/40 -f state=closed' "$granted")"
+check "a sub-issue grant does not cover removing a sub-issue" "deny" \
+    "$(decision 0 auto 'gh api -X DELETE repos/o/r/issues/40/sub_issue -F sub_issue_id=9' "$granted")"
+check "a sub-issue grant does not cover a POST to the priority path" "deny" \
+    "$(decision 0 auto 'gh api -X POST repos/o/r/issues/40/sub_issues/priority -F sub_issue_id=9' "$granted")"
+check "a sub-issue grant does not cover a PATCH of the sub_issues list" "deny" \
+    "$(decision 0 auto 'gh api -X PATCH repos/o/r/issues/40/sub_issues -F sub_issue_id=9' "$granted")"
+check "a sub-issue grant does not cover a second path" "deny" \
+    "$(decision 0 auto 'gh api repos/o/r/issues/40/sub_issues repos/o/r/pulls -F sub_issue_id=9' "$granted")"
+check "a sub-issue grant does not cover an issue create" "deny" \
+    "$(decision 0 auto 'gh issue create --title x --body y' "$granted")"
+check "a GraphQL addSubIssue is not the sub-issue grant" "deny" \
+    "$(decision 0 auto "gh api graphql -f query='mutation { addSubIssue(input: {issueId: \"I_1\", subIssueId: \"I_2\"}) { issue { number } } }'" "$granted")"
 # gh pr new is gh's alias for gh pr create (#120): the same grant covers it.
 printf '## Grants\n\n- pr-create\n' >"$granted/docs/agents/supervision.md"
 git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "pr-create only"

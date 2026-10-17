@@ -141,7 +141,7 @@ check "gh issue -R o/r view goes to the real gh" "real gh: issue -R o/r view 3" 
 # action through; gh api stays refused alongside it (#58).
 repo granted
 mkdir -p granted/docs/agents
-printf '## Grants\n\n- push\n- issue-close\n- issue-comment\n- issue-create\n- pr-create\n' >granted/docs/agents/supervision.md
+printf '## Grants\n\n- push\n- issue-close\n- issue-comment\n- issue-create\n- pr-create\n- sub-issue\n' >granted/docs/agents/supervision.md
 git -C granted add docs/agents/supervision.md
 git -C granted -c commit.gpgsign=false commit -q -m grants
 git -C granted push -q origin main 2>/dev/null
@@ -171,6 +171,16 @@ check "a granted issue create reaches the real gh" "real gh: issue create --titl
     "$(worker 0 granted 'gh issue create --title x --body y' | head -n 1)"
 check "a granted issue comment through gh api reaches the real gh" "real gh: api repos/o/r/issues/104/comments -f body=x" \
     "$(worker 0 granted 'gh api repos/o/r/issues/104/comments -f body=x' | head -n 1)"
+# The sub-issue grant links a child and reorders a parent's sub-issues
+# (#162), and covers no other gh api write to an issue.
+check "an ungranted sub-issue link is refused" "exit=1" \
+    "$(last "$(worker 0 plain 'sh -c "gh api --method POST repos/o/r/issues/40/sub_issues -F sub_issue_id=9"')")"
+check "a granted sub-issue link from a script reaches the real gh" "real gh: api --method POST repos/o/r/issues/40/sub_issues -F sub_issue_id=9" \
+    "$(worker 0 granted 'sh -c "gh api --method POST repos/o/r/issues/40/sub_issues -F sub_issue_id=9"' | head -n 1)"
+check "a granted sub-issue reorder reaches the real gh" "real gh: api -X PATCH repos/o/r/issues/40/sub_issues/priority -F sub_issue_id=9 -F after_id=8" \
+    "$(worker 0 granted 'gh api -X PATCH repos/o/r/issues/40/sub_issues/priority -F sub_issue_id=9 -F after_id=8' | head -n 1)"
+check "a sub-issue removal is refused under the grant" "exit=1" \
+    "$(last "$(worker 0 granted 'gh api -X DELETE repos/o/r/issues/40/sub_issue -F sub_issue_id=9')")"
 # The comment grant posts a new comment only (#113), and no grant covers
 # a GraphQL mutation.
 check "a granted repo's issue comment --edit-last is refused" "exit=1" \

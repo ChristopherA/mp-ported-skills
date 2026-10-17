@@ -138,13 +138,16 @@ classify_gh() {
         # contents or the git data API, or a GraphQL mutation. gh sends POST
         # by default once a field or input is given. A POST to an issue's
         # comments, or to a repo's issues, is named as the issue comment or
-        # new issue it makes, so the grant for that action covers it (#110):
-        # only when that path, matched whole, is the one word not taken by
-        # a method or field flag. Any other word -- a second path, a
-        # header's value -- leaves it a plain gh api write, never granted,
-        # as is a PATCH or DELETE of a comment (#113). A GraphQL mutation is
-        # never granted either, addComment and createIssue included; ADR
-        # 0005 says why. The words after `api` are the request.
+        # new issue it makes, so the grant for that action covers it (#110),
+        # and so are a POST to an issue's sub_issues (linking a child) and a
+        # PATCH to its sub_issues/priority (a reorder), for the sub-issue
+        # grant (#162): only when that path, matched whole, is the one word
+        # not taken by a method or field flag. Any other word -- a second
+        # path, a header's value -- leaves it a plain gh api write, never
+        # granted, as is a PATCH or DELETE of a comment (#113) or of a
+        # sub-issue. A GraphQL mutation is never granted either, addComment,
+        # createIssue and addSubIssue included; ADR 0005 says why. The words
+        # after `api` are the request.
         shift $((gh_pre + 1))
         _cmethod="" _cfields="" _ctarget="" _cgraphql="" _cissue="" _cwords=0
         while [ $# -gt 0 ]; do
@@ -165,6 +168,10 @@ classify_gh() {
                     _cissue=comment
                 elif printf '%s\n' "$1" | grep -Eqx '/?repos/[^/]+/[^/]+/issues/?'; then
                     _cissue=create
+                elif printf '%s\n' "$1" | grep -Eqx '/?repos/[^/]+/[^/]+/issues/[0-9]+/sub_issues/?'; then
+                    _cissue=sub-link
+                elif printf '%s\n' "$1" | grep -Eqx '/?repos/[^/]+/[^/]+/issues/[0-9]+/sub_issues/priority/?'; then
+                    _cissue=sub-reorder
                 fi
                 ;;
             esac
@@ -175,8 +182,12 @@ classify_gh() {
         [ -n "$_cmethod" ] || { [ -n "$_cfields" ] && _cmethod=POST; } || _cmethod=GET
         if [ -n "$_cgraphql" ]; then
             case "${classify_text:-}" in *mutation*) matched="gh api graphql mutation" ;; esac
-        elif [ -n "$_ctarget" ] && [ "$_cmethod" = POST ] && [ -n "$_cissue" ]; then
+        elif [ -n "$_ctarget" ] && [ "$_cmethod" = POST ] && { [ "$_cissue" = comment ] || [ "$_cissue" = create ]; }; then
             matched="gh api POST (issue $_cissue)"
+        elif [ -n "$_ctarget" ] && [ "$_cmethod" = POST ] && [ "$_cissue" = sub-link ]; then
+            matched="gh api POST (sub-issue link)"
+        elif [ -n "$_ctarget" ] && [ "$_cmethod" = PATCH ] && [ "$_cissue" = sub-reorder ]; then
+            matched="gh api PATCH (sub-issue reorder)"
         elif [ -n "$_ctarget" ] && [ "$_cmethod" != GET ]; then
             matched="gh api $_cmethod"
         fi
@@ -188,7 +199,8 @@ classify_gh() {
 # grant covers: the piped-into-a-shell fallback and the other gh api forms,
 # which do not say which action they reach, and an issue comment's edit or
 # delete (#113). The two gh api POSTs above that name an issue comment or a
-# new issue map to that action (#110).
+# new issue map to that action (#110), and the sub-issue link and reorder
+# map to sub-issue (#162).
 grant_action() { # <matched>
     case "$1" in
     "git push (piped"* | "gh (piped"*) ;;
@@ -199,5 +211,6 @@ grant_action() { # <matched>
     "gh issue close"*) echo issue-close ;;
     "gh issue comment" | "gh api POST (issue comment)") echo issue-comment ;;
     "gh issue create"* | "gh api POST (issue create)") echo issue-create ;;
+    "gh api POST (sub-issue link)" | "gh api PATCH (sub-issue reorder)") echo sub-issue ;;
     esac
 }

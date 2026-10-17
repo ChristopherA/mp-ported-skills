@@ -388,8 +388,16 @@ itself one by editing this file.
                       PATCH or DELETE), which no grant covers.
        issue-create   a new issue: gh issue create, or a gh api POST to
                       repos/<o>/<r>/issues.
+       sub-issue      linking an issue under a parent, a gh api POST to
+                      repos/<o>/<r>/issues/<n>/sub_issues, or reordering
+                      a parent's sub-issues, a gh api PATCH to
+                      repos/<o>/<r>/issues/<n>/sub_issues/priority. Not
+                      removing one, which no grant covers. The note says
+                      which tickets, as
+                      `- sub-issue: a capture's tickets, under the work's own parent`
+                      does; the hook checks only the action.
      No grant covers any other gh api write or a GraphQL mutation,
-     addComment and createIssue included.
+     addComment, createIssue and addSubIssue included.
      Example: `- push: release branches only`
      A push grant covers the commits a worker's capture makes after its
      reviewed work only when its note says so, as

@@ -241,6 +241,38 @@ last_says 'Waiting on: rm -rf build'
 run_as 'blocked input needed'
 not_routine "a Waiting on: line no grant can cover" "it waits on an action no grant can cover"
 
+# A capture waiting on linking its ticket under the parent, or placing it,
+# reads as the sub-issue action (#162); any other gh api write does not.
+link='gh api --method POST repos/{owner}/{repo}/issues/40/sub_issues -F sub_issue_id=4242'
+reorder='gh api -X PATCH repos/{owner}/{repo}/issues/40/sub_issues/priority -F sub_issue_id=4242 -F after_id=4241'
+last_says "Filed #195.
+
+Waiting on: $link"
+run_as 'blocked input needed'
+not_routine "a sub-issue link, no grant" "no standing grant covers sub-issue"
+last_says "Waiting on: $reorder"
+run_as 'blocked input needed'
+not_routine "a sub-issue reorder, no grant" "no standing grant covers sub-issue"
+last_says 'Waiting on: gh api -X DELETE repos/o/r/issues/40/sub_issue -F sub_issue_id=4242'
+run_as 'blocked input needed'
+not_routine "a sub-issue removal" "it waits on an action no grant can cover"
+last_says 'Waiting on: gh api -X POST repos/o/r/issues/40/sub_issues/priority -F sub_issue_id=4242'
+run_as 'blocked input needed'
+not_routine "a POST to the priority path" "it waits on an action no grant can cover"
+printf -- '- sub-issue: tickets a capture files, under the parent\n' >>"$repo/docs/agents/supervision.md"
+repo_git "$repo" commit -q -am "Grant sub-issue"
+repo_git "$repo" push -q origin main 2>/dev/null
+last_says "Filed #195.
+
+Waiting on: $link"
+run_as 'blocked input needed'
+check "a granted sub-issue link" "0 rule grant sub-issue: tickets a capture files, under the parent" \
+    "$(rc) $(sed -n 2p "$work/out")"
+last_says "Waiting on: $reorder"
+run_as 'blocked input needed'
+check "a granted sub-issue reorder" "0 rule grant sub-issue: tickets a capture files, under the parent" \
+    "$(rc) $(sed -n 2p "$work/out")"
+
 # --- errors ----------------------------------------------------------------
 last_says 'Proceed with #90?'
 (agents_file=''; run)

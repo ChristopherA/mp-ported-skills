@@ -15,7 +15,8 @@
 #   ticket  confirming the ticket it was launched on, "Proceed with #N?"
 #           and close forms, naming no other ticket, as the whole sentence;
 #   grant   one shared action (push, pr-create, pr-merge, issue-close,
-#           issue-comment, issue-create) that grant.sh finds granted on the
+#           issue-comment, issue-create, or sub-issue for a `Waiting on:`
+#           gh api link or reorder) that grant.sh finds granted on the
 #           default branch as committed on origin, asked about anyway.
 # Anything else is not: a question that offers a choice (" or "), names
 # another ticket or several actions, an action no grant covers, a block that
@@ -96,6 +97,17 @@ done
 # question, or why it is not routine.
 read_out=$(jq -s --arg n "$TICKET" '
     def norm: gsub("[*`_]"; "") | gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "");
+    # A gh api link of a sub-issue (a POST, or no method, to sub_issues) or
+    # reorder (a PATCH to sub_issues/priority), the two forms the sub-issue
+    # grant covers (#162), on one path. norm has dropped the underscores.
+    def sub_issue_api:
+        ([match("(^| )/?repos/[^/ ]+/[^/ ]+/issues/[0-9]+/subissues(/priority)?/?(?= |$)"; "g")]) as $paths
+        | ([match("(^| )/?repos/"; "g")] | length) as $all
+        | ([capture("(^| )(-X|--method)[ =]?(?<m>[A-Za-z]+)(?= |$)")] | last | .m // "" | ascii_upcase) as $m
+        | if ($paths | length) != 1 or $all != 1 then null
+          elif ($paths[0].captures[1].string == null) and ($m == "POST" or $m == "") then "sub-issue"
+          elif ($paths[0].captures[1].string != null) and $m == "PATCH" then "sub-issue"
+          else null end;
     def action_of_command:
         if test("^git (-c [^ ]+ )*push\\b") then "push"
         elif test("^gh pr (create|new)\\b") then "pr-create"
@@ -103,6 +115,7 @@ read_out=$(jq -s --arg n "$TICKET" '
         elif test("^gh issue close\\b") then "issue-close"
         elif test("^gh issue comment\\b") then "issue-comment"
         elif test("^gh issue (create|new)\\b") then "issue-create"
+        elif test("^gh api ") then sub_issue_api
         else null end;
     # The words a go-ahead question may open with, before its verb.
     def lead: "^(ok(ay)?,? )?((shall|should|can|may) i |do you want me to |want me to |ready to |ok(ay)? to )?(go ahead and )?";
