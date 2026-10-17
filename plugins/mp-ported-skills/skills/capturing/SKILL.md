@@ -14,7 +14,7 @@ A **phase boundary** is where the user picks Continue, `/clear`, `/handoff`, a s
 Walk the whole session for what was decided, learned or promised and is not yet durable. Route each item to its home now, as you find it, except findings, below:
 
 - **Settled decision or term**: an ADR or `CONTEXT.md`, through `domain-modeling`.
-- **Unfinished work** of this session's own: a ticket, published to this repo's tracker per `docs/agents/issue-tracker.md`, or none when this repo has no tracker. This session originated it, so it lands ready: `ready-for-agent`, or `ready-for-human` when it needs human judgment or access. `needs-triage` is the on-ramp for work arriving from others. When this session's work sits under a parent, link it as a sub-issue of that parent, placed per **A new ticket under a parent** below.
+- **Unfinished work** of this session's own: a ticket, published to this repo's tracker per `docs/agents/issue-tracker.md`, or none when this repo has no tracker. This session originated it, so it lands ready: `ready-for-agent`, or `ready-for-human` when it needs human judgment or access. `needs-triage` is the on-ramp for work arriving from others, and for a ticket an unattended capture files (**Unattended** below), which no one has read yet. When this session's work sits under a parent, link it as a sub-issue of that parent, placed per **A new ticket under a parent** below.
 - **A ticket of this session's own left open for a live check**: its build landed, and a criterion waits on a check only the user can run (a live `/supervise` run, a phone test). It moves to `ready-for-human` and, in the same step, after its parent's last open `ready-for-agent` child: left ahead of them, `resuming` names it as the parent's next child, and `/supervise` stops on it as `by hand` with buildable children behind it. See what that takes, which writes nothing:
 
   ```sh
@@ -27,7 +27,7 @@ Walk the whole session for what was decided, learned or promised and is not yet 
 - **Something only another person knows**: name it and suggest the user run `/to-questionnaire` (you type it; user-invoked).
 - **Already durable** (a commit, a ticket, an ADR, a research file, a `prototype/` branch): point at it and move on.
 - **Finding for an open ticket**: something this session learned that bears on an open ticket other than its own work, such as evidence or a data point for it, or that ticket's scope, narrowed by this session's change. A comment on that ticket, not an edit to its body in move 2: the fact, its evidence (a run, a commit, a transcript line), and what it changes for that ticket.
-- **Defect or idea noticed in passing**, outside this session's own work: a new ticket that lands ready, as unfinished work does, linked as a sub-issue of the parent this session's work sits under when there is one, placed per **A new ticket under a parent** below, with a `Blocked by:` line (`Blocked by: none` when nothing blocks it).
+- **Defect or idea noticed in passing**, outside this session's own work: a new ticket that lands ready, as unfinished work does (`needs-triage` when an unattended capture files it), linked as a sub-issue of the parent this session's work sits under when there is one, placed per **A new ticket under a parent** below, with a `Blocked by:` line (`Blocked by: none` when nothing blocks it).
 
 **A new ticket under a parent.** The session that files a ticket knows why it exists, what it must follow and what it should precede; a ticket linked with nothing more lands last in the parent's sub-issue order, which `/supervise` follows, with blockers `resuming`'s `state.sh` cannot see. So, for either new-ticket route, with attended and unattended as `before-clear.sh --action other` reads them below (run it first when unfinished work comes before any finding):
 
@@ -39,7 +39,19 @@ Walk the whole session for what was decided, learned or promised and is not yet 
   gh api --method PATCH 'repos/{owner}/{repo}/issues/<parent>/sub_issues/priority' -F sub_issue_id=<new ticket id> -F before_id=<#X id>
   ```
 
-- **Unattended**: file the ticket when the `issue-create` check below grants it, and leave the order alone: no grant covers a sub-issue reorder. List the proposed placement, its reason and the command above, ids filled in, in the report with the other unposted items.
+- **Unattended**: file the ticket when the `issue-create` check below grants it, labelled `needs-triage` whichever route it came from: nobody has read it, and a ready ticket filed overnight could be built the next night. Then check the link and the reorder, which are one shared action:
+
+  ```sh
+  sh "${CLAUDE_SKILL_DIR}/scripts/before-clear.sh" --action sub-issue </dev/null
+  ```
+
+  On `granted: <citation>`, link the ticket under the parent, then apply the proposed placement with the priority command above (last needs no call), database ids in both, with no confirmation, and report the place taken with that line:
+
+  ```sh
+  gh api --method POST 'repos/{owner}/{repo}/issues/<parent>/sub_issues' -F sub_issue_id=<new ticket id>
+  ```
+
+  On `ungranted`, leave the ticket unlinked and the order alone, and list the proposed placement, its reason and both commands, ids filled in, in the report with the other unposted items. Exit 1 is a usage error or a `grant.sh` failure: link nothing, and list the same with the error.
 
 The last two routes in the list above are **findings**. Gather them before writing any, over the whole session, including the results of any worker it supervised, by asking: what did this session learn that bears on an open ticket, or that no ticket holds yet? Unfinished work, a decision, a stale claim (move 2) and a rule (move 3) each have their own route; a finding is none of these, and is lost at `/clear` when nothing catches it. Then find out whether anyone can answer:
 
@@ -76,7 +88,7 @@ Run `git status` and compare it with what this session changed. Show the user an
 
 ## 6. Report
 
-- What was routed where, what stays open, and what has no home. Name each finding with the comment or ticket it became, and the `granted: <citation>` line when it posted unasked; or, when nobody could confirm it and no grant covered it, its intended target, text and command, left unposted; and each finding the user skipped. For each ticket filed under a parent, the place it took in the order, or, unattended, the proposed place, its reason and the reorder command left unrun. For a ticket left open for a live check, `live-check.sh`'s lines, applied or, unattended, left for the `Waiting on:` line.
+- What was routed where, what stays open, and what has no home. Name each finding with the comment or ticket it became, and the `granted: <citation>` line when it posted unasked; or, when nobody could confirm it and no grant covered it, its intended target, text and command, left unposted; and each finding the user skipped. For each ticket filed under a parent, the place it took in the order, with the `granted: <citation>` line when an unattended capture linked and placed it; or, unattended and ungranted, the proposed place, its reason and the link and reorder commands left unrun. For a ticket left open for a live check, `live-check.sh`'s lines, applied or, unattended, left for the `Waiting on:` line.
 - **One first next step**, from this repo's tracker only, read after move 5 from `resuming`'s script rather than worked out by hand:
 
   ```sh
