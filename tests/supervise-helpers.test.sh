@@ -50,7 +50,10 @@ esac
 EOF
 chmod +x "$work/bin/claude"
 PATH="$work/bin:$PATH"
-check "the fake claude is the one found" "$work/bin/claude" "$(command -v claude)"
+[ "$(command -v claude)" = "$work/bin/claude" ] || {
+    echo "FAIL the fake claude is not the one found; not running the rest"
+    exit 1
+}
 
 # lists <json>...: the lists the fake answers, in order.
 lists() {
