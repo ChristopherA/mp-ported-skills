@@ -764,10 +764,10 @@ check "launch: prints the id" "c2a368ee" "$out"
 # The worker is told its Project's standing grants (#88). $project has no
 # origin, so it has none, and an ungranted action ends the turn on one line.
 # It is also told how to read files without paying for them twice (#134).
-reads="Read each file once: read a large file (over about 20KB, or a long one such as a SKILL.md or a test file) with Read in ranges, or grep -n it first and read the range you need, never whole with cat; read one file per call, since a result over the output limit is saved to a file and has to be read again; and do not print a file you have already read in this session unless it has changed since."
+read_once="Read each file once: read a large file (over about 20KB, or a long one such as a SKILL.md or a test file) with Read in ranges, or grep -n it first and read the range you need, never whole with cat; read one file per call, since a result over the output limit is saved to a file and has to be read again; and do not print a file you have already read in this session unless it has changed since."
 no_grants="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/main, holds no standing grant.
 A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`.
-$reads"
+$read_once"
 check "launch: flags and the command" "--bg
 --model
 claude-sonnet-5
@@ -890,9 +890,9 @@ mismatch "isolation guard on" '| .respawnFlags = ["--disallowedTools", "EnterWor
 mismatch "isolation guard set to another value" '| .respawnFlags = ["--disallowedTools", "EnterWorktree", "--settings", "{\"worktree\":{\"bgIsolation\":\"worktree\"}}", "--permission-mode", "auto"]' \
     "Error: session c2a368ee has the background worktree guard on, so its edits in $project would be refused: bgIsolation none is not in its settings (its flags: --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"worktree\"}} --permission-mode auto); stopped it"
 mismatch "grants not recorded" '| .respawnFlags |= .[2:]' \
-    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
+    "Error: session c2a368ee was not told its Project's grants and how to read files: its flags hold no --append-system-prompt with them (its flags: --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
 mismatch "other grants recorded" '| .respawnFlags[1] = "something else"' \
-    "Error: session c2a368ee was not told its Project's grants: its flags hold no --append-system-prompt with them (its flags: --append-system-prompt something else --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
+    "Error: session c2a368ee was not told its Project's grants and how to read files: its flags hold no --append-system-prompt with them (its flags: --append-system-prompt something else --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
 # A worker is launched without the tools it never uses and without Claude in
 # Chrome (#130); flags from the launch with one of them missing are refused.
 mismatch "tools a worker does not use allowed" '| .respawnFlags[3] = "EnterWorktree"' \
@@ -1155,7 +1155,7 @@ check "launch with grants: lists the grants on origin, and only those" "You are 
 A shared action one of these grants covers goes ahead without asking: when /implement or a capture reaches it, take it, and do not end your turn to ask first.
 A granted push goes ahead as soon as its grant's conditions hold, before any capture: the supervisor sends /mp-ported-skills:capturing after your turn ends. A commit that capture makes is pushed under the push grant only when the grant's note names a capture's commits, as \`its capture's commits included\` does; otherwise end the capture's turn on \`Waiting on: git push origin main\`.
 A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`.
-$reads" \
+$read_once" \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d')"
 check "launch with grants: notes the grant committed only locally" "note: docs/agents/supervision.md grants pr-create on the working tree or current branch, not on the committed origin/main; ignored" \
     "$(launch_in "$granted" --ticket 56 2>&1 >/dev/null)"
@@ -1988,7 +1988,7 @@ $dist
 check "launch dist: runs in the Project folder" "$dproj" "$(command cat "$fake/cwd")"
 check "launch dist: the worker is told the repo" "This Project's code lives in its Distribution repo, $dist, named in docs/agents/distribution-repo.md. Make the ticket's code changes and commits there, by path (\`git -C $dist\`), on its current branch, with no new branch or worktree; read the ticket and the Project's docs from this folder." \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 2 | head -n 1)"
-check "launch dist: the worker is told how to read files, before the repo (#134)" "$reads" \
+check "launch dist: the worker is told how to read files, before the repo (#134)" "$read_once" \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 3 | head -n 1)"
 check "launch dist: the worker is told a Distribution repo push needs distribution-push (#141)" "A push in the Distribution repo is covered only by a distribution-push grant, never by push (#141). With none, do not push it: end your turn on \`Waiting on: git -C $dist push origin main\`, or, when this Project's push waits too, on \`Waiting on: git push origin main; git -C $dist push origin main\`." \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 1)"
