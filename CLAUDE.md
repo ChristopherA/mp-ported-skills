@@ -84,6 +84,10 @@ A new grant action, or a change to what one covers, goes into every list of the 
 
 A `claude` option that takes a list (`--allowedTools`, `--disallowedTools`, and any other `claude --help` shows as `<tools...>` or `<values...>`) goes before another option, never right before the prompt, as `launch.sh` places `--disallowedTools`. A list option reads every word after it that does not start with `-`, so the prompt becomes an entry in the list: `claude -p --disallowedTools EnterWorktree 'Reply OK'` warns that the deny rule "Reply" matches no known tool, then fails with `Input must be provided`.
 
+## Shared helpers
+
+Code that more than one `supervise` script needs goes in a sourced helper beside them, one concern per file, as `marker.sh` and `settle.sh` are, loaded with `. "$(dirname -- "$0")/<file>"`. A helper passes everything a function reads as an argument, prefixes its globals with its file's name (`settle_*`), and leaves its error text to the caller, which adds what it did not do: a global read across two functions left `settle_row` usable only inside `stop_and_settle` until #137's review. Test a helper by sourcing it, as `tests/supervise-helpers.test.sh` does.
+
 ## jq in scripts
 
 Build a JSON value from a shell string with `jq -n --arg`, as `fixed_nums` in `resuming`'s `state.sh` does. `jq -R` on empty stdin prints nothing, so a later `--argjson` of that value fails, and a script that goes on after the failure reports empty results as if they were real.
