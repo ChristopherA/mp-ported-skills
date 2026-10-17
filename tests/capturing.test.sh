@@ -68,8 +68,17 @@ check "the placement is asked in the filing's question" yes \
     "$(contains "$capturing" "in the same AskUserQuestion that confirms the filing")"
 check "a yes applies the placement through the priority API" yes \
     "$(contains "$capturing" "sub_issues/priority")"
-check "unattended leaves the order alone" yes \
-    "$(contains "$capturing" "no grant covers a sub-issue reorder")"
+
+# Unattended, a filed ticket is needs-triage, and the link and placement run
+# only under a sub-issue grant (#162).
+check "unattended files its ticket needs-triage" yes \
+    "$(contains "$capturing" "labelled \`needs-triage\` whichever route it came from")"
+check "unattended checks the sub-issue grant" yes \
+    "$(contains "$capturing" 'before-clear.sh" --action sub-issue </dev/null')"
+check "a granted capture links the ticket under its parent" yes \
+    "$(contains "$capturing" "issues/<parent>/sub_issues' -F sub_issue_id=<new ticket id>")"
+check "ungranted leaves the ticket unlinked and the order alone" yes \
+    "$(contains "$capturing" "On \`ungranted\`, leave the ticket unlinked and the order alone")"
 
 # A ticket left open for a live check is relabelled and moved after its
 # parent's ready-for-agent children in one step, gated like the relabel, and
