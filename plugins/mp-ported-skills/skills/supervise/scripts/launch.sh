@@ -321,7 +321,7 @@ marker=$(marker_path "$DIR")
 errs=$(mktemp) || fail "mktemp failed, so the grants cannot be read; not launched"
 granted=""
 push_granted=""
-actions="push pr-create pr-merge issue-close issue-comment issue-create sub-issue"
+actions="push pr-create pr-merge issue-close issue-comment issue-create sub-issue label"
 [ -z "$DIST" ] || actions="$actions distribution-push"
 for action in $actions; do
     cited=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$action" </dev/null 2>"$errs") &&
@@ -338,7 +338,7 @@ command rm -f "$errs"
 pushes="push is git push"
 [ -z "$DIST" ] || pushes="push is git push in this Project's repo, distribution-push is git push in its Distribution repo"
 if [ -n "$granted" ]; then
-    GRANTS="You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/$default ($pushes; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create; sub-issue is a gh api POST to an issue's sub_issues or a PATCH to its sub_issues/priority):$granted
+    GRANTS="You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/$default ($pushes; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create; sub-issue is a gh api POST to an issue's sub_issues or a PATCH to its sub_issues/priority; label is gh issue edit with only --add-label or --remove-label):$granted
 A shared action one of these grants covers goes ahead without asking: when /implement or a capture reaches it, take it, and do not end your turn to ask first."
     [ -z "$push_granted" ] || GRANTS="$GRANTS
 A granted push goes ahead as soon as its grant's conditions hold, before any capture: the supervisor sends /mp-ported-skills:capturing after your turn ends. A commit that capture makes is pushed under the push grant only when the grant's note names a capture's commits, as \`its capture's commits included\` does; otherwise end the capture's turn on \`Waiting on: git push origin $default\`."
@@ -346,7 +346,7 @@ else
     GRANTS="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/$default, holds no standing grant."
 fi
 GRANTS="$GRANTS
-A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create, a gh api link or reorder of a sub-issue) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin $default\`.
+A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create, a gh api link or reorder of a sub-issue, a label edit) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin $default\`.
 Read each file once: read a large file (over about 20KB, or a long one such as a SKILL.md or a test file) with Read in ranges, or grep -n it first and read the range you need, never whole with cat; read one file per call, since a result over the output limit is saved to a file and has to be read again; and do not print a file you have already read in this session unless it has changed since."
 [ -z "$DIST" ] || GRANTS="$GRANTS
 This Project's code lives in its Distribution repo, $DIST, named in docs/agents/distribution-repo.md. Make the ticket's code changes and commits there, by path (\`git -C $DIST\`), on its current branch, with no new branch or worktree; read the ticket and the Project's docs from this folder.

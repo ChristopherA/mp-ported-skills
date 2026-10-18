@@ -42,8 +42,9 @@
 # A branch line's action is always push. A command line's action is the
 # one the hook's own scan names for it (push, distribution-push for a push
 # in the Project's Distribution repo (#141), pr-create, pr-merge,
-# issue-close, issue-comment, issue-create, or sub-issue for a gh api link
-# or reorder of a sub-issue (#162)), or, when the scan names
+# issue-close, issue-comment, issue-create, sub-issue for a gh api link
+# or reorder of a sub-issue (#162), or label for a gh issue edit that only
+# changes labels (#184)), or, when the scan names
 # none, a light word-token guess from its text and the recorded op, good
 # enough to cite a grant, not an enforcement check; a gh write neither
 # names stays ungranted. A `children` entry -- a PR or issue the worker's
@@ -228,7 +229,7 @@ calls() {
 }
 
 # action_for <cmd> <ops>: push, distribution-push, pr-create, pr-merge,
-# issue-close, issue-comment, issue-create, sub-issue, or empty. The action of the
+# issue-close, issue-comment, issue-create, sub-issue, label, or empty. The action of the
 # form the hook itself matched, so the line cites the grant the hook would
 # have let the command through on (#110). When the hook matched no form a grant names --
 # a script whose push Claude Code recorded on the result, say, or a gh

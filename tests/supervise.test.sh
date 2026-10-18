@@ -766,7 +766,7 @@ check "launch: prints the id" "c2a368ee" "$out"
 # It is also told how to read files without paying for them twice (#134).
 read_once="Read each file once: read a large file (over about 20KB, or a long one such as a SKILL.md or a test file) with Read in ranges, or grep -n it first and read the range you need, never whole with cat; read one file per call, since a result over the output limit is saved to a file and has to be read again; and do not print a file you have already read in this session unless it has changed since."
 no_grants="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/main, holds no standing grant.
-A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create, a gh api link or reorder of a sub-issue) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`.
+A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create, a gh api link or reorder of a sub-issue, a label edit) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`.
 $read_once"
 check "launch: flags and the command" "--bg
 --model
@@ -1130,14 +1130,14 @@ git init -q --bare "$work/granted.git"
 git init -q -b main "$granted"
 granted_git() { git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@" >/dev/null 2>&1; }
 tracker_docs "$granted"
-printf '# Supervision\n\n## Grants\n\n- push: to main, once tests pass\n- issue-close\n- issue-comment: findings\n- sub-issue: a capture ticket, under its parent\n\n## Other\n\n- pr-merge\n' \
+printf '# Supervision\n\n## Grants\n\n- push: to main, once tests pass\n- issue-close\n- issue-comment: findings\n- sub-issue: a capture ticket, under its parent\n- label: relabels\n\n## Other\n\n- pr-merge\n' \
     >"$granted/docs/agents/supervision.md"
 granted_git add docs
 granted_git commit -m grants
 granted_git remote add origin "$work/granted.git"
 granted_git push origin main
 granted_git remote set-head origin main
-printf '# Supervision\n\n## Grants\n\n- push: to main, once tests pass\n- issue-close\n- issue-comment: findings\n- sub-issue: a capture ticket, under its parent\n- pr-create\n\n## Other\n\n- pr-merge\n' \
+printf '# Supervision\n\n## Grants\n\n- push: to main, once tests pass\n- issue-close\n- issue-comment: findings\n- sub-issue: a capture ticket, under its parent\n- label: relabels\n- pr-create\n\n## Other\n\n- pr-merge\n' \
     >"$granted/docs/agents/supervision.md"
 granted_git commit -am 'local grant'
 launch_in() { # <dir> [args...] -- launch.sh --dir <dir> with the fake claude
@@ -1148,14 +1148,15 @@ launch_in() { # <dir> [args...] -- launch.sh --dir <dir> with the fake claude
 }
 out=$(launch_in "$granted" --ticket 56 2>/dev/null); rc=$?
 check "launch with grants: exit 0" "0 c2a368ee" "$rc $out"
-check "launch with grants: lists the grants on origin, and only those" "You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/main (push is git push; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create; sub-issue is a gh api POST to an issue's sub_issues or a PATCH to its sub_issues/priority):
+check "launch with grants: lists the grants on origin, and only those" "You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/main (push is git push; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create; sub-issue is a gh api POST to an issue's sub_issues or a PATCH to its sub_issues/priority; label is gh issue edit with only --add-label or --remove-label):
 - push: to main, once tests pass
 - issue-close
 - issue-comment: findings
 - sub-issue: a capture ticket, under its parent
+- label: relabels
 A shared action one of these grants covers goes ahead without asking: when /implement or a capture reaches it, take it, and do not end your turn to ask first.
 A granted push goes ahead as soon as its grant's conditions hold, before any capture: the supervisor sends /mp-ported-skills:capturing after your turn ends. A commit that capture makes is pushed under the push grant only when the grant's note names a capture's commits, as \`its capture's commits included\` does; otherwise end the capture's turn on \`Waiting on: git push origin main\`.
-A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create, a gh api link or reorder of a sub-issue) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`.
+A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create, a gh api link or reorder of a sub-issue, a label edit) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`.
 $read_once" \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d')"
 check "launch with grants: notes the grant committed only locally" "note: docs/agents/supervision.md grants pr-create on the working tree or current branch, not on the committed origin/main; ignored" \
@@ -1818,6 +1819,42 @@ command succeeded granted (sub-issue: a capture ticket, under its parent): gh ap
 command succeeded ungranted: gh api -X DELETE repos/o/r/issues/40/sub_issue -F sub_issue_id=9" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo5" --start "$gstart" </dev/null | grep '^command')"
 
+# A capture's in-motion and live-check relabels cite the label grant (#184);
+# an edit of another field beside a label, or with no label at all, and a
+# label write through gh api, do not.
+{
+    bash_call l1 'gh issue edit 184 --add-label in-motion'
+    bash_call l2 'gh issue edit 118 --remove-label ready-for-agent --add-label ready-for-human'
+    bash_call l3 'gh issue -R o/r edit 5 --add-label=x'
+    bash_call l4 'gh issue edit 5 --add-label x --title y'
+    bash_call l5 'gh issue edit 5 --title y'
+    bash_call l6 'gh api repos/o/r/issues/5/labels -f "labels[]=x"'
+} >"$cfg/projects/-work-project/$sid.jsonl"
+new_grant_repo grepo6 '## Grants
+
+- issue-comment
+'
+check "actions: an ungranted relabel" \
+    "command succeeded ungranted: gh issue edit 184 --add-label in-motion
+command succeeded ungranted: gh issue edit 118 --remove-label ready-for-agent --add-label ready-for-human
+command succeeded ungranted: gh issue -R o/r edit 5 --add-label=x
+command succeeded ungranted: gh issue edit 5 --add-label x --title y
+command succeeded ungranted: gh issue edit 5 --title y
+command succeeded ungranted: gh api repos/o/r/issues/5/labels -f \"labels[]=x\"" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo6" --start "$gstart" </dev/null | grep '^command')"
+new_grant_repo grepo7 '## Grants
+
+- label: in-motion and live-check relabels
+'
+check "actions: a granted relabel is cited, a mixed edit, plain edit or gh api label write is not" \
+    "command succeeded granted (label: in-motion and live-check relabels): gh issue edit 184 --add-label in-motion
+command succeeded granted (label: in-motion and live-check relabels): gh issue edit 118 --remove-label ready-for-agent --add-label ready-for-human
+command succeeded granted (label: in-motion and live-check relabels): gh issue -R o/r edit 5 --add-label=x
+command succeeded ungranted: gh issue edit 5 --add-label x --title y
+command succeeded ungranted: gh issue edit 5 --title y
+command succeeded ungranted: gh api repos/o/r/issues/5/labels -f \"labels[]=x\"" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo7" --start "$gstart" </dev/null | grep '^command')"
+
 # gh pr new is gh's alias for gh pr create (#120), and is read the same.
 {
     bash_call p1 'gh pr create --fill'
@@ -2027,7 +2064,7 @@ dgit "$dproj" add docs
 dgit "$dproj" commit -m "Grant both pushes"
 dgit "$dproj" push origin main
 launch_dir "$dproj" --ticket 56 >/dev/null 2>&1
-check "launch dist: the grants name distribution-push, and which push is which" "You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/main (push is git push in this Project's repo, distribution-push is git push in its Distribution repo; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create; sub-issue is a gh api POST to an issue's sub_issues or a PATCH to its sub_issues/priority):
+check "launch dist: the grants name distribution-push, and which push is which" "You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/main (push is git push in this Project's repo, distribution-push is git push in its Distribution repo; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create; sub-issue is a gh api POST to an issue's sub_issues or a PATCH to its sub_issues/priority; label is gh issue edit with only --add-label or --remove-label):
 - push
 - distribution-push: the code" \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | head -n 3)"

@@ -141,7 +141,7 @@ check "gh issue -R o/r view goes to the real gh" "real gh: issue -R o/r view 3" 
 # action through; gh api stays refused alongside it (#58).
 repo granted
 mkdir -p granted/docs/agents
-printf '## Grants\n\n- push\n- issue-close\n- issue-comment\n- issue-create\n- pr-create\n- sub-issue\n' >granted/docs/agents/supervision.md
+printf '## Grants\n\n- push\n- issue-close\n- issue-comment\n- issue-create\n- pr-create\n- sub-issue\n- label\n' >granted/docs/agents/supervision.md
 git -C granted add docs/agents/supervision.md
 git -C granted -c commit.gpgsign=false commit -q -m grants
 git -C granted push -q origin main 2>/dev/null
@@ -181,6 +181,16 @@ check "a granted sub-issue reorder reaches the real gh" "real gh: api -X PATCH r
     "$(worker 0 granted 'gh api -X PATCH repos/o/r/issues/40/sub_issues/priority -F sub_issue_id=9 -F after_id=8' | head -n 1)"
 check "a sub-issue removal is refused under the grant" "exit=1" \
     "$(last "$(worker 0 granted 'gh api -X DELETE repos/o/r/issues/40/sub_issue -F sub_issue_id=9')")"
+# The label grant (#184) covers a gh issue edit that only changes labels,
+# by the real argv, so a quoted separator in a label cannot hide a title.
+check "an ungranted label edit from a script is refused" "exit=1" \
+    "$(last "$(worker 0 plain 'sh -c "gh issue edit 5 --add-label in-motion"')")"
+check "a granted label edit from a script reaches the real gh" "real gh: issue edit 118 --remove-label ready-for-agent --add-label ready-for-human" \
+    "$(worker 0 granted 'sh -c "gh issue edit 118 --remove-label ready-for-agent --add-label ready-for-human"' | head -n 1)"
+check "a label edit with a title is refused under the grant" "exit=1" \
+    "$(last "$(worker 0 granted 'sh -c "gh issue edit 5 --add-label \"a;b\" --title t"')")"
+check "a gh issue edit with no label flag reaches the real gh" "real gh: issue edit 5 --title t" \
+    "$(worker 0 plain 'sh -c "gh issue edit 5 --title t"' | head -n 1)"
 # The comment grant posts a new comment only (#113), and no grant covers
 # a GraphQL mutation.
 check "a granted repo's issue comment --edit-last is refused" "exit=1" \
