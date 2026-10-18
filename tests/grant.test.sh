@@ -181,6 +181,18 @@ push_main "$repo"
 check "sub-issue: cites the whole bullet" "sub-issue: tickets a capture files, under the parent" "$(grant sub-issue)"
 out=$(grant issue-create); rc=$?
 check "sub-issue: issue-create not granted" "1 " "$rc $out"
+out=$(grant label); rc=$?
+check "sub-issue: label not granted" "1 " "$rc $out"
+# label (#184), granted on its own.
+commit_file "$repo" docs/agents/supervision.md \
+'## Grants
+
+- label: in-motion and live-check relabels
+' "grant label"
+push_main "$repo"
+check "label: cites the whole bullet" "label: in-motion and live-check relabels" "$(grant label)"
+out=$(grant sub-issue); rc=$?
+check "label: sub-issue not granted" "1 " "$rc $out"
 commit_file "$repo" docs/agents/supervision.md \
 '## Grants
 

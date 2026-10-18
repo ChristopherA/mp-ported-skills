@@ -93,7 +93,7 @@ check "unattended, ungranted: prints ungranted" "ungranted" "$out"
 # A capture's findings (#110): a comment on an open ticket maps to
 # issue-comment and a new ticket to issue-create, each granted or not on
 # its own, the same as a push. Attended, both still ask.
-for action in issue-comment issue-create sub-issue; do
+for action in issue-comment issue-create sub-issue label; do
     out=$(bc 0 "$action"); rc=$?
     check "unattended, no $action grant: exit 0" "0" "$rc"
     check "unattended, no $action grant: ungranted" "ungranted" "$out"
@@ -105,6 +105,7 @@ commit_file "$repo" docs/agents/supervision.md '## Grants
 - issue-comment: findings for open tickets
 - issue-create
 - sub-issue: tickets a capture files, under the parent
+- label: in-motion and live-check relabels
 ' "grant the capture's findings"
 push_main "$repo"
 out=$(bc 0 issue-comment); rc=$?
@@ -113,6 +114,8 @@ check "unattended, issue-comment granted: cites the grant" "granted: issue-comme
 check "unattended, issue-create granted: cites the grant" "granted: issue-create" "$(bc 0 issue-create)"
 check "unattended, sub-issue granted: cites the grant" "granted: sub-issue: tickets a capture files, under the parent" "$(bc 0 sub-issue)"
 check "attended, sub-issue granted: still asks" "attended" "$(bc 1 sub-issue)"
+check "unattended, label granted: cites the grant" "granted: label: in-motion and live-check relabels" "$(bc 0 label)"
+check "attended, label granted: still asks" "attended" "$(bc 1 label)"
 check "attended, issue-comment granted: still asks" "attended" "$(bc 1 issue-comment)"
 
 # Unattended, a pushed grant exists but on another ref: a working-tree-only

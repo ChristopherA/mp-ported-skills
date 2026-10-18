@@ -9,14 +9,16 @@
 # main has no branch protection, and the auto-mode classifier only makes a
 # judgment call, not a rule. This hook refuses a Bash command that runs
 # `git push`, `gh pr create`, `gh pr merge`, `gh issue close`,
-# `gh issue comment`, `gh issue create` (#110), or a `gh api` write that
-# reaches the same actions, and points the worker at the supervisor and
+# `gh issue comment`, `gh issue create` (#110), a `gh issue edit` that adds
+# or removes a label (#184), or a `gh api` write that reaches the same
+# actions, and points the worker at the supervisor and
 # docs/agents/supervision.md (#58) as the route to a shared action -- unless
 # `grant.sh` finds a standing grant for that same action on the committed
 # default branch, in which case this hook lets the command through. A `git
 # push` or gh write whose action grant.sh cannot name (a gh api form other
 # than an issue comment, a new issue, or a sub-issue link or reorder (#162),
-# or a command piped into a shell) is never granted: a grant covers a form
+# a label write through gh api, a `gh issue edit` that changes another field
+# beside its labels, or a command piped into a shell) is never granted: a grant covers a form
 # this hook can tell apart from the others, and those cannot be told apart
 # from each other, so they stay refused on purpose.
 #
@@ -236,7 +238,7 @@ if [ -z "$matched" ] && [ -n "$piped" ]; then
     has() { printf '%s\n' "$words" | grep -qx -- "$1"; }
     if has git && has push; then
         matched="git push (piped into a shell)"
-    elif has gh && { { has pr && { has create || has merge; }; } || { has issue && { has close || has comment || has create || has new; }; }; }; then
+    elif has gh && { { has pr && { has create || has merge; }; } || { has issue && { has close || has comment || has create || has new || { has edit && { has --add-label || has --remove-label; }; }; }; }; }; then
         matched="gh (piped into a shell)"
     fi
 fi
@@ -257,6 +259,15 @@ if [ "$matched" = "gh issue comment" ]; then
         matched="gh issue comment (delete)"
     elif printf '%s\n' "$words" | grep -qx -- --edit-last; then
         matched="gh issue comment (edit)"
+    fi
+fi
+# A label value can hold a separator too (`--add-label "a;b" --title t`).
+# The label grant covers labels only (#184), so look for any other field
+# gh issue edit sets in the whole command.
+if [ "$matched" = "gh issue edit (label)" ]; then
+    words=$(printf '%s' "$cmd" | tr -c 'A-Za-z0-9_-' '\n')
+    if printf '%s\n' "$words" | grep -Eqx -- '-[tbFm]|--(title|body|body-file|milestone|parent|attach|type|remove-(milestone|parent|type)|(add|remove)-(assignee|blocked-by|blocking|project|sub-issue))'; then
+        matched="gh issue edit (label and other fields)"
     fi
 fi
 

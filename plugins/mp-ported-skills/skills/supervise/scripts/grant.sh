@@ -14,14 +14,15 @@
 #   - <action>
 #   - <action>: <note>
 # <action> is push, distribution-push, pr-create, pr-merge, issue-close,
-# issue-comment, issue-create or sub-issue. push is a push in DIR's own
+# issue-comment, issue-create, sub-issue or label. push is a push in DIR's own
 # repo, and distribution-push one in the Distribution repo DIR names (#141);
 # sub-issue links an issue under a parent or reorders a parent's sub-issues
-# (#162). The first
+# (#162); label adds or removes a label with gh issue edit, and changes no
+# other field (#184). The first
 # match wins; its whole bullet text (action, and the note if any) is the citation.
 #
 # Usage:
-#   grant.sh --dir DIR --action <push|distribution-push|pr-create|pr-merge|issue-close|issue-comment|issue-create|sub-issue>
+#   grant.sh --dir DIR --action <push|distribution-push|pr-create|pr-merge|issue-close|issue-comment|issue-create|sub-issue|label>
 #
 # Prints the citation and exits 0 when granted. Exits 1 with nothing on
 # stdout when not: no file at that ref, no "## Grants" section, or no
@@ -40,7 +41,7 @@ while [ $# -gt 0 ]; do
         --dir)    need_value "$@"; DIR="$2"; shift 2 ;;
         --action) need_value "$@"; ACTION="$2"; shift 2 ;;
         --help)
-            printf 'Usage: grant.sh --dir DIR --action <push|distribution-push|pr-create|pr-merge|issue-close|issue-comment|issue-create|sub-issue>\n'
+            printf 'Usage: grant.sh --dir DIR --action <push|distribution-push|pr-create|pr-merge|issue-close|issue-comment|issue-create|sub-issue|label>\n'
             printf 'Prints the citation and exits 0 when the action is granted on the committed default branch; exits 1 otherwise.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
@@ -50,8 +51,8 @@ fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 [ -n "$DIR" ] || fail "--dir is required"
 [ -d "$DIR" ] || fail "not a directory: $DIR"
 case "$ACTION" in
-    push | distribution-push | pr-create | pr-merge | issue-close | issue-comment | issue-create | sub-issue) ;;
-    *) fail "--action must be push, distribution-push, pr-create, pr-merge, issue-close, issue-comment, issue-create or sub-issue, not '$ACTION'" ;;
+    push | distribution-push | pr-create | pr-merge | issue-close | issue-comment | issue-create | sub-issue | label) ;;
+    *) fail "--action must be push, distribution-push, pr-create, pr-merge, issue-close, issue-comment, issue-create, sub-issue or label, not '$ACTION'" ;;
 esac
 git -C "$DIR" rev-parse --git-dir >/dev/null 2>&1 || fail "not a git checkout: $DIR"
 

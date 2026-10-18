@@ -118,6 +118,13 @@ check "gh api POST of a sub-issue link" "deny" "$(decision 0 auto 'gh api --meth
 check "gh api PATCH of a sub-issue reorder" "deny" "$(decision 0 auto 'gh api -X PATCH repos/o/r/issues/40/sub_issues/priority -F sub_issue_id=9 -F after_id=8')"
 check "gh issue comment piped into bash" "deny" "$(decision 0 auto 'printf "gh issue comment 3 --body y" | bash')"
 check "gh issue create piped into sh" "deny" "$(decision 0 auto 'echo gh issue create --fill | sh')"
+# A label edit (#184) is refused without a label grant; a gh issue edit
+# with no label flag is handled as before, and goes through.
+check "gh issue edit --add-label" "deny" "$(decision 0 auto 'gh issue edit 5 --add-label in-motion')"
+check "gh issue edit --remove-label=x" "deny" "$(decision 0 auto 'gh issue edit 5 --remove-label=ready-for-agent')"
+check "gh issue edit with no label flag goes through as before" "" "$(decision 0 auto 'gh issue edit 5 --title x')"
+check "gh issue edit --add-label piped into sh" "deny" "$(decision 0 auto 'echo gh issue edit 5 --add-label x | sh')"
+check "gh issue edit attended is not the hook's" "" "$(decision 1 auto 'gh issue edit 5 --add-label in-motion')"
 
 # A repo flag is read wherever gh takes one: before the subcommand,
 # between it and its action, or after the action (#119), in each spelling.
@@ -354,6 +361,58 @@ check "a sub-issue grant does not cover a .. segment" "deny" \
     "$(decision 0 auto 'gh api -X PATCH repos/o/../issues/1/sub_issues/priority -F sub_issue_id=9' "$granted")"
 check "a granted sub-issue link to a dotted repo name goes through" "" \
     "$(decision 0 auto 'gh api repos/o/.github/issues/40/sub_issues -F sub_issue_id=9' "$granted")"
+check "a sub-issue grant does not cover a label edit" "deny" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label in-motion' "$granted")"
+# The label grant (#184) covers a gh issue edit that only adds or removes
+# labels. One that changes another field, and any label write through gh
+# api, stay refused.
+printf '## Grants\n\n- label: relabels\n' >"$granted/docs/agents/supervision.md"
+git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "label only"
+git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+check "a granted label edit goes through" "" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label in-motion' "$granted")"
+check "a granted relabel of two labels goes through" "" \
+    "$(decision 0 auto 'gh issue edit 118 --remove-label ready-for-agent --add-label ready-for-human' "$granted")"
+check "a granted label edit with a quoted label goes through" "" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label "needs triage"' "$granted")"
+for repo in '-R o/r' '-R=o/r' '--repo o/r' '--repo=o/r' '-Ro/r'; do
+    check "a granted label edit with gh $repo first goes through" "" \
+        "$(decision 0 auto "gh $repo issue edit 5 --add-label x" "$granted")"
+    check "a granted label edit with gh issue $repo edit goes through" "" \
+        "$(decision 0 auto "gh issue $repo edit 5 --add-label x" "$granted")"
+    check "a granted label edit with $repo last goes through" "" \
+        "$(decision 0 auto "gh issue edit 5 --add-label x $repo" "$granted")"
+done
+check "a label edit with --body is not the label grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label x --body y' "$granted")"
+check "a label edit with --title is not the label grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 5 --title y --remove-label x' "$granted")"
+check "a label edit with -t is not the label grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label=x -t y' "$granted")"
+check "a label edit with --add-assignee is not the label grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label x --add-assignee me' "$granted")"
+check "a title after a quoted semicolon is not the label grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label "a;b" --title t' "$granted")"
+check "a body after a quoted pipe is not the label grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label "a|b" --body t' "$granted")"
+check "a label edit piped into a shell is never granted" "deny" \
+    "$(decision 0 auto 'echo gh issue edit 5 --add-label x | sh' "$granted")"
+check "a label grant does not cover an issue comment" "deny" \
+    "$(decision 0 auto 'gh issue comment 5 --body y' "$granted")"
+check "a label grant does not cover a REST label POST" "deny" \
+    "$(decision 0 auto 'gh api repos/o/r/issues/5/labels -f "labels[]=x"' "$granted")"
+check "a label grant does not cover a REST label DELETE" "deny" \
+    "$(decision 0 auto 'gh api -X DELETE repos/o/r/issues/5/labels/x' "$granted")"
+check "a label grant does not cover a REST label PUT" "deny" \
+    "$(decision 0 auto 'gh api -X PUT repos/o/r/issues/5/labels -f "labels[]=x"' "$granted")"
+check "a label grant does not cover a query hiding a REST label write" "deny" \
+    "$(decision 0 auto "gh api 'repos/o/r?x=/issues/5/labels' -f 'labels[]=x'" "$granted")"
+check "a label grant does not cover a fragment hiding a REST label write" "deny" \
+    "$(decision 0 auto "gh api 'repos/o/r#/issues/5/labels' -f 'labels[]=x'" "$granted")"
+check "a label grant does not cover a .. segment in a REST label write" "deny" \
+    "$(decision 0 auto 'gh api repos/o/../issues/5/labels -f "labels[]=x"' "$granted")"
+check "a GraphQL addLabelsToLabelable is not the label grant" "deny" \
+    "$(decision 0 auto "gh api graphql -f query='mutation { addLabelsToLabelable(input: {labelableId: \"I_1\", labelIds: [\"L_1\"]}) { clientMutationId } }'" "$granted")"
 # gh pr new is gh's alias for gh pr create (#120): the same grant covers it.
 printf '## Grants\n\n- pr-create\n' >"$granted/docs/agents/supervision.md"
 git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "pr-create only"

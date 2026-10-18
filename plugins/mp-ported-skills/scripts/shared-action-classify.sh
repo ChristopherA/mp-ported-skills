@@ -132,6 +132,28 @@ classify_gh() {
         done
         ;;
     issue/create | issue/new) matched="gh issue create" ;;
+    issue/edit)
+        # A label edit, for the label grant (#184): a gh issue edit with
+        # --add-label or --remove-label and no other edit flag. Every word is
+        # looked at, the ones before the action included; a repo flag is
+        # passed over, and words that are not flags (issue numbers, label
+        # values) are ignored, so a flag value that starts with - counts as
+        # another field and refuses. An edit with no label flag is left
+        # unmatched, as it was before.
+        _clabel="" _cother=""
+        for _carg in "$@"; do
+            case "$_carg" in
+            --add-label | --remove-label | --add-label=* | --remove-label=*) _clabel=yes ;;
+            -R | --repo | --repo=* | -R?*) ;;
+            -*) _cother=yes ;;
+            esac
+        done
+        if [ -n "$_clabel" ] && [ -n "$_cother" ]; then
+            matched="gh issue edit (label and other fields)"
+        elif [ -n "$_clabel" ]; then
+            matched="gh issue edit (label)"
+        fi
+        ;;
     api/*)
         # A write through the REST or GraphQL API reaches the same
         # actions: a POST, PUT, PATCH or DELETE on pulls, issues, merges,
@@ -204,9 +226,10 @@ classify_gh() {
 # The action a grant names for a matched form, or nothing for a form no
 # grant covers: the piped-into-a-shell fallback and the other gh api forms,
 # which do not say which action they reach, and an issue comment's edit or
-# delete (#113). The two gh api POSTs above that name an issue comment or a
-# new issue map to that action (#110), and the sub-issue link and reorder
-# map to sub-issue (#162).
+# delete (#113), and a gh issue edit that changes more than labels (#184).
+# The two gh api POSTs above that name an issue comment or a new issue map
+# to that action (#110), the sub-issue link and reorder map to sub-issue
+# (#162), and a label-only gh issue edit maps to label (#184).
 grant_action() { # <matched>
     case "$1" in
     "git push (piped"* | "gh (piped"*) ;;
@@ -218,5 +241,6 @@ grant_action() { # <matched>
     "gh issue comment" | "gh api POST (issue comment)") echo issue-comment ;;
     "gh issue create"* | "gh api POST (issue create)") echo issue-create ;;
     "gh api POST (sub-issue link)" | "gh api PATCH (sub-issue reorder)") echo sub-issue ;;
+    "gh issue edit (label)") echo label ;;
     esac
 }
