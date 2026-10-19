@@ -73,7 +73,9 @@
 #   <action> posted by the supervisor on the maintainer's approval: <url>
 # read from the checkout's `git rev-parse --git-path mp-supervise-posted`,
 # where post.sh records each post by worker id; <action> is issue-comment
-# or issue-create.
+# or issue-create. A ticket close.sh closed there after a landed
+# Distribution push (#186) is listed as
+#   issue-close by the supervisor after the Distribution push landed: <url>
 #
 # The job's state.json and the transcripts are read under
 # $CLAUDE_CONFIG_DIR, the transcript by session id in any project folder,
@@ -478,7 +480,9 @@ fi
 
 posted=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-posted 2>/dev/null)
 if [ -f "$posted" ]; then
-    supervisor_posts=$(awk -v id="$ID" '$1 == id { print $3 " posted by the supervisor on the maintainer'"'"'s approval: " $4 }' "$posted")
+    supervisor_posts=$(awk -v id="$ID" '
+        $1 == id && $3 == "issue-close" { print "issue-close by the supervisor after the Distribution push landed: " $4; next }
+        $1 == id { print $3 " posted by the supervisor on the maintainer'"'"'s approval: " $4 }' "$posted")
     [ -z "$supervisor_posts" ] || add "$supervisor_posts"
 fi
 
