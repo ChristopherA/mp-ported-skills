@@ -305,6 +305,32 @@ check "distribution-push grant: and from a session in it, by its marker" "" \
     "$(decision 0 auto "git push origin main" "$hdist")"
 check "distribution-push grant alone: the Project's own push is refused" "deny" \
     "$(decision 0 auto "git push origin main" "$hproj")"
+# The issue-close grant covers the worker's ticket after its work is pushed
+# (#186): while the Distribution repo holds commits its upstream lacks, the
+# close is refused and waits for Push on approval.
+printf '## Grants\n\n- issue-close\n' >"$hproj/docs/agents/supervision.md"
+dgit_in "$hproj" commit -q -am 'issue-close only'
+dgit_in "$hproj" push -q origin main 2>/dev/null
+dgit_in "$hdist" branch -q -u origin/main main
+check "issue-close grant, Distribution repo pushed: the close goes through" "" \
+    "$(decision 0 auto 'gh issue close 186 --comment done' "$hproj")"
+dgit_in "$hdist" commit -q --allow-empty -m 'the ticket code'
+check "issue-close grant, Distribution commit unpushed: the close is refused" "deny" \
+    "$(decision 0 auto 'gh issue close 186 --comment done' "$hproj")"
+check "issue-close grant, Distribution commit unpushed: the reason names the repo and the wait" \
+    "A background session in auto mode cannot run 'gh issue close' yet (#186): Distribution repo $hdist_real holds 1 commit its upstream lacks, and the issue-close grant covers the ticket only after its work is pushed. List the close with the push, as \`Waiting on: git -C $hdist_real push; gh issue close <N>\`: /supervise closes the ticket after the push lands." \
+    "$(reason 0 auto 'gh issue close 186' "$hproj")"
+check "issue-close grant, Distribution commit unpushed: refused from a session in the Distribution repo too" "deny" \
+    "$(decision 0 auto 'gh issue close 186' "$hdist")"
+check "issue-close grant, Distribution commit unpushed: a comment is not held" "deny" \
+    "$(decision 0 auto 'gh issue comment 186 --body x' "$hproj")"
+dgit_in "$hdist" push -q origin main 2>/dev/null
+check "issue-close grant, Distribution commit pushed: the close goes through again" "" \
+    "$(decision 0 auto 'gh issue close 186' "$hproj")"
+dgit_in "$hdist" checkout -q -b local-only
+check "issue-close grant, Distribution branch with no upstream: the close is refused" "deny" \
+    "$(decision 0 auto 'gh issue close 186' "$hproj")"
+dgit_in "$hdist" checkout -q main
 
 ungranted=$(mktemp -d)
 git init -q -b main "$ungranted"

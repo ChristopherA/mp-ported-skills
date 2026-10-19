@@ -329,6 +329,15 @@ case "$matched" in git*) grant_dir=$classify_dir ;; esac
 if [ -n "$action" ]; then
     grant_sh="${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}/skills/supervise/scripts/grant.sh"
     if [ -f "$grant_sh" ] && sh "$grant_sh" --dir "$grant_dir" --action "$action" >/dev/null 2>&1; then
+        # A granted close waits while the Project's Distribution repo holds
+        # unpushed commits (#186): the grant covers the ticket after its
+        # work is pushed, and that push is Push on approval's.
+        [ "$action" = issue-close ] && classify_close_held "$grant_dir"
+        if [ "$action" = issue-close ] && [ -n "$classify_held" ]; then
+            jq -cn --arg reason "$(close_held_reason)" \
+                '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
+            exit 0
+        fi
         exit 0
     fi
 fi
