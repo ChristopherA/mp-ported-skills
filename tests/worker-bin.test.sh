@@ -269,6 +269,24 @@ git -C proj -c commit.gpgsign=false commit -q --allow-empty -m capture2
 check "distribution-push grant alone: the Project's own push is refused" "exit=1" \
     "$(last "$(worker 0 proj 'git push -q origin main')")"
 
+# The issue-close grant covers the ticket only after its work is pushed
+# (#186): a close waits while the Distribution repo is ahead of its upstream.
+printf '## Grants\n\n- issue-close\n' >proj/docs/agents/supervision.md
+git -C proj -c commit.gpgsign=false commit -q -am 'grant issue-close'
+git -C proj push -q origin main 2>/dev/null
+git -C dist branch -q -u origin/main main
+check "issue-close grant, Distribution repo pushed: the close reaches the real gh" "real gh: issue close 7" \
+    "$(worker 0 proj 'sh -c "gh issue close 7"' | head -n 1)"
+git -C dist -c commit.gpgsign=false commit -q --allow-empty -m unpushed
+out=$(worker 0 proj 'sh -c "gh issue close 7"')
+check "issue-close grant, Distribution repo ahead: the close is refused" "exit=1" "$(last "$out")"
+check "the held close never reached the real gh" "0" "$(printf '%s\n' "$out" | grep -c 'real gh')"
+check "the refusal names the unpushed commit" "1" \
+    "$(printf '%s\n' "$out" | grep -c "Distribution repo $dist_real holds 1 commit its upstream lacks")"
+git -C dist push -q origin main 2>/dev/null
+check "issue-close grant, after the push: the close goes through again" "real gh: issue close 7" \
+    "$(worker 0 proj 'gh issue close 7' | head -n 1)"
+
 # The maintainer's own session: if the env file reached it, the wrappers
 # still let everything through.
 git -C plain -c commit.gpgsign=false commit -q --allow-empty -m attended

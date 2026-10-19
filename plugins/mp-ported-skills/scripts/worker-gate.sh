@@ -43,7 +43,10 @@ fi
 
 . "$here/shared-action-classify.sh"
 matched=""
-classify_git_cmd=$real
+# The real git, so an alias lookup does not run this wrapper again; for gh,
+# git on PATH (the wrapper passes a read such as rev-list straight through).
+classify_git_cmd=git
+[ "$prog" != git ] || classify_git_cmd=$real
 classify_base=$PWD
 classify_text="$*"
 classify_session=$PWD
@@ -62,6 +65,13 @@ action=$(grant_action "$matched")
 grant_dir=$PWD
 case "$matched" in git*) grant_dir=$classify_dir ;; esac
 if [ -n "$action" ] && sh "$here/../skills/supervise/scripts/grant.sh" --dir "$grant_dir" --action "$action" >/dev/null 2>&1; then
+    # A granted close waits while the Project's Distribution repo holds
+    # unpushed commits (#186), as in deny-shared-actions.sh.
+    [ "$action" = issue-close ] && classify_close_held "$grant_dir"
+    if [ "$action" = issue-close ] && [ -n "$classify_held" ]; then
+        printf '%s\n' "$(close_held_reason)" >&2
+        exit 1
+    fi
     exec "$real" "$@"
 fi
 
