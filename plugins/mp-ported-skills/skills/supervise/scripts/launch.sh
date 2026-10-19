@@ -350,7 +350,8 @@ A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue c
 Read each file once: read a large file (over about 20KB, or a long one such as a SKILL.md or a test file) with Read in ranges, or grep -n it first and read the range you need, never whole with cat; read one file per call, since a result over the output limit is saved to a file and has to be read again; and do not print a file you have already read in this session unless it has changed since."
 [ -z "$DIST" ] || GRANTS="$GRANTS
 This Project's code lives in its Distribution repo, $DIST, named in docs/agents/distribution-repo.md. Make the ticket's code changes and commits there, by path (\`git -C $DIST\`), on its current branch, with no new branch or worktree; read the ticket and the Project's docs from this folder.
-A push in the Distribution repo is covered only by a distribution-push grant, never by push (#141). With none, do not push it: end your turn on \`Waiting on: git -C $DIST push origin $dist_default\`, or, when this Project's push waits too, on \`Waiting on: git push origin $default; git -C $DIST push origin $dist_default\`."
+A push in the Distribution repo is covered only by a distribution-push grant, never by push (#141). With none, do not push it: end your turn on \`Waiting on: git -C $DIST push origin $dist_default\`, or, when this Project's push waits too, on \`Waiting on: git push origin $default; git -C $DIST push origin $dist_default\`.
+Closing the ticket waits for the Distribution push, under an issue-close grant or not (#186): while the Distribution repo holds commits its upstream lacks, do not close it, and name the close with the push, as \`Waiting on: git -C $DIST push origin $dist_default; gh issue close $TICKET\`. /supervise closes the ticket after the push lands."
 
 # The worker's name (#103), in characters, not bytes, whatever the locale.
 NAME="worker ${top##*/} #$TICKET"

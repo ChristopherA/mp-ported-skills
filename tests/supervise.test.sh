@@ -2053,10 +2053,12 @@ $dist
 --disallowedTools" "$(sed -n '/^--add-dir$/,/^--disallowedTools$/p' "$fake/args")"
 check "launch dist: runs in the Project folder" "$dproj" "$(command cat "$fake/cwd")"
 check "launch dist: the worker is told the repo" "This Project's code lives in its Distribution repo, $dist, named in docs/agents/distribution-repo.md. Make the ticket's code changes and commits there, by path (\`git -C $dist\`), on its current branch, with no new branch or worktree; read the ticket and the Project's docs from this folder." \
-    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 2 | head -n 1)"
-check "launch dist: the worker is told how to read files, before the repo (#134)" "$read_once" \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 3 | head -n 1)"
+check "launch dist: the worker is told how to read files, before the repo (#134)" "$read_once" \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 4 | head -n 1)"
 check "launch dist: the worker is told a Distribution repo push needs distribution-push (#141)" "A push in the Distribution repo is covered only by a distribution-push grant, never by push (#141). With none, do not push it: end your turn on \`Waiting on: git -C $dist push origin main\`, or, when this Project's push waits too, on \`Waiting on: git push origin main; git -C $dist push origin main\`." \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 2 | head -n 1)"
+check "launch dist: the worker is told the close waits for the Distribution push (#186)" "Closing the ticket waits for the Distribution push, under an issue-close grant or not (#186): while the Distribution repo holds commits its upstream lacks, do not close it, and name the close with the push, as \`Waiting on: git -C $dist push origin main; gh issue close 56\`. /supervise closes the ticket after the push lands." \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 1)"
 check "launch dist: the Project's marker names the repo" "c2a368ee
 distribution $dist" "$(command cat "$dproj_marker")"
