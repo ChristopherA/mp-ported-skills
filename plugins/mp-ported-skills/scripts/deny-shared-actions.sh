@@ -14,7 +14,9 @@
 # actions, and points the worker at the supervisor and
 # docs/agents/supervision.md (#58) as the route to a shared action -- unless
 # `grant.sh` finds a standing grant for that same action on the committed
-# default branch, in which case this hook lets the command through. A `git
+# default branch, in which case this hook lets the command through, except
+# a granted `gh issue close` while the Project's Distribution repo holds
+# commits its upstream lacks (classify_close_held, #186). A `git
 # push` or gh write whose action grant.sh cannot name (a gh api form other
 # than an issue comment, a new issue, or a sub-issue link or reorder (#162),
 # a label write through gh api, a `gh issue edit` that changes another field
