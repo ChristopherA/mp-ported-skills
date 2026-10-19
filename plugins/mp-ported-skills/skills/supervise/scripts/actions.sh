@@ -173,6 +173,17 @@ gh_write_words() {
     case "$gh_act" in
         '' | -* | view | list | status | diff | checks | checkout) return 0 ;;
     esac
+    # A help flag right after the action prints help and runs nothing
+    # (`gh issue edit --help`). Only there: a later --help can be a value.
+    _gw_seen=""
+    for _gw in "$@"; do
+        if [ "$_gw_seen" = act ]; then
+            case "$_gw" in --help | -h) return 0 ;; esac
+            break
+        fi
+        if [ "$_gw_seen" = sub ] && [ "$_gw" = "$gh_act" ]; then _gw_seen=act; continue; fi
+        [ "$_gw" != "$gh_sub" ] || _gw_seen=sub
+    done
     echo yes
 }
 

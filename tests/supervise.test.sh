@@ -1821,7 +1821,8 @@ command succeeded ungranted: gh api -X DELETE repos/o/r/issues/40/sub_issue -F s
 
 # A capture's in-motion and live-check relabels cite the label grant (#184);
 # an edit of another field beside a label, or with no label at all, and a
-# label write through gh api, do not.
+# label write through gh api, do not. A help flag right after the action
+# runs nothing and is no action; a later one is a label's value.
 {
     bash_call l1 'gh issue edit 184 --add-label in-motion'
     bash_call l2 'gh issue edit 118 --remove-label ready-for-agent --add-label ready-for-human'
@@ -1829,6 +1830,9 @@ command succeeded ungranted: gh api -X DELETE repos/o/r/issues/40/sub_issue -F s
     bash_call l4 'gh issue edit 5 --add-label x --title y'
     bash_call l5 'gh issue edit 5 --title y'
     bash_call l6 'gh api repos/o/r/issues/5/labels -f "labels[]=x"'
+    bash_call l7 'gh issue edit --help 2>&1 | sed -n "/FLAGS/,/INHERITED/p"'
+    bash_call l8 'gh issue edit -h'
+    bash_call l9 'gh issue edit 5 --add-label --help'
 } >"$cfg/projects/-work-project/$sid.jsonl"
 new_grant_repo grepo6 '## Grants
 
@@ -1840,7 +1844,8 @@ command succeeded ungranted: gh issue edit 118 --remove-label ready-for-agent --
 command succeeded ungranted: gh issue -R o/r edit 5 --add-label=x
 command succeeded ungranted: gh issue edit 5 --add-label x --title y
 command succeeded ungranted: gh issue edit 5 --title y
-command succeeded ungranted: gh api repos/o/r/issues/5/labels -f \"labels[]=x\"" \
+command succeeded ungranted: gh api repos/o/r/issues/5/labels -f \"labels[]=x\"
+command succeeded ungranted: gh issue edit 5 --add-label --help" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo6" --start "$gstart" </dev/null | grep '^command')"
 new_grant_repo grepo7 '## Grants
 
@@ -1852,7 +1857,8 @@ command succeeded granted (label: in-motion and live-check relabels): gh issue e
 command succeeded granted (label: in-motion and live-check relabels): gh issue -R o/r edit 5 --add-label=x
 command succeeded ungranted: gh issue edit 5 --add-label x --title y
 command succeeded ungranted: gh issue edit 5 --title y
-command succeeded ungranted: gh api repos/o/r/issues/5/labels -f \"labels[]=x\"" \
+command succeeded ungranted: gh api repos/o/r/issues/5/labels -f \"labels[]=x\"
+command succeeded ungranted: gh issue edit 5 --add-label --help" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo7" --start "$gstart" </dev/null | grep '^command')"
 
 # gh pr new is gh's alias for gh pr create (#120), and is read the same.
