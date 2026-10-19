@@ -15,8 +15,9 @@
 #   ticket  confirming the ticket it was launched on, "Proceed with #N?"
 #           and close forms, naming no other ticket, as the whole sentence;
 #   grant   one shared action (push, pr-create, pr-merge, issue-close,
-#           issue-comment, issue-create, or sub-issue for a `Waiting on:`
-#           gh api link or reorder) that grant.sh finds granted on the
+#           issue-comment, issue-create, sub-issue for a `Waiting on:`
+#           gh api link or reorder, or label for a `Waiting on:` gh issue
+#           edit that only adds or removes labels) that grant.sh finds granted on the
 #           default branch as committed on origin, asked about anyway.
 # Anything else is not: a question that offers a choice (" or "), names
 # another ticket or several actions, an action no grant covers, a block that
@@ -119,6 +120,9 @@ read_out=$(jq -s --arg n "$TICKET" '
         elif test("^gh issue comment\\b") then "issue-comment"
         elif test("^gh issue (create|new)\\b") then "issue-create"
         elif test("^gh api ") then sub_issue_api
+        # A gh issue edit is named by the classifier the hook uses, below,
+        # so the two cannot drift: a label-only edit is the label action.
+        elif test("^gh ") and test("(^| )edit( |$)") then "classify"
         else null end;
     # The words a go-ahead question may open with, before its verb.
     def lead: "^(ok(ay)?,? )?((shall|should|can|may) i |do you want me to |want me to |ready to |ok(ay)? to )?(go ahead and )?";
@@ -157,7 +161,7 @@ read_out=$(jq -s --arg n "$TICKET" '
         else {q: ($ask[0].question // "" | norm)} end
       elif ($lastline | test("^\\s*Waiting on:")) then
         ($lastline | sub("^\\s*Waiting on:\\s*"; "") | norm) as $cmd
-        | {q: "Waiting on: \($cmd)", waiting: true,
+        | {q: "Waiting on: \($cmd)", waiting: true, cmd: ($cmd | gsub("`"; "")),
            action: (if ($cmd | test("&&|\\|\\||;|\\|")) then "several" else ($cmd | gsub("`"; "") | action_of_command) end)}
       elif $text == "" then {why: "its last message holds no text and no question"}
       elif ($text | test("\\?$") | not) then {why: "its last message does not end on a question"}
@@ -191,6 +195,20 @@ why=$(printf '%s' "$read_out" | jq -r '.why // empty')
 kind=$(printf '%s' "$read_out" | jq -r '.kind // empty')
 action=$(printf '%s' "$read_out" | jq -r '.action // empty')
 quoted=$(printf '%s' "$read_out" | jq -r '.quoted // empty')
+if [ "$action" = classify ]; then
+    # The Waiting on: command's words, read by shared-action-classify.sh as
+    # the hook reads a command; a form no grant names cannot be answered.
+    . "$SCRIPT_DIR/../../../scripts/shared-action-classify.sh"
+    matched=""
+    set -f
+    # shellcheck disable=SC2046
+    set -- $(printf '%s' "$read_out" | jq -r '.cmd')
+    set +f
+    shift
+    classify_gh "$@"
+    action=$(grant_action "$matched")
+    [ -n "$action" ] || why="it waits on an action no grant can cover"
+fi
 if [ -z "$why" ]; then
     case $kind in
         ticket | grant) ;;

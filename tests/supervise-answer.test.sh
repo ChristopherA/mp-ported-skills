@@ -280,6 +280,33 @@ last_says "Waiting on: gh api -X PATCH 'repos/o/r?x=/issues/40/sub_issues/priori
 run_as 'blocked input needed'
 not_routine "a query hiding a repo PATCH under the grant" "it waits on an action no grant can cover"
 
+# A capture waiting on a relabel reads as the label action (#184), named by
+# the classifier the hook uses; an edit of another field does not.
+relabel='gh issue edit 118 --remove-label ready-for-agent --add-label ready-for-human'
+last_says "Waiting on: $relabel"
+run_as 'blocked input needed'
+not_routine "a relabel, no grant" "no standing grant covers label"
+last_says 'Waiting on: gh issue edit 118 --add-label in-motion --title t'
+run_as 'blocked input needed'
+not_routine "a relabel with a title, no grant" "it waits on an action no grant can cover"
+last_says 'Waiting on: gh issue edit 118 --body x'
+run_as 'blocked input needed'
+not_routine "an edit with no label flag" "it waits on an action no grant can cover"
+printf -- '- label: in-motion and live-check relabels\n' >>"$repo/docs/agents/supervision.md"
+repo_git "$repo" commit -q -am "Grant label"
+repo_git "$repo" push -q origin main 2>/dev/null
+last_says "Waiting on: \`$relabel\`"
+run_as 'blocked input needed'
+check "a granted relabel" "0 rule grant label: in-motion and live-check relabels" \
+    "$(rc) $(sed -n 2p "$work/out")"
+last_says 'Waiting on: gh -R o/r issue edit 118 --add-label=in-motion'
+run_as 'blocked input needed'
+check "a granted relabel with a repo flag" "0 rule grant label: in-motion and live-check relabels" \
+    "$(rc) $(sed -n 2p "$work/out")"
+last_says 'Waiting on: gh issue edit 118 --add-label in-motion --body x'
+run_as 'blocked input needed'
+not_routine "a relabel with a body under the grant" "it waits on an action no grant can cover"
+
 # --- errors ----------------------------------------------------------------
 last_says 'Proceed with #90?'
 (agents_file=''; run)
