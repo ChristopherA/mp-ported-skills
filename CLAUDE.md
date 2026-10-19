@@ -32,6 +32,8 @@ Tests are `tests/*.test.sh`, run with `sh`. Every `git commit` a test makes in a
 
 A check that two files match tests `cmp -s`'s exit status, as `same` in `tests/status-line-copy.test.sh` does. `cmp` reports a file that is a prefix of the other on stderr, so a check on its captured stdout reads empty, and passes, for files that differ.
 
+A scratch repo whose upstream a script reads (`@{upstream}`, `@{u}`) has one set: push it with `-u`, or run `git branch -u origin/main main` after the push. A plain `git push origin main` sets none, and the script then takes the no-upstream path, not the one the test means: #186's held-close check read "no upstream" where the test expected a count of unpushed commits.
+
 A check on a line that lists several items, such as `ready, blockers closed:`, compares the whole list with `check`, not `has`. A substring passes when extra items follow it: two tickets that should have read as blocked were listed as ready while a `has` check still passed.
 
 Each test sets or unsets every environment variable the scripts it runs read, so it gives the same result in any session. The maintainer's sessions set `MP_SESSION_TITLE=1`, which changes what the status line prints, and one test failed only there.
