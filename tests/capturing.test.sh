@@ -92,6 +92,16 @@ check "unattended, the capture waits on the relabel and the move" yes \
     "$(contains "$capturing" "on \`Waiting on: sh <this skill's folder>/scripts/live-check.sh --apply N\`")"
 check "attended, the capture asks before the relabel and the move" yes \
     "$(contains "$capturing" "\`attended\`: both are tracker changes others see, so ask once")"
+
+# Unattended, the relabels run under a label grant (#184): the in-motion move
+# is listed when ungranted, and the live-check step runs when every action it
+# needs is granted, and otherwise still waits.
+check "unattended checks the label grant" yes \
+    "$(contains "$capturing" 'before-clear.sh" --action label </dev/null')"
+check "an ungranted in-motion relabel is listed, not run" yes \
+    "$(contains "$capturing" "On \`ungranted\`, change no label, and list each label edit and its command")"
+check "a granted live check applies the relabel and the move" yes \
+    "$(contains "$capturing" "When every check reads \`granted: <citation>\`, run \`live-check.sh\` again with \`--apply\`")"
 supervise="$skills/supervise/SKILL.md"
 sup_call='sh "${CLAUDE_SKILL_DIR}/../capturing/scripts/live-check.sh" --dir "<project folder>" N </dev/null'
 check "the supervisor routes the wait" yes \
