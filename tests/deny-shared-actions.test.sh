@@ -395,6 +395,12 @@ check "a title after a quoted semicolon is not the label grant" "deny" \
     "$(decision 0 auto 'gh issue edit 5 --add-label "a;b" --title t' "$granted")"
 check "a body after a quoted pipe is not the label grant" "deny" \
     "$(decision 0 auto 'gh issue edit 5 --add-label "a|b" --body t' "$granted")"
+check "a joined -tT after a quoted semicolon is not the label grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label "a;b" -tT' "$granted")"
+check "a joined -bX after a quoted semicolon is not the label grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label "a;b" -bX' "$granted")"
+check "a granted label edit with a quoted semicolon goes through" "" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label "a;b" -R o/r' "$granted")"
 # Only the gh issue edit's own words are read for another field: a flag on
 # another command beside it is that command's.
 check "a granted label edit beside a git commit -m goes through" "" \
@@ -409,6 +415,14 @@ check "a title after an escaped semicolon is not the label grant" "deny" \
     "$(decision 0 auto 'gh issue edit 5 --add-label a\;b --title t' "$granted")"
 check "a title after an unclosed quote is not the label grant" "deny" \
     "$(decision 0 auto "gh issue edit 5 --add-label 'a; --title t" "$granted")"
+check "a title after a newline in single quotes is not the label grant" "deny" \
+    "$(decision 0 auto "$(printf "gh issue edit 5 --add-label 'a\nb' --title t")" "$granted")"
+check "a title after a newline in double quotes is not the label grant" "deny" \
+    "$(decision 0 auto "$(printf 'gh issue edit 5 --add-label "a\nb" --title t')" "$granted")"
+check "a title after a continued line is not the label grant" "deny" \
+    "$(decision 0 auto "$(printf 'gh issue edit 5 --add-label x \\\n  --title t')" "$granted")"
+check "a granted label edit on its own line goes through" "" \
+    "$(decision 0 auto "$(printf 'git commit -m msg -- f\ngh issue edit 5 --add-label in-motion')" "$granted")"
 check "a label edit piped into a shell is never granted" "deny" \
     "$(decision 0 auto 'echo gh issue edit 5 --add-label x | sh' "$granted")"
 check "a label grant does not cover an issue comment" "deny" \

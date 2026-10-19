@@ -267,6 +267,7 @@ fi
 # the separators outside quotes, one part per line. A flag on another
 # command beside it (`&& git commit -m`) is that command's. With a quote
 # left open the split cannot be trusted, so the whole command is one part.
+# A newline inside quotes or after a backslash joins its part, as a space.
 command_parts() {
     printf '%s' "$1" | awk '
         { s = s (NR > 1 ? "\n" : "") $0 }
@@ -274,9 +275,10 @@ command_parts() {
             sq = sprintf("%c", 39); q = ""; part = ""; n = length(s)
             for (i = 1; i <= n; i++) {
                 c = substr(s, i, 1)
+                if (q != "" && c == "\n") c = " "
                 if (q == sq) { if (c == sq) q = ""; part = part c; continue }
-                if (c == "\\" && i < n) { part = part c substr(s, i + 1, 1); i++; continue }
-                if (q == "\"") { if (c == "\"") q = ""; part = part (c == "\n" ? " " : c); continue }
+                if (c == "\\" && i < n) { d = substr(s, i + 1, 1); part = part c (d == "\n" ? " " : d); i++; continue }
+                if (q == "\"") { if (c == "\"") q = ""; part = part c; continue }
                 if (c == sq || c == "\"") { q = c; part = part c; continue }
                 if (index(";&|()`\n", c)) { print part; part = ""; continue }
                 part = part c
@@ -285,19 +287,29 @@ command_parts() {
         }'
 }
 if [ "$matched" = "gh issue edit (label)" ]; then
+    # Each part is read as the scan above reads a line, quotes dropped, and
+    # classify_gh decides from the words after its gh, so the hook and the
+    # wrappers share one rule for another field (`-tT` included).
     parts=$(command_parts "$cmd")
-    while IFS= read -r part; do
-        words=$(printf '%s' "$part" | tr -c 'A-Za-z0-9_-' '\n')
-        printf '%s\n' "$words" | grep -qx gh || continue
-        printf '%s\n' "$words" | grep -qx issue || continue
-        printf '%s\n' "$words" | grep -qx edit || continue
-        if printf '%s\n' "$words" | grep -Eqx -- '-[tbFm]|--(title|body|body-file|milestone|parent|attach|type|remove-(milestone|parent|type)|(add|remove)-(assignee|blocked-by|blocking|project|sub-issue))'; then
-            matched="gh issue edit (label and other fields)"
-            break
-        fi
-    done <<EOF
-$parts
-EOF
+    IFS='
+'
+    set -f
+    for part in $parts; do
+        IFS=$oldIFS
+        # shellcheck disable=SC2046
+        set -- $(printf '%s' "$part" | tr -d "\"'\\\\")
+        IFS='
+'
+        while [ $# -gt 0 ] && [ "${1##*/}" != gh ]; do shift; done
+        [ $# -gt 0 ] || continue
+        shift
+        matched=""
+        classify_gh "$@"
+        [ "$matched" = "gh issue edit (label and other fields)" ] && break
+    done
+    set +f
+    IFS=$oldIFS
+    [ "$matched" = "gh issue edit (label and other fields)" ] || matched="gh issue edit (label)"
 fi
 
 # A standing grant lets this exact form through. Only a form grant.sh can
