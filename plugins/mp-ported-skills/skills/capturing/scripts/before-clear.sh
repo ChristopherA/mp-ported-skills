@@ -32,7 +32,10 @@
 # Prints:
 #   attended            someone can answer; ask the question
 #   granted: <citation> unattended; this job's action is standing-granted
-#   ungranted           unattended; this job's action has no standing grant
+#   ungranted           unattended; this job's action has no standing grant,
+#                       or an issue-close grant waits on a Distribution
+#                       repo ahead of its upstream (#186; a note on stderr
+#                       names it)
 #
 # Exits 0 for all three. Exits 1 on a usage error, or when grant.sh itself
 # fails (its stderr starts with Error, distinct from the "note: ... ignored"
@@ -80,6 +83,19 @@ errs=$(mktemp) || fail "mktemp failed, so the grant cannot be read"
 if cited=$(sh "$grant_sh" --dir "$DIR" --action "$ACTION" 2>"$errs"); then
     command cat "$errs" >&2
     command rm -f "$errs"
+    # A granted close waits while the Project's Distribution repo is ahead
+    # of its upstream (#186): the hook and the wrappers refuse it, so the
+    # capture lists it with the push rather than trying it.
+    if [ "$ACTION" = issue-close ]; then
+        . "$SCRIPT_DIR/../../../scripts/shared-action-classify.sh"
+        classify_distribution_sh="$SCRIPT_DIR/../../supervise/scripts/distribution.sh"
+        classify_close_held "$DIR"
+        if [ -n "$classify_held" ]; then
+            printf 'note: the issue-close grant waits: %s; list the close with the push\n' "$classify_held" >&2
+            echo ungranted
+            exit 0
+        fi
+    fi
     echo "granted: $cited"
     exit 0
 fi

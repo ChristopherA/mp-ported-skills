@@ -129,6 +129,37 @@ check "unattended, working-tree-only grant: noted, then ungranted" \
 ungranted" "$out"
 repo_git "$repo" checkout -q -- docs/agents/supervision.md
 
+# A granted issue-close waits while the Project's Distribution repo holds
+# commits its upstream lacks (#186): ungranted, with a note naming the hold.
+proj="$work/proj"
+dist="$work/dist"
+for r in proj dist; do
+    git init -q --bare "$work/$r.git"
+    git init -q -b main "$work/$r"
+    repo_git "$work/$r" commit -q --allow-empty -m start
+    repo_git "$work/$r" remote add origin "$work/$r.git"
+    repo_git "$work/$r" push -q -u origin main 2>/dev/null
+    git -C "$work/$r" remote set-head origin main
+done
+commit_file "$proj" docs/agents/supervision.md '## Grants
+
+- issue-close
+' "grant issue-close"
+commit_file "$proj" docs/agents/distribution-repo.md '../dist
+' "name the Distribution repo"
+push_main "$proj"
+out=$(bc 0 issue-close "$proj" 2>&1); rc=$?
+check "unattended, issue-close, Distribution repo pushed: granted" "0 granted: issue-close" "$rc $out"
+repo_git "$dist" commit -q --allow-empty -m code
+out=$(bc 0 issue-close "$proj" 2>&1); rc=$?
+check "unattended, issue-close, Distribution repo ahead: ungranted with a note" "0 note: the issue-close grant waits: Distribution repo $dist holds 1 commit its upstream lacks; list the close with the push
+ungranted" "$rc $out"
+out=$(bc 0 issue-close "$proj" 2>/dev/null)
+check "unattended, issue-close held: stdout is ungranted alone" "ungranted" "$out"
+push_main "$dist"
+out=$(bc 0 issue-close "$proj" 2>&1); rc=$?
+check "unattended, issue-close after the push: granted again" "0 granted: issue-close" "$rc $out"
+
 # Unattended, DIR exists but is not a git checkout: grant.sh's own Error,
 # not a silent ungranted.
 plain="$work/plain-dir"
