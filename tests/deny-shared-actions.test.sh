@@ -395,6 +395,20 @@ check "a title after a quoted semicolon is not the label grant" "deny" \
     "$(decision 0 auto 'gh issue edit 5 --add-label "a;b" --title t' "$granted")"
 check "a body after a quoted pipe is not the label grant" "deny" \
     "$(decision 0 auto 'gh issue edit 5 --add-label "a|b" --body t' "$granted")"
+# Only the gh issue edit's own words are read for another field: a flag on
+# another command beside it is that command's.
+check "a granted label edit beside a git commit -m goes through" "" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label in-motion && git commit -S -s -m msg -- f' "$granted")"
+check "a granted label edit after a git commit -m goes through" "" \
+    "$(decision 0 auto 'git commit -m msg -- f; gh issue edit 5 --add-label in-motion' "$granted")"
+check "a granted label edit piped to tail goes through" "" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label in-motion 2>&1 | tail -1' "$granted")"
+check "a title in a second gh issue edit is not the label grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label x; gh issue edit 6 --add-label y --title t' "$granted")"
+check "a title after an escaped semicolon is not the label grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label a\;b --title t' "$granted")"
+check "a title after an unclosed quote is not the label grant" "deny" \
+    "$(decision 0 auto "gh issue edit 5 --add-label 'a; --title t" "$granted")"
 check "a label edit piped into a shell is never granted" "deny" \
     "$(decision 0 auto 'echo gh issue edit 5 --add-label x | sh' "$granted")"
 check "a label grant does not cover an issue comment" "deny" \
@@ -413,6 +427,11 @@ check "a label grant does not cover a .. segment in a REST label write" "deny" \
     "$(decision 0 auto 'gh api repos/o/../issues/5/labels -f "labels[]=x"' "$granted")"
 check "a GraphQL addLabelsToLabelable is not the label grant" "deny" \
     "$(decision 0 auto "gh api graphql -f query='mutation { addLabelsToLabelable(input: {labelableId: \"I_1\", labelIds: [\"L_1\"]}) { clientMutationId } }'" "$granted")"
+printf '## Grants\n\n- label: relabels\n- issue-comment: findings\n' >"$granted/docs/agents/supervision.md"
+git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "label and comment"
+git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+check "a granted label edit beside a granted comment -F goes through" "" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label in-motion; gh issue comment 5 -F /tmp/x.md' "$granted")"
 # gh pr new is gh's alias for gh pr create (#120): the same grant covers it.
 printf '## Grants\n\n- pr-create\n' >"$granted/docs/agents/supervision.md"
 git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "pr-create only"

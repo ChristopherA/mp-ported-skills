@@ -263,12 +263,41 @@ if [ "$matched" = "gh issue comment" ]; then
 fi
 # A label value can hold a separator too (`--add-label "a;b" --title t`).
 # The label grant covers labels only (#184), so look for any other field
-# gh issue edit sets in the whole command.
+# gh issue edit sets in each gh issue edit's own words: the command split at
+# the separators outside quotes, one part per line. A flag on another
+# command beside it (`&& git commit -m`) is that command's. With a quote
+# left open the split cannot be trusted, so the whole command is one part.
+command_parts() {
+    printf '%s' "$1" | awk '
+        { s = s (NR > 1 ? "\n" : "") $0 }
+        END {
+            sq = sprintf("%c", 39); q = ""; part = ""; n = length(s)
+            for (i = 1; i <= n; i++) {
+                c = substr(s, i, 1)
+                if (q == sq) { if (c == sq) q = ""; part = part c; continue }
+                if (c == "\\" && i < n) { part = part c substr(s, i + 1, 1); i++; continue }
+                if (q == "\"") { if (c == "\"") q = ""; part = part (c == "\n" ? " " : c); continue }
+                if (c == sq || c == "\"") { q = c; part = part c; continue }
+                if (index(";&|()`\n", c)) { print part; part = ""; continue }
+                part = part c
+            }
+            if (q != "") { gsub("\n", " ", s); print s } else print part
+        }'
+}
 if [ "$matched" = "gh issue edit (label)" ]; then
-    words=$(printf '%s' "$cmd" | tr -c 'A-Za-z0-9_-' '\n')
-    if printf '%s\n' "$words" | grep -Eqx -- '-[tbFm]|--(title|body|body-file|milestone|parent|attach|type|remove-(milestone|parent|type)|(add|remove)-(assignee|blocked-by|blocking|project|sub-issue))'; then
-        matched="gh issue edit (label and other fields)"
-    fi
+    parts=$(command_parts "$cmd")
+    while IFS= read -r part; do
+        words=$(printf '%s' "$part" | tr -c 'A-Za-z0-9_-' '\n')
+        printf '%s\n' "$words" | grep -qx gh || continue
+        printf '%s\n' "$words" | grep -qx issue || continue
+        printf '%s\n' "$words" | grep -qx edit || continue
+        if printf '%s\n' "$words" | grep -Eqx -- '-[tbFm]|--(title|body|body-file|milestone|parent|attach|type|remove-(milestone|parent|type)|(add|remove)-(assignee|blocked-by|blocking|project|sub-issue))'; then
+            matched="gh issue edit (label and other fields)"
+            break
+        fi
+    done <<EOF
+$parts
+EOF
 fi
 
 # A standing grant lets this exact form through. Only a form grant.sh can
