@@ -17,6 +17,8 @@
 #     (#77), and a pid can show again; a pid showing starts the settle time
 #     over. The worker's cost row is written at the stop, and a record read
 #     right after a stop has missed it, so the wait is not cut short.
+# A stop then waits until the daemon's roster no longer lists the job, so
+# a resume after it wakes the worker rather than starting a copy (#185).
 # Then it releases DIR's marker with release.sh.
 #
 # Prints `stopped ID` (or `gone ID` when the list no longer holds it), then
@@ -92,6 +94,6 @@ unfinished() {
 }
 unstopped() { printf 'Error: %s\n' "$1" >&2; unfinished stop.sh; }
 
-v=$(stop_and_settle "$ID" "$SETTLE" "$INTERVAL" "$TIMEOUT" settle_row) || unstopped "$v"
+v=$(stop_and_settle "$ID" "$SETTLE" "$INTERVAL" "$TIMEOUT" settle_row "$CLAUDE_CONFIG_DIR/daemon/roster.json") || unstopped "$v"
 echo "$v $ID"
 sh "$here/release.sh" --dir "$DIR" --id "$ID" || unfinished release.sh

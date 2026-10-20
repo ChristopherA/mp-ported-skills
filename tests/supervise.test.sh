@@ -501,6 +501,10 @@ case "$1" in
         [ -n "${FAKE_AGENTS_FAIL:-}" ] && { echo "daemon unreachable" >&2; exit 1; }
         [ -z "${FAKE_GROW:-}" ] || echo '{}' >>"$FAKE_GROW"
         f=$(sed -n "${n}p" "$fake/seq"); [ -n "$f" ] || f=$(tail -n 1 "$fake/seq")
+        if [ -f "$fake/roster-seq" ]; then
+            r=$(sed -n "${n}p" "$fake/roster-seq"); [ -n "$r" ] || r=$(tail -n 1 "$fake/roster-seq")
+            mkdir -p "$CLAUDE_CONFIG_DIR/daemon"; printf '%s\n' "$r" >"$CLAUDE_CONFIG_DIR/daemon/roster.json"
+        fi
         command cat "$f" ;;
     stop) echo "stop $2" >>"$fake/calls"; echo "stopped $2" ;;
     rm) echo "rm $2" >>"$fake/calls"
@@ -593,7 +597,7 @@ fi
 jq '.respawnFlags = ["--disallowedTools", "EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback", "--no-chrome", "--settings", "{\"worktree\":{\"bgIsolation\":\"none\"}}"] + .respawnFlags[2:]' \
     "$fixtures/job-state.json" >"$work/job-launched.json"
 export FAKE_DIR="$fake" FAKE_JOB="$work/job-launched.json"
-reset_fake() { command rm -rf "$fake" "$cfg/jobs"; mkdir -p "$fake"; }
+reset_fake() { command rm -rf "$fake" "$cfg/jobs" "$cfg/daemon"; mkdir -p "$fake"; }
 
 # --- watch.sh polling -----------------------------------------------------
 poll() { # <id> <fixture>... -- watch.sh's output over that sequence
@@ -1293,6 +1297,32 @@ check "resume: an unreadable list says so" "Error: claude agents --json --all pr
 ( unset CLAUDE_CONFIG_DIR; resume woke "$fixtures/stopped.json" >/dev/null 2>&1 )
 check "resume: config dir required" "1" "$?"
 check "resume: no config dir, never stopped" "" "$(calls)"
+
+# The daemon lets the job go a moment after `claude agents` shows it
+# stopped, and a resume while its roster still lists the job starts a copy
+# (#185). So the first resume waits until the roster drops it. Each line of
+# roster-seq is the roster the fake writes with that read of the list.
+reset_roster() { # <roster per read>...
+    for r in "$@"; do printf '%s\n' "$r"; done >"$work/roster-seq"
+}
+held='{"workers":{"c2a368ee":{"pid":4242}}}'
+freed='{"workers":{}}'
+roster_resume() { # <roster per read>... -- resume woke stopped, with those rosters
+    reset_roster "$@"
+    ( reset_fake; command cp "$work/roster-seq" "$fake/roster-seq"
+      mkdir -p "$cfg/jobs/c2a368ee"; command cp "$fixtures/job-state.json" "$cfg/jobs/c2a368ee/state.json"
+      echo woke >"$fake/resume-out"; echo "$fixtures/stopped.json" >"$fake/seq"
+      PATH="$work/bin:$PATH" sh "$scripts/resume.sh" --id c2a368ee --dir "$project" \
+          --prompt /mp-ported-skills:capturing --interval 0 --settle 0 --timeout "${ROSTER_TIMEOUT:-300}" </dev/null )
+}
+out=$(roster_resume "$held" "$held" "$freed" 2>&1); rc=$?
+check "resume: waits for the daemon's roster to drop the job" "0 stop c2a368ee
+resume after 3 reads" "$rc $(calls)"
+check "resume: the roster wait still wakes the original" "resumed c2a368ee" "$(printf '%s\n' "$out" | tail -n 1)"
+command rm -f "$marker"
+out=$(ROSTER_TIMEOUT=0; roster_resume "$held" 2>&1); rc=$?
+check "resume: a job the roster keeps is not resumed" "1 stop c2a368ee" "$rc $(calls)"
+check "resume: a job the roster keeps says why" "Error: session c2a368ee was still in the daemon's roster 0s after claude stop; not resumed" "$out"
 
 # Two live workers in one checkout would interleave their commits, so
 # another live background session there stops the resume.

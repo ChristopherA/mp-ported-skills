@@ -15,6 +15,8 @@
 #     resume issued the moment the pid went started a copy, while the same
 #     resume 47 seconds later woke the original. A pid showing again starts
 #     the settle time over.
+# Either way it then waits until the daemon's roster no longer lists the
+# job: until then, a resume starts a copy (#185).
 # Before each resume it checks that no other background session is live in
 # the worker's checkout, since two workers there interleave their commits.
 #
@@ -116,7 +118,7 @@ verdict() {
 # stop_safe: stop the session and wait, with settle.sh's rule (shared with
 # stop.sh), until it is safe to resume, or exit 1.
 stop_safe() {
-    v=$(stop_and_settle "$ID" "$SETTLE" "$INTERVAL" "$TIMEOUT" verdict) || fail "$v; not resumed"
+    v=$(stop_and_settle "$ID" "$SETTLE" "$INTERVAL" "$TIMEOUT" verdict "$CLAUDE_CONFIG_DIR/daemon/roster.json") || fail "$v; not resumed"
     case $v in
         gone) fail "session $ID is not in claude agents; not resumed" ;;
         others\ *) fail "another live background session in ${v#others }; not resumed" ;;

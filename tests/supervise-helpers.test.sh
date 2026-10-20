@@ -7,7 +7,9 @@
 # fake `claude` first on PATH. The fake logs each call and answers
 # `agents --json --all` with the next of the lists agents.1, agents.2, ...
 # in its folder, staying on the last, and fails when FAKE_AGENTS_FAIL is
-# set. Touches nothing outside its own mktemp directory.
+# set. With each list N it writes roster.N, when there is one, as the
+# daemon's roster file, so the roster changes with the list. Touches
+# nothing outside its own mktemp directory.
 #
 # Usage: sh tests/supervise-helpers.test.sh
 
@@ -43,6 +45,7 @@ case "\$*" in
         n=\$((n + 1))
         [ -f "$work/lists/agents.\$n" ] || n=\$((n - 1))
         echo "\$n" >"$work/count"
+        [ ! -f "$work/lists/roster.\$n" ] || command cp -f "$work/lists/roster.\$n" "$work/roster.json"
         command cat "$work/lists/agents.\$n" ;;
     stop\ *) ;;
     *) echo "fake claude: unexpected \$*" >&2; exit 1 ;;
@@ -57,13 +60,23 @@ PATH="$work/bin:$PATH"
 
 # lists <json>...: the lists the fake answers, in order.
 lists() {
-    command rm -f "$work"/lists/agents.* "$work/count" "$work/claude-calls"
+    command rm -f "$work"/lists/agents.* "$work"/lists/roster.* "$work/roster.json" "$work/count" "$work/claude-calls"
     i=0
     for l in "$@"; do
         i=$((i + 1))
         printf '%s\n' "$l" >"$work/lists/agents.$i"
     done
 }
+# rosters <json>...: the roster files written with lists 1, 2, ..., in order.
+rosters() {
+    i=0
+    for r in "$@"; do
+        i=$((i + 1))
+        printf '%s\n' "$r" >"$work/lists/roster.$i"
+    done
+}
+held='{"workers":{"c2a368ee":{"pid":202}}}'
+freed='{"workers":{"0ca7d123":{"pid":303}}}'
 row() { printf '[{"kind":"background","id":"c2a368ee","state":"%s","pid":%s}]' "$1" "$2"; }
 
 # --- marker.sh -------------------------------------------------------------
@@ -115,6 +128,41 @@ check "a failed agents read is reported" "1 claude agents --json --all failed, s
 lists 'not json'
 out=$(stop_and_settle c2a368ee 60 0 300 settle_row); rc=$?
 check "an unreadable list is reported" "1 claude agents --json --all printed no list jq could read, so session c2a368ee's state is unknown" "$rc $out"
+
+# The daemon lets the job go a moment after `claude agents` shows it
+# stopped, and a resume in that moment starts a copy (#185). So a session
+# the roster still lists is not settled yet, whichever way it was read as
+# stopped, and the wait goes on until the roster drops it.
+lists "$(row stopped null)" "$(row stopped null)" "$(row stopped null)"
+rosters "$held" "$held" "$freed"
+out=$(stop_and_settle c2a368ee 60 0 300 settle_row "$work/roster.json"); rc=$?
+check "stopped waits until the roster drops the job" "0 stopped 3" "$rc $out $(grep -c '^agents' "$work/claude-calls")"
+
+lists "$(row done null)" "$(row done null)"
+rosters "$held" "$freed"
+out=$(stop_and_settle c2a368ee 0 0 300 settle_row "$work/roster.json"); rc=$?
+check "the settle time's stopped waits for the roster too" "0 stopped 2" "$rc $out $(grep -c '^agents' "$work/claude-calls")"
+
+lists "$(row stopped null)"
+rosters "$held"
+out=$(stop_and_settle c2a368ee 60 0 0 settle_row "$work/roster.json"); rc=$?
+check "a job the roster keeps times out" "1 session c2a368ee was still in the daemon's roster 0s after claude stop" "$rc $out"
+
+lists "$(row stopped null)" "$(row stopped null)"
+rosters 'not json' "$freed"
+out=$(stop_and_settle c2a368ee 60 0 300 settle_row "$work/roster.json"); rc=$?
+check "an unreadable roster is read again" "0 stopped 2" "$rc $out $(grep -c '^agents' "$work/claude-calls")"
+
+lists "$(row stopped null)"
+out=$(stop_and_settle c2a368ee 60 0 300 settle_row "$work/roster.json"); rc=$?
+check "no roster file means no daemon holds the job" "0 stopped" "$rc $out"
+
+# Only a stop waits for the roster: gone and a caller's own word end the
+# wait as they did.
+lists '[]'
+rosters "$held"
+out=$(stop_and_settle c2a368ee 60 0 300 settle_row "$work/roster.json"); rc=$?
+check "gone does not wait for the roster" "0 gone" "$rc $out"
 
 # A caller's own verdict: any word but pid and nopid ends the wait with it.
 mine() { echo "others somewhere"; }
