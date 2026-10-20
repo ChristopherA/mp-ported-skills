@@ -30,7 +30,9 @@
 #                 was given (then printed as `skip grant: ...`)
 #
 # Without --check, when every check passes, it runs the commands, each
-# printed as `ran: gh ...`. --pushed then prints `closed <url>` and appends
+# printed as `ran: gh ...`. --pushed on a ticket already closed prints
+# `closed already: #N` and records nothing, since the close was not the
+# supervisor's. Otherwise --pushed prints `closed <url>` and appends
 # `ID <time> issue-close <url>` to the checkout's
 # `git rev-parse --git-path mp-supervise-posted`, which actions.sh reads to
 # name the close as the supervisor's, after the push, and record.sh to keep
@@ -111,10 +113,12 @@ if ! DIST=$(sh "$here/distribution.sh" --dir "$DIR" </dev/null 2>/dev/null); the
     bad "distribution: distribution.sh failed in $DIR"
 elif [ -z "$DIST" ]; then
     bad "distribution: $DIR names no Distribution repo; close the ticket as any other"
-elif ! git -C "$DIST" rev-parse --git-dir >/dev/null 2>&1; then
-    bad "distribution: $DIST is not a git checkout"
+elif ! real=$(CDPATH= cd -- "$DIST" 2>/dev/null && pwd -P) ||
+    [ "$(git -C "$real" rev-parse --show-toplevel 2>/dev/null)" != "$real" ]; then
+    bad "distribution: $DIST is not a git checkout of its own"
     DIST=""
 else
+    DIST=$real
     ok "distribution: $DIST"
 fi
 
@@ -184,10 +188,11 @@ url=$(printf '%s' "$view" | jq -r '.url // empty')
 if [ "$OUTCOME" = pushed ]; then
     printf 'Closed after the Distribution push landed: %s is even with its upstream at %s.\n' "$DIST" "$head_line" >"$body"
     if [ "$(printf '%s' "$view" | jq -r '.state')" = CLOSED ]; then
+        # Someone else closed it, so the close is not the supervisor's.
         echo "closed already: #$TICKET"
-    else
-        run issue close "$TICKET" --comment "$(command cat "$body")"
+        exit 0
     fi
+    run issue close "$TICKET" --comment "$(command cat "$body")"
     echo "closed $url"
     record=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-posted)
     printf '%s %s %s %s\n' "$ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" issue-close "$url" >>"$record" ||

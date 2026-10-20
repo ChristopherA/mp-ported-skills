@@ -69,7 +69,7 @@ if [ -n "$action" ] && sh "$here/../skills/supervise/scripts/grant.sh" --dir "$g
     # unpushed commits (#186), as in deny-shared-actions.sh.
     [ "$action" = issue-close ] && classify_close_held "$grant_dir"
     if [ "$action" = issue-close ] && [ -n "$classify_held" ]; then
-        printf '%s\n' "$(close_held_reason)" >&2
+        printf '%s\n' "$(classify_close_held_reason "$classify_held" "$classify_held_repo")" >&2
         exit 1
     fi
     exec "$real" "$@"

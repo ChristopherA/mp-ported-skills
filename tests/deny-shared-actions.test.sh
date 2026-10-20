@@ -318,7 +318,7 @@ dgit_in "$hdist" commit -q --allow-empty -m 'the ticket code'
 check "issue-close grant, Distribution commit unpushed: the close is refused" "deny" \
     "$(decision 0 auto 'gh issue close 186 --comment done' "$hproj")"
 check "issue-close grant, Distribution commit unpushed: the reason names the repo and the wait" \
-    "A background session in auto mode cannot run 'gh issue close' yet (#186): Distribution repo $hdist_real holds 1 commit its upstream lacks, and the issue-close grant covers the ticket only after its work is pushed. List the close with the push, as \`Waiting on: git -C $hdist_real push; gh issue close <N>\`: /supervise closes the ticket after the push lands." \
+    "A background session in auto mode cannot run 'gh issue close' yet (#186): Distribution repo $hdist_real holds 1 commit its upstream lacks, and the issue-close grant covers the ticket only after its work is pushed. List the close with the push, as \`Waiting on: git -C $hdist_real push origin <branch>; gh issue close <N>\`: /supervise closes the ticket after the push lands." \
     "$(reason 0 auto 'gh issue close 186' "$hproj")"
 check "issue-close grant, Distribution commit unpushed: refused from a session in the Distribution repo too" "deny" \
     "$(decision 0 auto 'gh issue close 186' "$hdist")"
@@ -331,6 +331,15 @@ dgit_in "$hdist" checkout -q -b local-only
 check "issue-close grant, Distribution branch with no upstream: the close is refused" "deny" \
     "$(decision 0 auto 'gh issue close 186' "$hproj")"
 dgit_in "$hdist" checkout -q main
+# A Distribution path that is a plain folder inside the Project's repo is no
+# repo of its own, so the Project's own unpushed commit does not hold it.
+mkdir -p "$hproj/plain"
+printf 'plain\n' >"$hproj/docs/agents/distribution-repo.md"
+dgit_in "$hproj" commit -q -am 'dist is a plain folder'
+dgit_in "$hproj" push -q origin main 2>/dev/null
+dgit_in "$hproj" commit -q --allow-empty -m 'unpushed Project commit'
+check "issue-close grant, a plain-folder Distribution path: the close goes through" "" \
+    "$(decision 0 auto 'gh issue close 186' "$hproj")"
 
 ungranted=$(mktemp -d)
 git init -q -b main "$ungranted"

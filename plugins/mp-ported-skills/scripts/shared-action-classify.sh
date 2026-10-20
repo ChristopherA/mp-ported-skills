@@ -91,7 +91,9 @@ classify_distribution() {
 # classify_close_held <dir>: the issue-close grant covers the worker's
 # ticket only after its work is pushed (#186). Sets classify_held to why a
 # close in <dir> waits, or empty: a Distribution repo of the Project holds
-# commits its upstream lacks, or has no upstream to compare with. The
+# commits its upstream lacks, or has no upstream to compare with; and
+# classify_held_repo to that repo's path. A path that is not a repo of its
+# own (a plain folder inside another repo) is passed over. The
 # Project is <dir>'s repo, or the one its worker marker names (`project
 # <path>`, from a session in the Distribution repo); its Distribution repos
 # are the one distribution.sh reads from origin and the one the Project's
@@ -100,6 +102,7 @@ classify_distribution() {
 # classify_distribution_sh; with no distribution.sh nothing is held.
 classify_close_held() {
     classify_held=""
+    classify_held_repo=""
     [ -f "${classify_distribution_sh:-}" ] || return 0
     _cg=${classify_git_cmd:-git}
     _ctop=$("$_cg" -C "$1" rev-parse --show-toplevel 2>/dev/null) || return 0
@@ -122,27 +125,28 @@ $(sed -n 's/^distribution //p' "$_cpm" | head -n 1)"
     for _cd in $_cdists; do
         [ -d "$_cd" ] || continue
         _cd=$(CDPATH= cd -- "$_cd" && pwd -P) || continue
+        [ "$("$_cg" -C "$_cd" rev-parse --show-toplevel 2>/dev/null)" = "$_cd" ] || continue
         if ! _cn=$("$_cg" -C "$_cd" rev-list --count '@{upstream}..HEAD' 2>/dev/null); then
             classify_held="Distribution repo $_cd has no upstream to compare with"
+            classify_held_repo=$_cd
             break
         fi
         if [ "$_cn" != 0 ]; then
             _cs=s
             [ "$_cn" != 1 ] || _cs=""
             classify_held="Distribution repo $_cd holds $_cn commit$_cs its upstream lacks"
+            classify_held_repo=$_cd
             break
         fi
     done
     IFS=$_cifs
 }
 
-# The refusal for a held close, from classify_held and the Distribution
-# repo's path in it.
-close_held_reason() {
-    _cd=${classify_held#Distribution repo }
-    _cd=${_cd%% holds *}
-    _cd=${_cd%% has no upstream*}
-    printf '%s' "A background session in auto mode cannot run 'gh issue close' yet (#186): $classify_held, and the issue-close grant covers the ticket only after its work is pushed. List the close with the push, as \`Waiting on: git -C $_cd push; gh issue close <N>\`: /supervise closes the ticket after the push lands."
+# classify_close_held_reason <held> <repo>: the refusal the hook and the
+# wrappers give for a held close, from classify_close_held's
+# classify_held and classify_held_repo.
+classify_close_held_reason() {
+    printf '%s' "A background session in auto mode cannot run 'gh issue close' yet (#186): $1, and the issue-close grant covers the ticket only after its work is pushed. List the close with the push, as \`Waiting on: git -C $2 push origin <branch>; gh issue close <N>\`: /supervise closes the ticket after the push lands."
 }
 
 # gh_words <args after "gh">: sets gh_sub and gh_act to the subcommand and

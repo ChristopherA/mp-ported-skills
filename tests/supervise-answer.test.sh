@@ -307,6 +307,30 @@ last_says 'Waiting on: gh issue edit 118 --add-label in-motion --body x'
 run_as 'blocked input needed'
 not_routine "a relabel with a body under the grant" "it waits on an action no grant can cover"
 
+# A granted close waits while the Distribution repo is ahead (#186).
+dist="$work/dist"
+git init -q --bare "$work/dist.git"
+git init -q -b main "$dist"
+repo_git "$dist" commit -q --allow-empty -m start
+repo_git "$dist" remote add origin "$work/dist.git"
+repo_git "$dist" push -q -u origin main 2>/dev/null
+dist_real=$(CDPATH= cd -- "$dist" && pwd -P)
+printf -- '- issue-close: the worker'\''s own ticket, after its work is pushed\n' >>"$repo/docs/agents/supervision.md"
+printf '../dist\n' >"$repo/docs/agents/distribution-repo.md"
+repo_git "$repo" add docs/agents
+repo_git "$repo" commit -q -m "Grant issue-close, name dist"
+repo_git "$repo" push -q origin main 2>/dev/null
+repo_git "$repo" remote set-head origin main
+repo_git "$dist" commit -q --allow-empty -m 'the ticket code'
+last_says 'Waiting on: gh issue close 90'
+run_as 'blocked input needed'
+not_routine "a granted close, Distribution ahead" \
+    "the issue-close grant waits: Distribution repo $dist_real holds 1 commit its upstream lacks; Push on approval closes the ticket after the push"
+repo_git "$dist" push -q origin main 2>/dev/null
+run_as 'blocked input needed'
+check "a granted close, Distribution pushed" "0 rule grant issue-close: the worker's own ticket, after its work is pushed" \
+    "$(rc) $(sed -n 2p "$work/out")"
+
 # --- errors ----------------------------------------------------------------
 last_says 'Proceed with #90?'
 (agents_file=''; run)

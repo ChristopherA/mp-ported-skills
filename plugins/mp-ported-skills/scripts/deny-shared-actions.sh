@@ -336,7 +336,7 @@ if [ -n "$action" ]; then
         # work is pushed, and that push is Push on approval's.
         [ "$action" = issue-close ] && classify_close_held "$grant_dir"
         if [ "$action" = issue-close ] && [ -n "$classify_held" ]; then
-            jq -cn --arg reason "$(close_held_reason)" \
+            jq -cn --arg reason "$(classify_close_held_reason "$classify_held" "$classify_held_repo")" \
                 '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
             exit 0
         fi

@@ -176,6 +176,7 @@ check "actions: the close is the supervisor's, after the push" \
 reset CLOSED '["afk"]'
 out=$(close --pushed)
 check "pushed, already closed: no second close" "issue view 7 --json state,labels,url" "$(command cat "$work/gh-log")"
+check "pushed, already closed: not recorded as the supervisor's" "no" "$([ -f "$record" ] && echo yes || echo no)"
 
 reset OPEN '["afk"]'
 out=$(FAKE_GH_FAIL=1; export FAKE_GH_FAIL; close --pushed)
@@ -193,6 +194,17 @@ check "pushed, no grant: says to ask" "fail grant: the Project grants no issue-c
     "$(printf '%s\n' "$out" | grep '^fail grant')"
 out=$(close --pushed --approved)
 check "pushed --approved: closes" "exit=0" "$(last "$out")"
+
+# A Distribution path that is a plain folder inside the Project's repo is
+# no repo of its own: its upstream count would be the Project's.
+mkdir -p "$proj/plain"
+printf 'plain\n' >"$proj/docs/agents/distribution-repo.md"
+g "$proj" -c commit.gpgsign=false commit -q -am 'dist is a plain folder'
+g "$proj" push -q origin main 2>/dev/null
+reset OPEN '["afk"]'
+out=$(close --pushed --approved)
+check "plain-folder Distribution path: refused" "exit=2" "$(last "$out")"
+check "plain-folder Distribution path: gh not called" "no" "$([ -f "$work/gh-log" ] && echo yes || echo no)"
 
 # A Project that names no Distribution repo has nothing to settle here.
 g "$proj" rm -q docs/agents/distribution-repo.md

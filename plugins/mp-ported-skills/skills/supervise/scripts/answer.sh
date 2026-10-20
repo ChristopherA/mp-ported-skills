@@ -231,6 +231,14 @@ case $kind in
             grep -q '^Error:' "$errors" && { printf 'not routine: grant.sh failed: %s\n' "$(grep '^Error:' "$errors" | head -n 1)"; exit 2; }
             not_routine "no standing grant covers $action"
         fi
+        # A granted close waits while the Project's Distribution repo is
+        # ahead of its upstream (#186), and the hook would refuse it.
+        if [ "$action" = issue-close ]; then
+            . "$SCRIPT_DIR/../../../scripts/shared-action-classify.sh"
+            classify_distribution_sh="$SCRIPT_DIR/distribution.sh"
+            classify_close_held "$DIR"
+            [ -z "$classify_held" ] || not_routine "the issue-close grant waits: $classify_held; Push on approval closes the ticket after the push"
+        fi
         printf 'rule grant %s\n' "$citation"
         printf 'answer [supervisor answer to "%s"] Yes, go ahead with the %s. The Project'\''s standing grant covers it ("%s"), so take it as the grant allows, without asking again.\n' \
             "$quoted" "$action" "$citation" ;;
