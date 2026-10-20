@@ -16,7 +16,8 @@
 #     resume 47 seconds later woke the original. A pid showing again starts
 #     the settle time over.
 # Either way it then waits until the daemon's roster no longer lists the
-# job: until then, a resume starts a copy (#185).
+# job, or for --timeout: until then, a resume starts a copy (#185), which
+# the retry below catches.
 # Before each resume it checks that no other background session is live in
 # the worker's checkout, since two workers there interleave their commits.
 #

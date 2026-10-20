@@ -19,8 +19,11 @@
 # The daemon lets the job go a moment after `claude agents` shows it
 # stopped, and `claude --bg --resume` starts a copy while it still holds
 # the job, "already running in the background" (#185). A roster jq cannot
-# read, as mid-write, is read again; no roster file, or an empty ROSTER,
-# means no daemon holds the job.
+# read, as mid-write, is read again; no roster file, an empty ROSTER, or a
+# roster with no `workers` object means no daemon holds the job. A job the
+# roster still lists TIMEOUT seconds after the stop ends the wait as
+# `stopped` all the same: the session is stopped, and a resume that then
+# starts a copy is caught by resume.sh's retry.
 # The stop's own status is not read, since stopping a stopped session may
 # fail; the wait is what decides.
 #
@@ -48,7 +51,7 @@ settle_row() {
 # workers, or cannot be read.
 settle_held() {
     [ -n "$1" ] && [ -f "$1" ] || return 1
-    jq -e --arg id "$2" '.workers | has($id) | not' "$1" >/dev/null 2>&1 && return 1
+    jq -e --arg id "$2" '.workers | if type == "object" then has($id) else false end | not' "$1" >/dev/null 2>&1 && return 1
     return 0
 }
 
@@ -79,11 +82,8 @@ stop_and_settle() {
             *) echo "$settle_v"; return 0 ;;
         esac
         [ $((settle_now - settle_begin)) -lt "$settle_limit" ] || {
-            if [ "$settle_v" = stopped ]; then
-                echo "session $settle_id was still in the daemon's roster ${settle_limit}s after claude stop"
-            else
-                echo "session $settle_id was not stopped ${settle_limit}s after claude stop"
-            fi
+            [ "$settle_v" != stopped ] || { echo stopped; return 0; }
+            echo "session $settle_id was not stopped ${settle_limit}s after claude stop"
             return 1
         }
         sleep "$settle_every"

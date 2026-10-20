@@ -1320,9 +1320,13 @@ check "resume: waits for the daemon's roster to drop the job" "0 stop c2a368ee
 resume after 3 reads" "$rc $(calls)"
 check "resume: the roster wait still wakes the original" "resumed c2a368ee" "$(printf '%s\n' "$out" | tail -n 1)"
 command rm -f "$marker"
+# A job the roster keeps past the timeout is resumed all the same: the
+# session is stopped, and a copy it starts is caught by the retry.
 out=$(ROSTER_TIMEOUT=0; roster_resume "$held" 2>&1); rc=$?
-check "resume: a job the roster keeps is not resumed" "1 stop c2a368ee" "$rc $(calls)"
-check "resume: a job the roster keeps says why" "Error: session c2a368ee was still in the daemon's roster 0s after claude stop; not resumed" "$out"
+check "resume: a job the roster keeps is resumed at the timeout" "0 stop c2a368ee
+resume after 1 reads" "$rc $(calls)"
+check "resume: a job the roster keeps still wakes the original" "resumed c2a368ee" "$(printf '%s\n' "$out" | tail -n 1)"
+command rm -f "$marker"
 
 # Two live workers in one checkout would interleave their commits, so
 # another live background session there stops the resume.
@@ -1457,6 +1461,19 @@ check "stop: waits out the settle time" "yes" "$([ "$n" -ge 3 ] && [ "$n" -le 4 
 echo c2a368ee >"$marker"
 stop_worker nopid pid nopid -- --settle 1 --interval 1 >/dev/null 2>&1
 check "stop: a pid starts the settle time over" "4" "$(command cat "$fake/count")"
+
+# stop.sh waits too until the daemon's roster drops the job (#185), so a
+# resume after it wakes the worker.
+echo c2a368ee >"$marker"
+out=$( (reset_roster "$held" "$held" "$freed"
+        stop_rostered() { reset_fake; command cp "$work/roster-seq" "$fake/roster-seq"
+            mkdir -p "$cfg/jobs/c2a368ee"; command cp "$fixtures/job-state.json" "$cfg/jobs/c2a368ee/state.json"
+            echo "$fixtures/stopped.json" >"$fake/seq"
+            PATH="$work/bin:$PATH" sh "$scripts/stop.sh" --id c2a368ee --dir "$project" --interval 0 --settle 0 </dev/null; }
+        stop_rostered 2>&1; echo "reads $(command cat "$fake/count")") ); rc=$?
+check "stop: waits for the daemon's roster to drop the job" "0 stopped c2a368ee
+released c2a368ee
+reads 3" "$rc $out"
 
 # A worker already removed is stopped too.
 echo c2a368ee >"$marker"

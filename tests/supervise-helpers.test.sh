@@ -146,7 +146,7 @@ check "the settle time's stopped waits for the roster too" "0 stopped 2" "$rc $o
 lists "$(row stopped null)"
 rosters "$held"
 out=$(stop_and_settle c2a368ee 60 0 0 settle_row "$work/roster.json"); rc=$?
-check "a job the roster keeps times out" "1 session c2a368ee was still in the daemon's roster 0s after claude stop" "$rc $out"
+check "a job the roster keeps is stopped at the timeout" "0 stopped" "$rc $out"
 
 lists "$(row stopped null)" "$(row stopped null)"
 rosters 'not json' "$freed"
@@ -156,6 +156,16 @@ check "an unreadable roster is read again" "0 stopped 2" "$rc $out $(grep -c '^a
 lists "$(row stopped null)"
 out=$(stop_and_settle c2a368ee 60 0 300 settle_row "$work/roster.json"); rc=$?
 check "no roster file means no daemon holds the job" "0 stopped" "$rc $out"
+
+lists "$(row stopped null)"
+rosters '{"proto":1}'
+out=$(stop_and_settle c2a368ee 60 0 300 settle_row "$work/roster.json"); rc=$?
+check "a roster with no workers holds no job" "0 stopped" "$rc $out"
+
+lists "$(row stopped null)"
+rosters '{"workers":[]}'
+out=$(stop_and_settle c2a368ee 60 0 300 settle_row "$work/roster.json"); rc=$?
+check "a roster whose workers is no object holds no job" "0 stopped" "$rc $out"
 
 # Only a stop waits for the roster: gone and a caller's own word end the
 # wait as they did.
