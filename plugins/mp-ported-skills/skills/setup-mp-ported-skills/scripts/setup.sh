@@ -381,7 +381,9 @@ itself one by editing this file.
                       docs/agents/distribution-repo.md names
        pr-create      gh pr create
        pr-merge       gh pr merge
-       issue-close    gh issue close
+       issue-close    gh issue close. Held while the Distribution repo
+                      holds commits its upstream lacks: /supervise
+                      closes the ticket after that push lands.
        issue-comment  a new comment: gh issue comment, or a gh api POST
                       to repos/<o>/<r>/issues/<n>/comments. Not editing
                       or deleting one (--edit-last, --delete-last, a
