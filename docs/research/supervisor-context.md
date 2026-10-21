@@ -15,6 +15,7 @@ Sessions measured, all Opus 5.5 at medium, 150k zone:
 | d45b30de | 0.8.45 to 0.8.46 | #108, then #123 after `/reload-plugins` and a second `/supervise` |
 | a90acc86 | 0.8.54 to 0.8.60 | `--loop`: #152, #147, #155, #144, #138 |
 | 7b8a9a92 | 0.8.77 to 0.8.78 | `--loop`: #135 and #131, each zone-captured and continued |
+| 8f160663 | 0.8.91 to 0.8.92 | #185, zone-captured and continued, with `--watch iterm` (After #192, below) |
 
 ## Fixed load
 
@@ -60,6 +61,26 @@ A worker's run has two turn ends to watch, its work and its capture, so the watc
 | #131 | zone capture: two workers, an answer and a question | 22,600 |
 
 A clean ticket costs 7.7k to 9.6k. A ticket that blocks once on a question costs 1k to 3k more; one with a zone capture and continuation costs about twice a clean one.
+
+## After #192
+
+#192 cut each worker turn end to a `watch.sh --detail` verdict and a settled run's end to one `finish.sh` call (0.8.85). Session 8f160663 ran #185 at 0.8.91 to 0.8.92: a first worker zone-captured mid-build, then a continuation whose build and capture each ended blocked on a label change no grant covers. It held no clean ticket, so the clean-ticket total is not measured yet; the steps #192 changed are.
+
+| Step | Before #192 | Session 8f160663 |
+|---|---|---|
+| A worker turn end: the task notification and reading the watch's output | 2,000 to 3,500, with `last-message.sh` | 1,392 (`capture-due`); 2,041 (a capture's `done`, which always prints its message); 1,664 and 1,773 (`blocked input needed`) |
+| A settled run's end | `stop.sh`, `actions.sh` and the glance, 2,000 to 5,100, then `record.sh` and the post | `finish.sh`, 635 and 758 |
+
+No settled `done` occurred, the one verdict that prints no message, so its cost is not measured.
+
+The whole ticket cost 31,748 (88,316 to 120,064), against 16,900 and 22,600 for the zone-captured #135 and #131. The difference lies outside #192's steps:
+
+- Reading the ticket's body and comments before the launch (`SKILL.md` step 2): 6,154 for #185, whose comments were long. The 0.8.77 session read no ticket.
+- Split-out files read when reached: `watching.md` 1,770, `zone-capture.md` 1,795, `routine-answers.md` 1,168, `report-states.md` 1,618. At 0.8.77 that text was in `SKILL.md`, counted in the fixed load.
+- Two questions to the maintainer (an ungranted label change, then the live-check relabel) and two `live-check.sh` runs: 2,457.
+- Reading the run record back for the report: 1,012.
+
+The first worker alone, from `step.sh` to its `finish.sh`, cost 16,486; without the ticket read and the two split-out files, 6,767. The first worker of #135, from `step.sh` to its glance, cost 8,328.
 
 ## Options weighed
 
