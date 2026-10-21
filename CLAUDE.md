@@ -36,6 +36,8 @@ A scratch repo whose upstream a script reads (`@{upstream}`, `@{u}`) has one set
 
 A check on a line that lists several items, such as `ready, blockers closed:`, compares the whole list with `check`, not `has`. A substring passes when extra items follow it: two tickets that should have read as blocked were listed as ready while a `has` check still passed.
 
+A check that output holds no match for a pattern anchors the pattern to what it looks for, such as `grep '^jq: '` for jq's error lines, never a bare short word. Output that prints a scratch path carries `mktemp`'s random name, and a bare word matches it now and then: `grep jq` in `tests/resuming.test.sh` failed about one run in 400, when the name held `jq` (#128).
+
 Each test sets or unsets every environment variable the scripts it runs read, so it gives the same result in any session. The maintainer's sessions set `MP_SESSION_TITLE=1`, which changes what the status line prints, and one test failed only there.
 
 A test that runs `git` or `gh` unsets `CLAUDE_CODE_SESSION_ATTENDED`. A `/supervise` worker runs the suite with `scripts/worker-bin` first on its PATH and the variable at `0`, and there the wrappers refuse a scratch repo's push (docs/adr/0006); five test files failed only there. Check a new test the way a worker runs it: `PATH="$PWD/plugins/mp-ported-skills/scripts/worker-bin:$PATH" CLAUDE_CODE_SESSION_ATTENDED=0 sh tests/<name>.test.sh`.
