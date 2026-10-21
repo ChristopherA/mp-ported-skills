@@ -64,7 +64,8 @@ ideas="/grill-with-docs on a new idea, or /improve-codebase-architecture (you ty
 # "parked", when none qualifies; nothing when #n has no open sub-issues.
 # Reads $open_nums, $repo_slug, $body_blockers and the label strings. The
 # weigh step reads the child's number back from "; next child #N", so keep
-# that wording.
+# that wording. Writes the open children to $tmp/kids-<n>.json, which the
+# /supervise queue reads.
 # Reads every page: gh prints one array per page, merged here into one, and
 # the first page can hold only closed children.
 next_child() {
@@ -503,8 +504,9 @@ gather() {
         else cands=$(printf '%s' "$rows" | jq -c --argjson open "$open_nums" --argjson fx "$fixed_nums" '
             [.[] | select(.role == "agent" and (.l | index("parked") | not) and (.n as $n | $fx | index($n) | not))
              | .line |= [.[] | select(. as $b | $open | index($b))]]'); fi
-        qlinks='{}'
-        for n in $(printf '%s' "$cands" | jq -r '.[] | select(.dep > 0) | .n'); do
+        # Links unblocks: already read are reused: each read spends the budget.
+        qlinks=$links
+        for n in $(printf '%s' "$cands" | jq -r --argjson have "$links" '.[] | select(.dep > 0 and ($have | has("\(.n)") | not)) | .n'); do
             b=$(open_link_blockers "$n")
             qlinks=$(printf '%s' "$qlinks" | jq -c --arg n "$n" --argjson b "${b:-null}" '.[$n] = $b')
         done
@@ -532,11 +534,13 @@ gather() {
                  end
                end) as $m
             | {q: $r.q, m: $m, len: (($m.after // $r.q) | length)}')
-        qlen=$(printf '%s' "$qr" | jq '.len')
+        # Empty when the children or the replay could not be read: refused below.
+        qlen=$(printf '%s' "$qr" | jq '.len' 2>/dev/null)
         echo "queue: $(printf '%s' "$qr" | jq -r '.q | map("#\(.)") | join(" ")')"
-        printf '%s' "$qr" | jq -r --arg p "$parent" '.m // empty
+        printf '%s' "$qr" | jq -r --arg p "$parent" \
+            --arg path "'repos/{owner}/{repo}/issues/$parent/sub_issues/priority'" '.m // empty
             | "reorder: #\(.y) (open child \(.yi) of #\($p)) ahead of #\(.x) (open child \(.xi)): "
-              + "gh api --method PATCH '"'repos/{owner}/{repo}/issues/\(\$p)/sub_issues/priority'"'"
+              + "gh api --method PATCH \($path)"
               + " -F sub_issue_id=\(.yid) -F before_id=\(.xid); queue after: \(.after | map("#\(.)") | join(" "))"'
     fi
     refusal=
@@ -548,6 +552,7 @@ gather() {
     elif [ -n "$dist_inflight" ]; then refusal="work in flight in distribution repo $dist: ${dist_inflight#, }"
     elif [ -n "$dist_unread" ]; then refusal="distribution repo $dist_unread"
     elif [ -z "$step_n" ]; then refusal="other work in flight: ${inflight#, }"
+    elif ! [ "$qlen" -ge 0 ] 2>/dev/null; then refusal="the queue could not be read"
     elif [ "$qlen" -lt 2 ]; then refusal="a queue of one (#$step_n); /supervise is worth running only for two or more tickets"
     else
         here=$(pwd -P)

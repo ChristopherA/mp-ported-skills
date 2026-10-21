@@ -47,7 +47,7 @@ Done when the case stands confirmed or you have moved it.
   - **A queue of one** (`supervise: not offered: a queue of one`, no `reorder:` line): recommend `/implement #N`, with no `/supervise` form.
   - **A queue of two or more** (the `supervise:` line holds a command, no `reorder:` line): recommend the `--loop` command, without the `(you type it; user-invoked)` note, naming the queued tickets in order, as the way to build them in background workers while this session stays free. `/implement #N` is the alternative, for building only the first ticket in this session.
   - **A reorder** (a `reorder:` line, and the `supervise:` line holds a command): recommend the reorder, naming the ticket, the child it goes ahead of and the queue after, and then the `--loop` command over that queue. Give the PATCH command in a fenced code block; run it only when the user picks that option, and then give the loop command for them to type. `/implement #N` alone is the alternative.
-  - **A failed check** (any other `not offered:` reason): recommend `/implement #N` and give the reason in one line.
+  - **A failed check** (any other `not offered:` reason): recommend `/implement #N` and give the reason in one line. A `reorder:` line beside it is not offered either: the reorder only serves the loop.
 
   Never start a worker yourself; only the user starts `/supervise`.
 - **Runner-up**: the `runner-up:` line: the next case that applies, the second hand ticket when case 6 wins, or the case 7 suggestions.
