@@ -92,10 +92,11 @@ unset FAKE_GH_FAIL FAKE_CLAUDE_FAIL FAKE_GH_SLEEP MP_RESUME_BUDGET CLAUDE_PROJEC
 issues() { printf '%s' "$1" >"$FAKE_GH/issues.json"; }
 prs() { printf '%s' "$1" >"$FAKE_GH/prs.json"; }
 # issue <n> <labels csv> [blocked_by] [body]; every issue is in me/proj, and a
-# blocker fixture names other/lib for a ticket in another repo.
+# blocker fixture names other/lib for a ticket in another repo. Its id, which
+# a sub-issue reorder names, is 1000 + n.
 issue() {
     jq -nc --argjson n "$1" --arg l "$2" --argjson d "${3:-0}" --arg b "${4:-}" \
-        '{number: $n, title: "t\($n)", body: $b, comments: 0, state: "open",
+        '{id: (1000 + $n), number: $n, title: "t\($n)", body: $b, comments: 0, state: "open",
           repository_url: "https://api.github.com/repos/me/proj",
           labels: ($l | split(",") | map(select(. != "") | {name: .})),
           issue_dependencies_summary: {blocked_by: $d}}'
@@ -480,26 +481,56 @@ g checkout -q -b feature
 check "case 1: off the default branch" "1 work in flight: on feature not main" "$(next "$(run)")"
 g checkout -q main
 
-# --- the /supervise offer ---------------------------------------------------
-# When the next step is /implement #N, state.sh says whether /supervise would
-# take it: launch.sh's entry checks (default branch, clean tree, no other live
-# background session) and step.sh's (nothing else in flight).
+# --- the /supervise offer (#111, #129) ---------------------------------------
+# When the next step is /implement #N, state.sh replays the pick a
+# /supervise --loop makes after each ticket to find its queue, and offers the
+# loop only for a queue of two or more, when launch.sh's entry checks
+# (default branch, clean tree, no other live background session) and
+# step.sh's (nothing else in flight) pass. Under an in-motion parent, a ready
+# child behind the child that ends the queue is offered as a reorder.
 sup() { printf '%s\n' "$1" | sed -n 's/^supervise: //p'; }
+queue() { line_of "$1" queue; }
+reorder() { line_of "$1" reorder; }
 real=$(cd "$proj" && pwd -P)
-offer="/mp-ported-skills:supervise $proj --model claude-opus-5-5 --effort medium (you type it; user-invoked)"
+offer="/mp-ported-skills:supervise $proj --loop --model claude-opus-5-5 --effort medium (you type it; user-invoked)"
+one() { printf 'not offered: a queue of one (#%s); /supervise is worth running only for two or more tickets' "$1"; }
+move() { # <parent> <ticket> <ahead of>
+    printf "gh api --method PATCH 'repos/{owner}/{repo}/issues/%s/sub_issues/priority' -F sub_issue_id=%s -F before_id=%s" \
+        "$1" "$((1000 + $2))" "$((1000 + $3))"
+}
 agents() { printf '%s' "$1" >"$FAKE_GH/agents.json"; }
 row() { # <id> <state> <pid or null> [cwd] [kind]
     jq -nc --arg id "$1" --arg s "$2" --argjson pid "$3" --arg cwd "${4:-$real}" --arg k "${5:-background}" \
         '{id: $id, kind: $k, cwd: $cwd, state: $s, pid: $pid}'
 }
 
+# Case 2: the queue is the ready tickets, lowest number first.
 issues "$(list "$(issue 52 ready-for-agent)")"
 out=$(run)
-check "supervise: offered for case 2 on a clean default branch" "$offer" "$(sup "$out")"
+check "queue: case 2, one ready ticket" "#52" "$(queue "$out")"
+check "supervise: not offered for a queue of one" "$(one 52)" "$(sup "$out")"
 check "supervise: next line unchanged" "2 /implement #52 (you type it; user-invoked): #52 t52" "$(next "$out")"
+issues "$(list "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)")"
+out=$(run)
+check "queue: case 2, two ready tickets" "#52 #53" "$(queue "$out")"
+check "supervise: the loop offered for a queue of two" "$offer" "$(sup "$out")"
+check "supervise: no reorder outside an in-motion parent" "" "$(reorder "$out")"
 check "supervise: the folder as given, . by default" \
-    "/mp-ported-skills:supervise . --model claude-opus-5-5 --effort medium (you type it; user-invoked)" \
+    "/mp-ported-skills:supervise . --loop --model claude-opus-5-5 --effort medium (you type it; user-invoked)" \
     "$(sup "$(cd "$proj" && sh "$state" </dev/null 2>&1)")"
+# A ticket blocked only by queued tickets, by body or GitHub link, joins the
+# queue where the loop would reach it; one with another open blocker, a
+# parked one and a ready-for-human one do not.
+issues "$(list "$(issue 9 needs-triage)" "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent 0 'Blocked by: #52')" \
+    "$(issue 54 ready-for-agent 1)" "$(issue 55 ready-for-agent 0 'Blocked by: #52, #9')" \
+    "$(issue 56 ready-for-agent,parked)" "$(issue 57 ready-for-human)")"
+printf '[{"number":53,"state":"open"}]' >"$FAKE_GH/deps-54.json"
+check "queue: case 2, tickets blocked only by queued ones join" "#52 #53 #54" "$(queue "$(run)")"
+printf 'not json' >"$FAKE_GH/deps-54.json"
+check "queue: case 2, unread links keep a ticket out" "#52 #53" "$(queue "$(run)")"
+command rm -f "$FAKE_GH/deps-54.json"
+
+issues "$(list "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)")"
 agents "$(list "$(row aa11 stopped null)" "$(row bb22 done null)" "$(row cc33 working 12 /elsewhere)" \
     "$(row dd44 working 13 "$real" interactive)")"
 check "supervise: stopped, finished, elsewhere and interactive sessions do not count" "$offer" "$(sup "$(run)")"
@@ -516,14 +547,50 @@ check "supervise: not offered when claude agents prints no list" \
     "$(sup "$(run)")"
 agents '[]'
 
-# An in-motion parent whose next child is ready-for-agent is also /implement.
-issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)")"
-list "$(issue 52 ready-for-agent)" >"$FAKE_GH/sub-24.json"
-check "supervise: offered for an in-motion parent's next child" "$offer" "$(sup "$(run)")"
+# An in-motion parent: the queue follows the parent's order, and a child
+# blocked only by a queued child counts.
+kids() { list "$@" >"$FAKE_GH/sub-24.json"; issues "$(list "$(issue 9 needs-triage)" "$(issue 24 ready-for-human,in-motion)" "$@")"; }
+kids "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent 0 'Blocked by: #52')" "$(issue 54 ready-for-human)"
+out=$(run)
+check "queue: a child blocked only by a queued child counts" "#52 #53" "$(queue "$out")"
+check "supervise: offered for an in-motion parent's queue" "$offer" "$(sup "$out")"
+check "supervise: no reorder with nothing behind the child that ends it" "" "$(reorder "$out")"
+kids "$(issue 52 ready-for-agent)" "$(issue 58 ready-for-agent 0 'Blocked by: #9')" "$(issue 53 ready-for-agent)" \
+    "$(issue 59 ready-for-agent 1)"
+printf '[{"number":53,"state":"open"}]' >"$FAKE_GH/deps-59.json"
+check "queue: blocked children are skipped, and a linked blocker that is queued counts" "#52 #53 #59" "$(queue "$(run)")"
+command rm -f "$FAKE_GH/deps-59.json"
+# A ready child behind the ready-for-human child that ends the queue.
+kids "$(issue 52 ready-for-agent)" "$(issue 54 ready-for-human)" "$(issue 55 ready-for-agent)"
+out=$(run)
+check "reorder: the queue ends at a by-hand child" "#52" "$(queue "$out")"
+check "reorder: names the move, its command and the longer queue" \
+    "#55 (open child 3 of #24) ahead of #54 (open child 2): $(move 24 55 54); queue after: #52 #55" "$(reorder "$out")"
+check "reorder: the loop offered over the longer queue" "$offer" "$(sup "$out")"
+check "reorder: next line unchanged" "1 work in flight: in motion #24 t24; next child #52 (ready-for-agent, /implement #52, you type it; user-invoked): t52" "$(next "$out")"
+# A parked child is never queued or moved.
+kids "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent,parked)" "$(issue 54 ready-for-human)" \
+    "$(issue 55 ready-for-agent,parked)" "$(issue 56 ready-for-agent)"
+out=$(run)
+check "reorder: a parked child is not queued" "#52" "$(queue "$out")"
+check "reorder: a parked child is not moved" \
+    "#56 (open child 5 of #24) ahead of #54 (open child 3): $(move 24 56 54); queue after: #52 #56" "$(reorder "$out")"
+# A not-ready child ends the queue as a by-hand one does.
+kids "$(issue 52 ready-for-agent)" "$(issue 57 enhancement)" "$(issue 55 ready-for-agent)" "$(issue 56 ready-for-agent)"
+check "reorder: behind a not-ready child, the queue after counts every ticket it frees" \
+    "#55 (open child 3 of #24) ahead of #57 (open child 2): $(move 24 55 57); queue after: #52 #55 #56" "$(reorder "$(run)")"
+# A child blocked by the one that ends the queue cannot go ahead of it.
+kids "$(issue 52 ready-for-agent)" "$(issue 54 ready-for-human)" "$(issue 55 ready-for-agent 0 'Blocked by: #54')"
+out=$(run)
+check "reorder: none for a child blocked by the one ending the queue" "" "$(reorder "$out")"
+check "reorder: none, so a queue of one" "$(one 52)" "$(sup "$out")"
+
+kids "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)"
 echo x >"$proj/scratch"
 out=$(run)
 check "supervise: dirty tree, next is still the child" "1 work in flight: 1 uncommitted paths, in motion #24 t24; next child #52 (ready-for-agent, /implement #52, you type it; user-invoked): t52" "$(next "$out")"
 check "supervise: not offered on a dirty tree" "not offered: 1 uncommitted paths; commit or clear them first" "$(sup "$out")"
+check "queue: none when step.sh would not take the step" "" "$(queue "$out")"
 command rm -f "$proj/scratch"
 g checkout -q -b side
 check "supervise: not offered off the default branch" "not offered: on side, not the default branch main" "$(sup "$(run)")"
@@ -544,17 +611,20 @@ prs '[]'
 
 # step.sh takes only the first in-motion ticket's child.
 issues "$(list "$(issue 23 ready-for-human,in-motion)" "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)")"
+list "$(issue 52 ready-for-agent)" >"$FAKE_GH/sub-24.json"
 check "supervise: not offered for a second in-motion ticket's child" \
     "not offered: other work in flight: in motion #23 t23; #24 t24; next child #52 (ready-for-agent, /implement #52, you type it; user-invoked): t52" \
     "$(sup "$(run)")"
 issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)")"
 
-# Any other step: no offer at all.
-list "$(issue 26 ready-for-human)" >"$FAKE_GH/sub-24.json"
-check "supervise: no offer when the next child is by hand" "" "$(sup "$(run)")"
+# Any other step: no offer and no queue.
+list "$(issue 26 ready-for-human)" "$(issue 52 ready-for-agent)" >"$FAKE_GH/sub-24.json"
+out=$(run)
+check "supervise: no offer when the next child is by hand" "" "$(sup "$out")"
+check "queue: none when the next child is by hand" "" "$(queue "$out")"
 command rm -f "$FAKE_GH/sub-24.json"
 check "supervise: no offer for an in-motion ticket" "" "$(sup "$(run)")"
-issues "$(list "$(issue 31 needs-triage)" "$(issue 52 ready-for-agent)")"
+issues "$(list "$(issue 31 needs-triage)" "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)")"
 out=$(run)
 check "supervise: still offered when the runner-up is not /implement" "$offer" "$(sup "$out")"
 issues "$(list "$(issue 81 ready-for-human)" "$(issue 31 needs-triage)")"
@@ -568,8 +638,8 @@ issues "$saved_issues"
 # A Project naming a Distribution repo in docs/agents/distribution-repo.md has
 # that repo's git read too, and its work in flight is case 1. An in-motion
 # parent's ready child is the step, so the /supervise line shows.
-issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)")"
-list "$(issue 52 ready-for-agent)" >"$FAKE_GH/sub-24.json"
+issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)")"
+list "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)" >"$FAKE_GH/sub-24.json"
 child="in motion #24 t24; next child #52 (ready-for-agent, /implement #52, you type it; user-invoked): t52"
 before=$(run)
 git init -q --bare "$work/dist.git"
