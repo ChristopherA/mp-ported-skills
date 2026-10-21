@@ -5,11 +5,12 @@
 # PATH that serves fixture JSON: no issue-tracker config, `gh` failing (report
 # says unreached), a hung `gh` (report says timed out within its budget), each
 # of the seven weighing cases, a ticket labelled in-motion or parked, the next
-# child of an in-motion parent, the /supervise offer beside /implement (with a
-# fake `claude` serving `claude agents`), what each ready ticket unblocks,
-# a Distribution repo's git work and one that cannot be read, and label
-# strings read from triage-labels.md. Also checks that no plugin
-# hook runs state.sh. Touches nothing outside its own mktemp directory.
+# child of an in-motion parent, the queue a /supervise --loop would run and a
+# reorder that would lengthen it, the /supervise --loop offer beside
+# /implement (with a fake `claude` serving `claude agents`), what each ready
+# ticket unblocks, a Distribution repo's git work and one that cannot be
+# read, and label strings read from triage-labels.md. Also checks that no
+# plugin hook runs state.sh. Touches nothing outside its own mktemp directory.
 #
 # Usage: sh tests/resuming.test.sh
 
@@ -575,10 +576,12 @@ out=$(run)
 check "reorder: a parked child is not queued" "#52" "$(queue "$out")"
 check "reorder: a parked child is not moved" \
     "#56 (open child 5 of #24) ahead of #54 (open child 3): $(move 24 56 54); queue after: #52 #56" "$(reorder "$out")"
-# A not-ready child ends the queue as a by-hand one does.
-kids "$(issue 52 ready-for-agent)" "$(issue 57 enhancement)" "$(issue 55 ready-for-agent)" "$(issue 56 ready-for-agent)"
+# A not-ready child ends the queue as a by-hand one does. The child moved
+# ahead of it also frees a child waiting on it ahead in the order.
+kids "$(issue 52 ready-for-agent)" "$(issue 56 ready-for-agent 0 'Blocked by: #55')" "$(issue 57 enhancement)" \
+    "$(issue 55 ready-for-agent)"
 check "reorder: behind a not-ready child, the queue after counts every ticket it frees" \
-    "#55 (open child 3 of #24) ahead of #57 (open child 2): $(move 24 55 57); queue after: #52 #55 #56" "$(reorder "$(run)")"
+    "#55 (open child 4 of #24) ahead of #57 (open child 3): $(move 24 55 57); queue after: #52 #55 #56" "$(reorder "$(run)")"
 # A child blocked by the one that ends the queue cannot go ahead of it.
 kids "$(issue 52 ready-for-agent)" "$(issue 54 ready-for-human)" "$(issue 55 ready-for-agent 0 'Blocked by: #54')"
 out=$(run)

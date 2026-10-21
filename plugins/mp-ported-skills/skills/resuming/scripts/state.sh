@@ -9,7 +9,11 @@
 # what each ready ticket unblocks (`unblocks:`), and what the next step's and
 # runner-up's tickets unblock, without changing the step. When the working
 # tree's docs/agents/distribution-repo.md names a Distribution repo (#142),
-# reads that repo's git too, and its work in flight is case 1. Writes nothing.
+# reads that repo's git too, and its work in flight is case 1. When the next
+# step is /implement #N, prints the queue a /supervise --loop would run
+# (`queue:`), a sub-issue reorder that would lengthen it (`reorder:`), and the
+# loop command, offered only for two or more tickets (`supervise:`). Writes
+# nothing.
 #
 # Usage: sh state.sh [dir]
 #   dir defaults to the current folder. Reports everything; an unreached
@@ -70,10 +74,13 @@ next_child() {
         { printf '; sub-issues not read'; return; }
     kids=$(printf '%s' "$subs" | jq -c --arg repo "$repo_slug" --argjson open "$open_nums" "$body_blockers"'
         [.[] | select(.state == "open")
-         | {n: .number, t: .title, l: [.labels[].name],
+         | {n: .number, id: .id, t: .title, l: [.labels[].name],
             dep: (.issue_dependencies_summary.blocked_by // 0),
             line: [body_blockers[] | select(. as $b | $open | index($b))]}]')
     [ "$(printf '%s' "$kids" | jq length)" = 0 ] && return
+    # Kept for the /supervise queue, which replays this pick: this function
+    # runs in a command substitution, so a variable would not outlive it.
+    printf '%s' "$kids" >"$tmp/kids-$1.json"
     step=$(printf '%s' "$kids" | jq -r --arg ta "$t_agent" --arg th "$t_human" --arg you "$you_type_bare" '
         [.[] | select(.dep == 0 and (.line | length == 0) and (.l | index("parked") | not))]
         | first // empty
@@ -464,13 +471,14 @@ gather() {
         done
     fi
 
-    # --- the /supervise offer (#111) ---------------------------------------
-    # When the next step is /implement #N, whether /supervise would run it:
-    # step.sh takes it only with nothing else in flight (its patterns are
-    # copied here), and launch.sh only in the main checkout, not a linked
-    # worktree (#79), on the default branch, with a clean tree and no other
-    # live background session in the folder, and the Distribution repo, when
-    # there is one, read and clean.
+    # --- the /supervise offer (#111, #129) ---------------------------------
+    # When the next step is /implement #N, whether /supervise --loop would run
+    # it and the tickets after it: step.sh takes it only with nothing else in
+    # flight (its patterns are copied here), and launch.sh only in the main
+    # checkout, not a linked worktree (#79), on the default branch, with a
+    # clean tree and no other live background session in the folder, and the
+    # Distribution repo, when there is one, read and clean. A loop is worth
+    # running only for two or more tickets, counting a reorder's.
     first=$(printf '%s' "$cases" | sed -n 1p)
     impl=$(printf '%s\n' "$first" | sed -n \
         -e 's/^2 \/implement #\([0-9][0-9]*\) .*/\1/p' \
@@ -479,6 +487,58 @@ gather() {
     step_n=$(printf '%s\n' "$first" | sed -n \
         -e 's/^2 \/implement #\([0-9][0-9]*\) .*/\1/p' \
         -e 's/^1 work in flight: in motion #[0-9][0-9]* [^;]*; next child #\([0-9][0-9]*\) ([^,)]*, \/implement #\1, .*/\1/p')
+    # The queue (#129): the tickets a /supervise --loop would run in turn.
+    # The loop runs no list: after each ticket step.sh re-reads next:, so the
+    # queue replays that pick with each queued ticket counted as closed. Under
+    # an in-motion parent it is next_child's pick in the parent's order, and a
+    # ready-for-human or unlabelled pick ends the queue as step.sh stops on it;
+    # otherwise case 2's, the lowest-numbered ready ticket. A ticket whose
+    # links cannot be read counts as blocked. Under a parent, the first
+    # ready-for-agent child behind the one ending the queue, unblocked once
+    # the queue is closed, is offered as a reorder ahead of it (reorder:).
+    qlen=0
+    if [ -n "$step_n" ]; then
+        parent=$(printf '%s\n' "$first" | sed -n 's/^1 work in flight: in motion #\([0-9][0-9]*\) .*/\1/p')
+        if [ -n "$parent" ]; then cands=$(cat "$tmp/kids-$parent.json")
+        else cands=$(printf '%s' "$rows" | jq -c --argjson open "$open_nums" --argjson fx "$fixed_nums" '
+            [.[] | select(.role == "agent" and (.l | index("parked") | not) and (.n as $n | $fx | index($n) | not))
+             | .line |= [.[] | select(. as $b | $open | index($b))]]'); fi
+        qlinks='{}'
+        for n in $(printf '%s' "$cands" | jq -r '.[] | select(.dep > 0) | .n'); do
+            b=$(open_link_blockers "$n")
+            qlinks=$(printf '%s' "$qlinks" | jq -c --arg n "$n" --argjson b "${b:-null}" '.[$n] = $b')
+        done
+        qr=$(printf '%s' "$cands" | jq -c --argjson links "$qlinks" --arg ta "$t_agent" --arg p "$parent" '
+            def queued($q): . as $b | $q | index($b);
+            def free($q): .by != null and all(.by[]; queued($q));
+            def open($q): (.n | queued($q) | not) and (.l | index("parked") | not);
+            def replay($c): def go: .q as $q
+                | ([$c[] | select(open($q) and free($q))] | first) as $k
+                | if $k == null then .
+                  elif ($k.l | index($ta)) then .q += [$k.n] | go
+                  else .end = $k.n end;
+                {q: [], end: null} | go;
+            map(.line as $line | .by = (if .dep > 0 then $links["\(.n)"] | if . then . + $line else null end
+                                        else $line end))
+            | . as $c | replay($c) as $r
+            | ($c | map(.n)) as $ns
+            | (if $p == "" or $r.end == null then null
+               else ($ns | index($r.end)) as $xi
+               | ([$c[$xi + 1:][] | select(open($r.q) and (.l | index($ta)) and free($r.q))] | first) as $y
+               | if $y == null then null
+                 else ($ns | index($y.n)) as $yi
+                 | {y: $y.n, yid: $y.id, yi: ($yi + 1), x: $r.end, xid: $c[$xi].id, xi: ($xi + 1),
+                    after: replay($c[:$xi] + [$y] + [$c[$xi:][] | select(.n != $y.n)]).q}
+                 end
+               end) as $m
+            | {q: $r.q, m: $m, len: (($m.after // $r.q) | length)}')
+        qlen=$(printf '%s' "$qr" | jq '.len')
+        echo "queue: $(printf '%s' "$qr" | jq -r '.q | map("#\(.)") | join(" ")')"
+        printf '%s' "$qr" | jq -r --arg p "$parent" '.m // empty
+            | "reorder: #\(.y) (open child \(.yi) of #\($p)) ahead of #\(.x) (open child \(.xi)): "
+              + "gh api --method PATCH '"'repos/{owner}/{repo}/issues/\(\$p)/sub_issues/priority'"'"
+              + " -F sub_issue_id=\(.yid) -F before_id=\(.xid); queue after: \(.after | map("#\(.)") | join(" "))"'
+    fi
     refusal=
     if ! linked=$(sh "$main_checkout" . </dev/null 2>&1); then refusal=$linked
     elif [ "$dirty" -gt 0 ]; then refusal="$dirty uncommitted paths; commit or clear them first"
@@ -488,6 +548,7 @@ gather() {
     elif [ -n "$dist_inflight" ]; then refusal="work in flight in distribution repo $dist: ${dist_inflight#, }"
     elif [ -n "$dist_unread" ]; then refusal="distribution repo $dist_unread"
     elif [ -z "$step_n" ]; then refusal="other work in flight: ${inflight#, }"
+    elif [ "$qlen" -lt 2 ]; then refusal="a queue of one (#$step_n); /supervise is worth running only for two or more tickets"
     else
         here=$(pwd -P)
         # A row is live unless stopped, or done with no pid, as in launch.sh.
@@ -503,7 +564,7 @@ gather() {
         fi
     fi
     if [ -n "$refusal" ]; then echo "supervise: not offered: $refusal"
-    else echo "supervise: /mp-ported-skills:supervise $shown --model claude-opus-5-5 --effort medium $you_type"; fi
+    else echo "supervise: /mp-ported-skills:supervise $shown --loop --model claude-opus-5-5 --effort medium $you_type"; fi
 }
 
 # gather runs in the background so the watchdog can stop a hung `gh`. The EXIT
