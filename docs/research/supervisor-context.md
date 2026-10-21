@@ -75,7 +75,7 @@ No settled `done` occurred, the one verdict that prints no message, so its cost 
 
 The whole ticket cost 31,748 (88,316 to 120,064), against 16,900 and 22,600 for the zone-captured #135 and #131. The difference lies outside #192's steps:
 
-- Reading the ticket's body and comments before the launch (`SKILL.md` step 2): 6,154 for #185, whose comments were long. The 0.8.77 session read no ticket.
+- Reading the ticket's body and comments before the launch (`SKILL.md` step 2): 6,154 for #185, whose comments were long. Step 2 has asked for this read since `/supervise` was added, but the 0.8.77 session skipped it, so By step has no row for it.
 - Split-out files read when reached: `watching.md` 1,770, `zone-capture.md` 1,795, `routine-answers.md` 1,168, `report-states.md` 1,618. At 0.8.77 that text was in `SKILL.md`, counted in the fixed load.
 - Two questions to the maintainer (an ungranted label change, then the live-check relabel) and two `live-check.sh` runs: 2,457.
 - Reading the run record back for the report: 1,012.
