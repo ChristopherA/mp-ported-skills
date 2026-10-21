@@ -30,6 +30,8 @@ After a push that bumps the version, run `claude plugin marketplace update mp-po
 
 Tests are `tests/*.test.sh`, run with `sh`. Every `git commit` a test makes in a scratch repo passes `-c commit.gpgsign=false`: the maintainer's global git config signs commits, and a signing prompt hangs a test that has no terminal.
 
+A session that continues a ticket from an earlier worker's red test commit checks each failing expectation against the brief before making it green; a failing check is not yet a spec. In #129, one red check expected a queue the brief's own rule could not produce, and only the build showed it; the fixture was rewritten to test what its name said.
+
 A check that two files match tests `cmp -s`'s exit status, as `same` in `tests/status-line-copy.test.sh` does. `cmp` reports a file that is a prefix of the other on stderr, so a check on its captured stdout reads empty, and passes, for files that differ.
 
 A scratch repo whose upstream a script reads (`@{upstream}`, `@{u}`) has one set: push it with `-u`, or run `git branch -u origin/main main` after the push. A plain `git push origin main` sets none, and the script then takes the no-upstream path, not the one the test means: #186's held-close check read "no upstream" where the test expected a count of unpushed commits.
