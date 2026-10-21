@@ -155,7 +155,9 @@ check "case 5: runner-up falls to case 7" "$case7_later" "$(runner "$out")"
 issues "$(list "$(issue 31 ready-for-agent)")"
 out=$(run)
 has "no closing commits: ready ticket still found" "ready, blockers closed: #31 t31" "$out"
-check "no closing commits: no jq error" "" "$(printf '%s\n' "$out" | grep jq)"
+# jq's own error lines start `jq: `. A bare `jq` also matched the scratch
+# path in the supervise: line whenever mktemp's random name held "jq" (#128).
+check "no closing commits: no jq error" "" "$(printf '%s\n' "$out" | grep '^jq: ')"
 # Past 100 open issues, a ticket only on the second page is still read.
 list "$(issue 32 ready-for-agent)" >"$FAKE_GH/issues.page2.json"
 check "open issues: a ready ticket on the second page" "#31 t31; #32 t32" "$(line_of "$(run)" "ready, blockers closed")"
