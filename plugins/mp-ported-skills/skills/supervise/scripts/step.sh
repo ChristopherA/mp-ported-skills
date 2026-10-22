@@ -18,6 +18,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 state="$SCRIPT_DIR/../../resuming/scripts/state.sh"
+. "$SCRIPT_DIR/accept.sh"
 
 case "${1:-}" in
     --from)
@@ -44,12 +45,9 @@ if [ -z "$line" ]; then
     exit 0
 fi
 
-# Case 2 names the ticket first. In case 1, an in-motion ticket must be the
-# only work in flight (git's items come before it), and the next child's
-# parentheses name /implement only for the ready-for-agent label.
-n=$(printf '%s\n' "$line" | sed -n \
-    -e 's/^2 \/implement #\([0-9][0-9]*\) .*/\1/p' \
-    -e 's/^1 work in flight: in motion #[0-9][0-9]* [^;]*; next child #\([0-9][0-9]*\) ([^,)]*, \/implement #\1, .*/\1/p')
+# Which steps it takes is accept.sh's, shared with state.sh's supervise:
+# offer (#115).
+n=$(accept_step "$line")
 if [ -n "$n" ]; then
     echo "implement #$n"
 else

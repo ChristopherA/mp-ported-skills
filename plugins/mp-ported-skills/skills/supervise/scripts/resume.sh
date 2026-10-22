@@ -88,6 +88,7 @@ done
 DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
 . "$(dirname -- "$0")/marker.sh"
 . "$(dirname -- "$0")/settle.sh"
+. "$(dirname -- "$0")/live.sh"
 
 job="$CLAUDE_CONFIG_DIR/jobs/$ID/state.json"
 sid=$(jq -r '.sessionId // empty' "$job" 2>/dev/null)
@@ -96,17 +97,15 @@ sid=$(jq -r '.sessionId // empty' "$job" 2>/dev/null)
 # verdict <agents json>: one word for the session's row: `gone`, `others
 # <list>` (another live background session in its checkout, copies this run
 # made left out), `stopped`, `pid` or `nopid`. Exits non-zero when jq fails.
-# Another session is live unless it is stopped, or done with no pid, the
-# same rule as launch.sh's.
+# Which other sessions are live is live.sh's, shared with launch.sh.
 verdict() {
-    printf '%s' "$1" | jq -er --arg id "$ID" --arg d "$DIR" --arg copies "$copies" '
+    printf '%s' "$1" | jq -er --arg id "$ID" --arg d "$DIR" --arg copies "$copies" "$live_def"'
         ($copies | split(" ")) as $mine
         | . as $all
         | ([$all[] | select(.kind == "background" and .id == $id)] | first) as $row
         | if $row == null then "gone"
           else ($row.cwd // $d) as $cwd
-               | [$all[] | select(.kind == "background" and .id != $id and .cwd == $cwd
-                               and .state != "stopped" and (.state != "done" or .pid != null)
+               | [$all[] | select(live and .id != $id and .cwd == $cwd
                                and (.id | IN($mine[]) | not))
                   | "\(.id) (\(.state // "unknown"))"] as $others
                | if ($others | length) > 0 then "others \($cwd): \($others | join(", "))"

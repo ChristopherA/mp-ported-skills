@@ -1,7 +1,9 @@
 #!/bin/sh
 # supervise-helpers.test.sh -- tests for the supervise skill's shared
-# helpers: marker.sh (the checkout's worker marker) and settle.sh (stop a
-# worker and wait until it has settled) (#137).
+# helpers: marker.sh (the checkout's worker marker), settle.sh (stop a
+# worker and wait until it has settled) (#137), live.sh (which background
+# sessions are live in a checkout) and accept.sh (which next: step /supervise
+# takes) (#115).
 #
 # Sources each helper and runs its function against a scratch repo and a
 # fake `claude` first on PATH. The fake logs each call and answers
@@ -179,6 +181,56 @@ mine() { echo "others somewhere"; }
 lists "$(row running 101)"
 out=$(stop_and_settle c2a368ee 60 0 300 mine); rc=$?
 check "a caller's verdict word ends the wait" "0 others somewhere" "$rc $out"
+
+# --- live.sh ---------------------------------------------------------------
+. "$scripts/live.sh"
+
+# bg <id> <cwd> <state json> <pid json> [kind]: one claude agents row.
+bg() { printf '{"id":"%s","kind":"%s","cwd":"%s","state":%s,"pid":%s}' "$1" "${5:-background}" "$2" "$3" "$4"; }
+d=/w/proj
+agents="[$(bg a1 $d '"working"' 11),$(bg a2 $d '"stopped"' null),$(bg a3 $d '"done"' null),$(bg a4 $d '"done"' 14),$(bg a5 $d null null),$(bg a6 /w/other '"working"' 16),$(bg a7 $d '"working"' 17 interactive),$(bg a8 $d '"blocked"' null)]"
+out=$(live_others "$agents" "$d"); rc=$?
+check "live: working, done with a pid, unknown and blocked count; stopped, done with no pid, another folder and an interactive row do not" \
+    "0 a1 (working), a4 (done), a5 (unknown), a8 (blocked)" "$rc $out"
+out=$(live_others "[$(bg a2 $d '"stopped"' null)]" "$d"); rc=$?
+check "live: none live prints nothing" "0 " "$rc $out"
+out=$(live_others "[]" "$d"); rc=$?
+check "live: an empty list prints nothing" "0 " "$rc $out"
+live_others "not json" "$d" >/dev/null; rc=$?
+check "live: a list jq cannot read fails" "fail" "$([ $rc -ne 0 ] && echo fail || echo ok)"
+out=$(printf '%s' "$agents" | jq -c "$live_def [.[] | select(live) | .id]")
+check "live: live_def works inside a caller's own jq" '["a1","a4","a5","a6","a8"]' "$out"
+
+# The rule lives only in live.sh: no script carries its own copy (#115).
+skills="$root/plugins/mp-ported-skills/skills"
+copies=$(grep -l '.state != "done" or .pid != null' "$skills"/*/scripts/*.sh | sed "s|$skills/||")
+check "live: the rule is written only in live.sh" "supervise/scripts/live.sh" "$copies"
+for f in supervise/scripts/launch.sh supervise/scripts/resume.sh resuming/scripts/state.sh; do
+    grep -q 'live\.sh"' "$skills/$f"; rc=$?
+    check "live: $f sources live.sh" 0 "$rc"
+done
+
+# --- accept.sh -------------------------------------------------------------
+. "$scripts/accept.sh"
+
+check "accept: case 2 names its ticket" 12 \
+    "$(accept_step '2 /implement #12 (you type it): #12 Do a thing')"
+check "accept: case 1 with only an in-motion parent takes its ready-for-agent child" 41 \
+    "$(accept_step '1 work in flight: in motion #40 Supervise; next child #41 (ready-for-agent, /implement #41, you type it)')"
+check "accept: case 1 with git work before the parent is not taken" "" \
+    "$(accept_step '1 work in flight: 2 uncommitted paths, in motion #40 Supervise; next child #41 (ready-for-agent, /implement #41, you type it)')"
+check "accept: a ready-for-human child is not taken" "" \
+    "$(accept_step '1 work in flight: in motion #40 Supervise; next child #41 (ready-for-human, by hand)')"
+check "accept: case 3 is not taken" "" \
+    "$(accept_step '3 /triage (you type it): 1 unlabelled')"
+
+# The patterns live only in accept.sh: step.sh and state.sh both use it.
+copies=$(grep -l 'in motion #\[0-9\]\[0-9\]\* \[^;\]\*; next child' "$skills"/*/scripts/*.sh | sed "s|$skills/||")
+check "accept: the patterns are written only in accept.sh" "supervise/scripts/accept.sh" "$copies"
+for f in supervise/scripts/step.sh resuming/scripts/state.sh; do
+    grep -q 'accept\.sh"' "$skills/$f"; rc=$?
+    check "accept: $f sources accept.sh" 0 "$rc"
+done
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

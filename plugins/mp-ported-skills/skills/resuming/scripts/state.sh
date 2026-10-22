@@ -34,6 +34,10 @@ esac
 supervise_scripts="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/../../supervise/scripts"
 main_checkout="$supervise_scripts/main-checkout.sh"
 distribution="$supervise_scripts/distribution.sh"
+# The rules the supervise: offer shares with /supervise (#115): which next:
+# step it takes, and which background sessions are live.
+. "$supervise_scripts/accept.sh"
+. "$supervise_scripts/live.sh"
 
 cd "$dir" 2>/dev/null || exit 0
 
@@ -475,7 +479,7 @@ gather() {
     # --- the /supervise offer (#111, #129) ---------------------------------
     # When the next step is /implement #N, whether /supervise --loop would run
     # it and the tickets after it: step.sh takes it only with nothing else in
-    # flight (its patterns are copied here), and launch.sh only in the main
+    # flight (accept.sh's patterns, which it shares), and launch.sh only in the main
     # checkout, not a linked worktree (#79), on the default branch, with a
     # clean tree and no other live background session in the folder, and the
     # Distribution repo, when there is one, read and clean. A loop is worth
@@ -485,9 +489,7 @@ gather() {
         -e 's/^2 \/implement #\([0-9][0-9]*\) .*/\1/p' \
         -e 's/^1 work in flight: .*; next child #\([0-9][0-9]*\) ([^,)]*, \/implement #\1, .*/\1/p')
     [ -n "$impl" ] || return 0
-    step_n=$(printf '%s\n' "$first" | sed -n \
-        -e 's/^2 \/implement #\([0-9][0-9]*\) .*/\1/p' \
-        -e 's/^1 work in flight: in motion #[0-9][0-9]* [^;]*; next child #\([0-9][0-9]*\) ([^,)]*, \/implement #\1, .*/\1/p')
+    step_n=$(accept_step "$first")
     # The queue (#129): the tickets a /supervise --loop would run in turn.
     # The loop runs no list: after each ticket step.sh re-reads next:, so the
     # queue replays that pick with each queued ticket counted as closed. Under
@@ -556,13 +558,10 @@ gather() {
     elif [ "$qlen" -lt 2 ]; then refusal="a queue of one (#$step_n); /supervise is worth running only for two or more tickets"
     else
         here=$(pwd -P)
-        # A row is live unless stopped, or done with no pid, as in launch.sh.
+        # Which sessions are live is live.sh's, shared with launch.sh.
         if ! list=$(claude agents --json --all </dev/null 2>/dev/null); then
             refusal="claude agents --json --all failed, so other sessions in $here are unknown"
-        elif ! others=$(printf '%s' "$list" | jq -er --arg d "$here" '
-            [.[] | select(.kind == "background" and .cwd == $d and .state != "stopped"
-                          and (.state != "done" or .pid != null))
-             | "\(.id) (\(.state // "unknown"))"] | join(", ")' 2>/dev/null); then
+        elif ! others=$(live_others "$list" "$here"); then
             refusal="claude agents --json --all printed no list jq could read, so other sessions in $here are unknown"
         elif [ -n "$others" ]; then
             refusal="another live background session in $here: $others"
