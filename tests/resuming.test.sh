@@ -666,6 +666,13 @@ distribution repo branch: main (default main), in sync with origin/main, as of l
 distribution repo uncommitted paths: 0; unpushed commits: 0" "$(printf '%s\n' "$out" | sed -n '1,5p')"
 check "dist: clean, next is the child" "1 work in flight: $child" "$(next "$out")"
 check "dist: clean, supervise offered" "$offer" "$(sup "$out")"
+# launch.sh refuses a live background session in the Distribution repo too.
+agents "$(list "$(row dd77 working 21 "$dist")")"
+check "dist: a live session there, supervise not offered" \
+    "not offered: another live background session in distribution repo $dist: dd77 (working)" "$(sup "$(run)")"
+agents "$(list "$(row dd77 stopped null "$dist")")"
+check "dist: a stopped session there, supervise offered" "$offer" "$(sup "$(run)")"
+agents '[]'
 
 echo x >"$dist/scratch"
 out=$(run)

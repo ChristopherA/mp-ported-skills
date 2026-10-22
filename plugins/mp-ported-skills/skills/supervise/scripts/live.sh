@@ -1,3 +1,4 @@
+#!/bin/sh
 # live.sh -- sourced by launch.sh, resume.sh and resuming's state.sh: which
 # background sessions count as live in a checkout (#115). One rule, so
 # /supervise and /next cannot disagree on it.

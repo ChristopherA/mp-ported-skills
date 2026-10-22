@@ -479,11 +479,12 @@ gather() {
     # --- the /supervise offer (#111, #129) ---------------------------------
     # When the next step is /implement #N, whether /supervise --loop would run
     # it and the tickets after it: step.sh takes it only with nothing else in
-    # flight (accept.sh's patterns, which it shares), and launch.sh only in the main
-    # checkout, not a linked worktree (#79), on the default branch, with a
-    # clean tree and no other live background session in the folder, and the
-    # Distribution repo, when there is one, read and clean. A loop is worth
-    # running only for two or more tickets, counting a reorder's.
+    # flight (accept.sh's patterns, shared with it), and launch.sh only in
+    # the main checkout, not a linked worktree (#79), on the default branch,
+    # with a clean tree and no other live background session in the folder
+    # (live.sh's rule, shared with it), and the Distribution repo, when there
+    # is one, read and clean. A loop is worth running only for two or more
+    # tickets, counting a reorder's.
     first=$(printf '%s' "$cases" | sed -n 1p)
     impl=$(printf '%s\n' "$first" | sed -n \
         -e 's/^2 \/implement #\([0-9][0-9]*\) .*/\1/p' \
@@ -558,13 +559,16 @@ gather() {
     elif [ "$qlen" -lt 2 ]; then refusal="a queue of one (#$step_n); /supervise is worth running only for two or more tickets"
     else
         here=$(pwd -P)
-        # Which sessions are live is live.sh's, shared with launch.sh.
+        # Which sessions are live is live.sh's, shared with launch.sh, which
+        # also refuses one in the Distribution repo.
         if ! list=$(claude agents --json --all </dev/null 2>/dev/null); then
             refusal="claude agents --json --all failed, so other sessions in $here are unknown"
         elif ! others=$(live_others "$list" "$here"); then
             refusal="claude agents --json --all printed no list jq could read, so other sessions in $here are unknown"
         elif [ -n "$others" ]; then
             refusal="another live background session in $here: $others"
+        elif [ -n "$dist" ] && others=$(live_others "$list" "$dist") && [ -n "$others" ]; then
+            refusal="another live background session in distribution repo $dist: $others"
         fi
     fi
     if [ -n "$refusal" ]; then echo "supervise: not offered: $refusal"

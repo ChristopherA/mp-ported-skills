@@ -1,3 +1,4 @@
+#!/bin/sh
 # accept.sh -- sourced by step.sh and resuming's state.sh: which next: step
 # /supervise takes (#115). One copy of the patterns, so state.sh's
 # supervise: offer and step.sh cannot disagree on it.
