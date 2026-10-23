@@ -1,0 +1,81 @@
+#!/bin/sh
+# supervise-relabel-route.test.sh -- checks the supervise skill's route for
+# a worker that pushed its ticket and then waits on relabelling it
+# ready-for-human (#204).
+#
+# No grant covers that relabel, so the build's turn ends on `Waiting on: gh
+# issue edit N --add-label ready-for-human ...`. The work is settled, and
+# the capture's live-check step already takes the relabel and the reorder
+# on one question, so the Report step sends the capture rather than leaving
+# the worker running. This checks that route in SKILL.md, that a capture
+# waiting on both a push and the live check reaches the live-check question
+# in SKILL.md and zone-capture.md, and that loop.md counts a capture ending
+# on the live check as settled. Reads only files in this checkout.
+#
+# Usage: sh tests/supervise-relabel-route.test.sh
+
+set -u
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+dir="$root/plugins/mp-ported-skills/skills/supervise"
+skill="$dir/SKILL.md"
+zone="$dir/zone-capture.md"
+loop="$dir/loop.md"
+
+pass=0 fail=0
+check() { # <name> <expected> <actual>
+    if [ "$2" = "$3" ]; then
+        pass=$((pass + 1))
+    else
+        fail=$((fail + 1))
+        printf 'FAIL %s\n  expected: %s\n  actual:   %s\n' "$1" "$2" "$3"
+    fi
+}
+# line <file> <fixed string>: the first line holding the string.
+line() { grep -F -- "$2" "$1" | head -n 1; }
+# has_in <text> <fixed string> -- yes or no
+has_in() { if printf '%s\n' "$1" | grep -qF -- "$2"; then echo yes; else echo no; fi; }
+
+# The Report step routes the post-push relabel to the capture.
+head_relabel="**\`blocked input needed\`** whose \`needs\` line relabels the worker's own ticket to \`ready-for-human\`"
+report=$(line "$skill" "- $head_relabel")
+check "the Report step has the relabel route" yes "$(has_in "$report" "$head_relabel")"
+check "the route holds only when the work is pushed" yes \
+    "$(has_in "$report" "shows the branch even with its upstream")"
+check "the route sends the capture" yes "$(has_in "$report" "Send the capture (Capture, below)")"
+check "the route asks the maintainer nothing first" yes \
+    "$(has_in "$report" "ask the maintainer nothing first")"
+check "the capture's live check takes the relabel" yes \
+    "$(has_in "$report" "live-check.sh")"
+check "a branch still ahead is reported as other states are" yes \
+    "$(has_in "$report" "A branch ahead of its upstream")"
+report_line=$(grep -nF -- "- $head_relabel" "$skill" | cut -d: -f1)
+other_line=$(grep -nF -- '- **Any other state** (`moved`' "$skill" | cut -d: -f1)
+check "the route comes before Any other state" yes \
+    "$([ -n "$report_line" ] && [ -n "$other_line" ] && [ "$report_line" -lt "$other_line" ] && echo yes || echo no)"
+
+# Capture's When list names the block.
+when=$(line "$skill" "- **When:**")
+check "Capture runs after the relabel block" yes \
+    "$(has_in "$when" "the post-push \`ready-for-human\` relabel of the worker's own ticket")"
+
+# A capture waiting on a push and the live check reaches the live check:
+# the needs line holds only the last Waiting on line.
+both="names \`live-check.sh --apply N\` as well"
+push=$(line "$skill" "   - **\`blocked input needed\`** on a \`git push\` no grant covers")
+check "Capture's push route defers to the live check" yes "$(has_in "$push" "$both")"
+live=$(line "$skill" "   - **\`blocked input needed\`** on \`live-check.sh --apply N\`")
+check "Capture's live-check route ends with finish.sh" yes \
+    "$(has_in "$live" "unless Push on approval already ran \`finish.sh\`")"
+zpush=$(line "$zone" "   - **\`blocked input needed\`** on a \`git push\`")
+check "the zone capture's push route defers to the live check" yes "$(has_in "$zpush" "$both")"
+
+# loop.md counts an ordinary capture ending on the live check as settled.
+settle=$(line "$loop" "A ticket's run goes on to the next only when")
+check "loop settles on the relabel block" yes \
+    "$(has_in "$settle" "the post-push \`ready-for-human\` relabel of its own ticket")"
+check "loop settles on a capture ending on the live check" yes \
+    "$(has_in "$settle" "its capture ran (Capture, in \`SKILL.md\`), one ending on \`live-check.sh --apply N\` included")"
+
+printf '%s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" = 0 ]
