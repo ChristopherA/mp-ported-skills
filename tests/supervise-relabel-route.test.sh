@@ -8,9 +8,10 @@
 # the capture's live-check step already takes the relabel and the reorder
 # on one question, so the Report step sends the capture rather than leaving
 # the worker running. This checks that route in SKILL.md, that a capture
-# waiting on both a push and the live check reaches the live-check question
-# in SKILL.md and zone-capture.md, and that loop.md counts a capture ending
-# on the live check as settled. Reads only files in this checkout.
+# waiting on the live check and on a push or a post reaches the live-check
+# question in SKILL.md and zone-capture.md, that routine-answers.md leaves
+# the block to the Report step, and that loop.md counts a capture ending on
+# the live check as settled. Reads only files in this checkout.
 #
 # Usage: sh tests/supervise-relabel-route.test.sh
 
@@ -21,6 +22,7 @@ dir="$root/plugins/mp-ported-skills/skills/supervise"
 skill="$dir/SKILL.md"
 zone="$dir/zone-capture.md"
 loop="$dir/loop.md"
+routine="$dir/routine-answers.md"
 
 pass=0 fail=0
 check() { # <name> <expected> <actual>
@@ -77,8 +79,14 @@ check "Capture's live-check route says how a push is seen" yes \
     "$(has_in "$live" "When a \`git push\` also waits (the capture's message names one, or")"
 check "Capture's live check comes before finish.sh" yes \
     "$(has_in "$live" "Push on approval first, up to its step 6")"
-check "Capture's live-check route ends with step 6 or done" yes \
-    "$(has_in "$live" "Then Push on approval's step 6 when it ran, or else the Report step for \`done\`")"
+check "Capture's live-check route sees a Distribution push" yes \
+    "$(has_in "$live" "with a Distribution repo \`git -C \"<distribution repo>\" status -sb\` shows that one ahead")"
+check "Capture's live-check route ends with step 6, a post, or done" yes \
+    "$(has_in "$live" "Then Push on approval's step 6 when it ran; or else, when the capture's message names a \`gh issue comment\` or \`gh issue create\` no grant covers, Post on approval")"
+post=$(line "$skill" "   - **\`blocked input needed\`** on a \`gh issue comment\` or \`gh issue create\`")
+check "Capture's post route names the second wait" yes "$(has_in "$post" "$both")"
+check "Capture's post route defers to the live check" yes \
+    "$(has_in "$post" "take the \`live-check.sh\` bullet below instead, which posts after the live check")"
 zpush=$(line "$zone" "   - **\`blocked input needed\`** on a \`git push\`")
 check "the zone capture's push route names the second wait" yes "$(has_in "$zpush" "$both")"
 check "the zone capture's push route defers to the live check" yes \
@@ -86,9 +94,14 @@ check "the zone capture's push route defers to the live check" yes \
 zlive=$(line "$zone" "   - **\`blocked input needed\`** on \`live-check.sh --apply N\`")
 check "the zone capture's live check comes before finish.sh" yes \
     "$(has_in "$zlive" "up to its step 6")"
+check "the zone capture's live-check route posts before step 4" yes \
+    "$(has_in "$zlive" "Post on approval (read \`\${CLAUDE_SKILL_DIR}/post-on-approval.md\` and follow it), whose last step runs \`finish.sh\` in place of step 4")"
+zpost=$(line "$zone" "   - **\`blocked input needed\`** on a \`gh issue comment\` or \`gh issue create\`")
+check "the zone capture's post route names the second wait" yes "$(has_in "$zpost" "$both")"
+check "the zone capture's post route defers to the live check" yes \
+    "$(has_in "$zpost" "take the \`live-check.sh\` bullet above, which posts after the live check")"
 
 # Routine answers' not-routine exit leaves a settled route to the Report step.
-routine="$dir/routine-answers.md"
 exit2=$(line "$routine" "- **Exit 2**")
 check "a not-routine block goes on by the Report step" yes \
     "$(has_in "$exit2" "Go on by the items of \`SKILL.md\`'s Report step")"
