@@ -189,6 +189,16 @@ needs git push origin main" "$(watch_file done 9121ff49)"
 waiting_on "All done; pushed to main. Nothing is Waiting on: anything."
 check "watch: a mention mid-line is not waiting" "done
 cwd /work/project" "$(watch_file done 9121ff49)"
+# A capture that waits on a push and on its live check names both; the needs
+# line holds only the last, so the supervise skill reads the message for the
+# other (#204).
+waiting_on "Captured.
+
+\`Waiting on: git push origin main\`
+\`Waiting on: sh /p/capturing/scripts/live-check.sh --apply 185\`"
+check "watch: two Waiting on lines need the last" "blocked input needed
+cwd /work/project
+needs sh /p/capturing/scripts/live-check.sh --apply 185" "$(watch_file done 9121ff49)"
 # The background service can mark that worker blocked with no waitingFor
 # before watch.sh sees it done. The `Waiting on:` line still names what it
 # waits on, and wins over the job's needs summary, which can name a side

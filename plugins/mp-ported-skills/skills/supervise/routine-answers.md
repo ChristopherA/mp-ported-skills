@@ -17,5 +17,5 @@ It reads the question from the worker's transcript: a pending AskUserQuestion wi
   ```
 
   The prompt starts `[supervisor answer to "<q>"]`, which `record.sh` lists under `supervisor answers`, apart from human interventions. List each question answered and its answer in the report.
-- **Exit 2**: `not routine: <why>`, after `question <q>` when one was read. Report the block by the items of `SKILL.md`'s Report step, with `claude attach ID`, adding the `why` line.
+- **Exit 2**: `not routine: <why>`, after `question <q>` when one was read. Go on by the items of `SKILL.md`'s Report step, adding the `why` line; for one they report to the maintainer, add `claude attach ID`. Some send the capture instead, such as a `git push` no grant covers or the post-push `ready-for-human` relabel of the worker's own ticket.
 - **Exit 1**: report the error, and the block.

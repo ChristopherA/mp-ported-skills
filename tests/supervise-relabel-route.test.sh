@@ -45,8 +45,14 @@ check "the route holds only when the work is pushed" yes \
 check "the route sends the capture" yes "$(has_in "$report" "Send the capture (Capture, below)")"
 check "the route asks the maintainer nothing first" yes \
     "$(has_in "$report" "ask the maintainer nothing first")"
-check "the capture's live check takes the relabel" yes \
-    "$(has_in "$report" "live-check.sh")"
+check "the capture's live check takes the relabel and the move" yes \
+    "$(has_in "$report" "its live-check step runs \`live-check.sh\`, which takes the relabel and the move")"
+check "the live check is one question" yes \
+    "$(has_in "$report" "which Capture's step 3 puts to the maintainer as one question")"
+check "the route checks a Distribution repo too" yes \
+    "$(has_in "$report" "with a Distribution repo, that repo's too")"
+check "a capture that ends done leaves no shipped ticket ready-for-agent" yes \
+    "$(has_in "$report" "When the capture then returns \`done\` with the ticket still labelled \`ready-for-agent\`")"
 check "a branch still ahead is reported as other states are" yes \
     "$(has_in "$report" "A branch ahead of its upstream")"
 report_line=$(grep -nF -- "- $head_relabel" "$skill" | cut -d: -f1)
@@ -63,12 +69,31 @@ check "Capture runs after the relabel block" yes \
 # the needs line holds only the last Waiting on line.
 both="names \`live-check.sh --apply N\` as well"
 push=$(line "$skill" "   - **\`blocked input needed\`** on a \`git push\` no grant covers")
-check "Capture's push route defers to the live check" yes "$(has_in "$push" "$both")"
+check "Capture's push route names the second wait" yes "$(has_in "$push" "$both")"
+check "Capture's push route defers to the live check" yes \
+    "$(has_in "$push" "take the \`live-check.sh\` bullet below instead")"
 live=$(line "$skill" "   - **\`blocked input needed\`** on \`live-check.sh --apply N\`")
-check "Capture's live-check route ends with finish.sh" yes \
-    "$(has_in "$live" "unless Push on approval already ran \`finish.sh\`")"
+check "Capture's live-check route says how a push is seen" yes \
+    "$(has_in "$live" "When a \`git push\` also waits (the capture's message names one, or")"
+check "Capture's live check comes before finish.sh" yes \
+    "$(has_in "$live" "Push on approval first, up to its step 6")"
+check "Capture's live-check route ends with step 6 or done" yes \
+    "$(has_in "$live" "Then Push on approval's step 6 when it ran, or else the Report step for \`done\`")"
 zpush=$(line "$zone" "   - **\`blocked input needed\`** on a \`git push\`")
-check "the zone capture's push route defers to the live check" yes "$(has_in "$zpush" "$both")"
+check "the zone capture's push route names the second wait" yes "$(has_in "$zpush" "$both")"
+check "the zone capture's push route defers to the live check" yes \
+    "$(has_in "$zpush" "take the \`live-check.sh\` bullet below")"
+zlive=$(line "$zone" "   - **\`blocked input needed\`** on \`live-check.sh --apply N\`")
+check "the zone capture's live check comes before finish.sh" yes \
+    "$(has_in "$zlive" "up to its step 6")"
+
+# Routine answers' not-routine exit leaves a settled route to the Report step.
+routine="$dir/routine-answers.md"
+exit2=$(line "$routine" "- **Exit 2**")
+check "a not-routine block goes on by the Report step" yes \
+    "$(has_in "$exit2" "Go on by the items of \`SKILL.md\`'s Report step")"
+check "claude attach only for a block reported to the maintainer" yes \
+    "$(has_in "$exit2" "for one they report to the maintainer, add \`claude attach ID\`")"
 
 # loop.md counts an ordinary capture ending on the live check as settled.
 settle=$(line "$loop" "A ticket's run goes on to the next only when")
@@ -76,6 +101,9 @@ check "loop settles on the relabel block" yes \
     "$(has_in "$settle" "the post-push \`ready-for-human\` relabel of its own ticket")"
 check "loop settles on a capture ending on the live check" yes \
     "$(has_in "$settle" "its capture ran (Capture, in \`SKILL.md\`), one ending on \`live-check.sh --apply N\` included")"
+
+check "loop goes on past the relabel and the live check" yes \
+    "$(has_in "$settle" "other than that push, that relabel, or a capture's issue comment, new issue or live check")"
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]
