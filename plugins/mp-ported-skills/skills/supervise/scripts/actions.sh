@@ -66,7 +66,12 @@
 # the supervisor's session (#100), is labelled `pushed by the supervisor on
 # the maintainer's approval` instead, read from the checkout's
 # `git rev-parse --git-path mp-supervise-pushed`, where push.sh records
-# each push by worker id and upstream branch.
+# each push by worker id and upstream branch. One pushed under the
+# `checked-push` grant, with no question (#188), is labelled
+#   branch <b> pushed by the supervisor under checked-push (<citation>):
+#   <old>..<new>; holds the worker's commits; checks: <ok lines>
+# and a Distribution repo's (`distribution:<remote/branch>`), whose branches
+# are not in DIR, is listed from the record the same way.
 #
 # An issue comment or new issue post.sh posted for this worker, on the
 # maintainer's approval in the supervisor's session (#144), is listed as
@@ -456,6 +461,21 @@ if [ -n "$sid" ]; then
     done
 fi
 
+# checked_push <record> <id> <branch>: the line for the branch's last
+# push.sh push for the worker when it went under checked-push (#188), or
+# empty. Such a record line ends with ` checked-push`, a tab, the grant's
+# citation, a tab, and the check lines joined by `; `.
+checked_push() {
+    awk -F '\t' -v id="$2" -v b="$3" '
+        { split($1, f, " ") }
+        f[1] == id && f[2] == b { last = (f[6] == "checked-push") ? $0 : "" }
+        END {
+            if (last == "") exit
+            n = split(last, t, "\t"); split(t[1], f, " ")
+            printf "branch %s pushed by the supervisor under checked-push (%s): %s..%s; holds the worker'"'"'s commits; checks: %s\n", b, t[2], substr(f[3], 1, 7), substr(f[4], 1, 7), t[3]
+        }' "$1"
+}
+
 if commits=$(git -C "$DIR" rev-list "$START..HEAD" 2>/dev/null); then
     # Filtered on the full name: origin/HEAD's short name is just `origin`.
     branches=$(for c in $commits; do
@@ -463,6 +483,12 @@ if commits=$(git -C "$DIR" rev-list "$START..HEAD" 2>/dev/null); then
     done | grep -v '/HEAD$' | sed 's|^refs/remotes/||' | sort -u)
     pushed=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-pushed 2>/dev/null)
     for b in $branches; do
+        checked=""
+        [ ! -f "$pushed" ] || checked=$(checked_push "$pushed" "$ID" "$b")
+        if [ -n "$checked" ]; then
+            add "$checked"
+            continue
+        fi
         if [ -f "$pushed" ] && awk -v id="$ID" -v b="$b" '$1 == id && $2 == b { found = 1 } END { exit !found }' "$pushed"; then
             add "branch $b pushed by the supervisor on the maintainer's approval: holds the worker's commits"
             continue
@@ -474,6 +500,13 @@ if commits=$(git -C "$DIR" rev-list "$START..HEAD" 2>/dev/null); then
         grant_label push
         add "branch $b $GRANT_LABEL: holds the worker's commits"
     done
+    # A Distribution repo's branches are not in DIR; its checked pushes are
+    # listed from the record alone.
+    if [ -f "$pushed" ]; then
+        for b in $(awk -v id="$ID" '$1 == id && $2 ~ /^distribution:/ && $6 == "checked-push" { print $2 }' "$pushed" | sort -u); do
+            add "$(checked_push "$pushed" "$ID" "$b")"
+        done
+    fi
 else
     note "git rev-list $START..HEAD failed in $DIR, so remote branches were not read"
 fi

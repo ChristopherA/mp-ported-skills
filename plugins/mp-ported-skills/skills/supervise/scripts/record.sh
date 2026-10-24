@@ -380,7 +380,9 @@ fi
 
 # --- waits on a human ------------------------------------------------------
 # The times post.sh posted and push.sh pushed for this worker, one a line
-# with `post` or `push` after it, from the checkout's records; with none, or
+# with `post`, `push` or, for a push under the checked-push grant with no
+# question (#188), `checked-push` after it, from the checkout's records;
+# each clears the wait before it as the supervisor's. With none, or
 # none readable, every wait they would clear stays a human's. A push.sh line
 # from before it wrote a time has none, and is skipped.
 approvals=""
@@ -389,8 +391,8 @@ pushed=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-
 if [ -n "$ID" ]; then
     approvals=$({
         [ ! -f "$posted" ] || awk -v id="$ID" '$1 == id { print $2, "post" }' "$posted"
-        [ ! -f "$pushed" ] || awk -v id="$ID" '$1 == id { print $5, "push" }' "$pushed"
-    } | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z (post|push)$')
+        [ ! -f "$pushed" ] || awk -v id="$ID" '$1 == id { print $5, ($6 == "checked-push" ? "checked-push" : "push") }' "$pushed"
+    } | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z (post|push|checked-push)$')
 fi
 approvals_json=$(jq -cn --arg t "$approvals" '[$t | splits("\n") | select(. != "") | split(" ") | {at: .[0], kind: .[1]}]')
 waits=""
@@ -512,7 +514,7 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
       (select($hand | not)
        | "- approval waits: \(if $w.calls == null then "unknown"
                               elif ($ap | length) == 0 then "none"
-                              else [$ap[] | "\(if .span == null then "unknown time" else .span | span end) before the \(.kind) on approval at \(.at)"]
+                              else [$ap[] | "\(if .span == null then "unknown time" else .span | span end) before the \(if .kind == "checked-push" then "checked push" else "\(.kind) on approval" end) at \(.at)"]
                                    | join("; ") end)"),
       "- API calls: \(if $w.calls == null then "unknown"
                      elif $sub == "" then "\($w.calls) by the \($who), its subagents unknown"

@@ -698,6 +698,17 @@ check "approval waits: a post and a push, in time order" \
     "10 min before the post on approval at 2026-09-29T06:20:00Z; 30 min before the push on approval at 2026-09-29T06:40:00Z" \
     "$(field 'approval waits' "$(record --now 2026-09-29T06:41:00Z)")"
 command rm -f "$posted"
+# A push under the checked-push grant went with no question (#188): it
+# clears the wait as the supervisor's, and is named as a checked push.
+printf 'c2a368ee origin/main %s %s 2026-09-29T06:40:00Z checked-push\tcheckedpush\tok tree: clean\n' "$start" "$start" |
+    sed 's/checkedpush/checked-push: code-only/' >"$pushed"
+out=$(record --now 2026-09-29T06:41:00Z)
+check "checked push: clears the wait" \
+    "1 wait on a human (AskUserQuestion: Next step), 1 question answered in the worker" \
+    "$(field 'human interventions' "$out")"
+check "checked push: named as one" "30 min before the checked push at 2026-09-29T06:40:00Z" \
+    "$(field 'approval waits' "$out")"
+printf '%s\n' "c2a368ee origin/main $start $start 2026-09-29T06:40:00Z" >"$pushed"
 # A turn end with background agents pending is not the turn end it waits from.
 jq -cn '{type: "system", subtype: "turn_duration", timestamp: "2026-09-29T06:30:00.000Z", pendingBackgroundAgentCount: 1}' \
     >>"$cfg/projects/-work-project/$sid.jsonl"

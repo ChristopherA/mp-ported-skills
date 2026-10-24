@@ -507,5 +507,145 @@ printf '%s\n' "$project" >"$work/suite-fail"
 dist_test_refused "project test fails, dist passes" "fail project test: $suite_cmd"
 command rm -f "$work/suite-fail"
 
+# --- --checked: the checked push under a checked-push grant (#188) ---------
+printf '# Supervision\n\n## Grants\n\n- checked-push: code-only pushes\n' >"$work/grants"
+pushed_record() { command cat "$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-pushed)"; }
+TAB=$(printf '\t')
+
+command rm -f "$work/grants"
+new_project
+out=$(push --checked --check --sweep "$sweep" --test "$suite_cmd")
+check "checked, no grant: refused" "1 Error: --checked needs a checked-push grant in docs/agents/supervision.md on origin's default branch, and $project has none" \
+    "$? $(printf '%s\n' "$out" | tail -n 1)"
+printf '# Supervision\n\n## Grants\n\n- push\n' >"$work/grants"
+new_project
+out=$(push --checked --sweep "$sweep" --test "$suite_cmd")
+check "checked, only a push grant: refused" "1" "$?"
+check "checked, only a push grant: nothing pushed" "$start" "$(git -C "$remote" rev-parse main)"
+printf '# Supervision\n\n## Grants\n\n- checked-push: code-only pushes\n' >"$work/grants"
+
+new_project
+out=$(push --checked --check --sweep "$sweep")
+check "checked, no --test: refused" "1 Error: --checked needs --test: a checked push counts on the suite passing" \
+    "$? $(printf '%s\n' "$out" | tail -n 1)"
+out=$(push --checked --check --no-sweep --test "$suite_cmd")
+check "checked, --no-sweep: refused" "1 Error: --checked needs --sweep: a checked push is not read by anyone, so its range is swept" \
+    "$? $(printf '%s\n' "$out" | tail -n 1)"
+
+# All ok, code only: the check passes with a prose line, and the push lands
+# recorded under the grant.
+new_project
+out=$(push --checked --check --sweep "$sweep" --test "$suite_cmd")
+check "checked code-only check: exits 0" "0" "$?"
+check "checked code-only check: test and prose lines last" "ok test: $suite_cmd
+ok prose: no README, CHANGELOG, docs/ or .md file changed" "$(printf '%s\n' "$out" | tail -n 2)"
+check "checked code-only check: nothing pushed" "$start" "$(git -C "$remote" rev-parse main)"
+out=$(push --checked --sweep "$sweep" --test "$suite_cmd")
+check "checked code-only push: exits 0" "0" "$?"
+check "checked code-only push: pushed" "$head" "$(git -C "$remote" rev-parse main)"
+rec=$(pushed_record)
+check "checked code-only push: the record's first fields are unchanged" "3fb49286 origin/main $start $head" \
+    "$(printf '%s\n' "$rec" | cut -d ' ' -f 1-4)"
+check "checked code-only push: marked, with the citation and the check lines" \
+    "checked-push${TAB}checked-push: code-only pushes${TAB}ok marker: no worker marker in the checkout; ok tree: clean; ok fast-forward: 2 ahead of origin/main, 0 behind; ok start: $(short "$start") is on origin/main; ok version: plugin/.claude-plugin/plugin.json 0.8.22 -> 0.8.23 (patch); ok sweep: clean over $(short "$start")..$(short "$head"); ok test: $suite_cmd; ok prose: no README, CHANGELOG, docs/ or .md file changed" \
+    "$(printf '%s\n' "$rec" | cut -d ' ' -f 6-)"
+mkdir -p "$CLAUDE_CONFIG_DIR/jobs/3fb49286" "$CLAUDE_CONFIG_DIR/projects/p"
+printf '{"sessionId": "s1", "children": []}\n' >"$CLAUDE_CONFIG_DIR/jobs/3fb49286/state.json"
+: >"$CLAUDE_CONFIG_DIR/projects/p/s1.jsonl"
+check "checked code-only push: actions.sh names the grant, range and checks" \
+    "branch origin/main pushed by the supervisor under checked-push (checked-push: code-only pushes): $(short "$start")..$(short "$head"); holds the worker's commits; checks: ok marker: no worker marker in the checkout; ok tree: clean; ok fast-forward: 2 ahead of origin/main, 0 behind; ok start: $(short "$start") is on origin/main; ok version: plugin/.claude-plugin/plugin.json 0.8.22 -> 0.8.23 (patch); ok sweep: clean over $(short "$start")..$(short "$head"); ok test: $suite_cmd; ok prose: no README, CHANGELOG, docs/ or .md file changed" \
+    "$(sh "$scripts/actions.sh" --id 3fb49286 --dir "$project" --start "$start" </dev/null)"
+
+# Prose in the range: exit 4, the files named, nothing pushed; the same push
+# without --checked goes, as on the maintainer's yes.
+new_project
+mkdir -p "$project/sub/docs" "$project/notes"
+echo r >"$project/README"
+echo c >"$project/sub/CHANGELOG.txt"
+echo d >"$project/sub/docs/guide.txt"
+echo s >"$project/notes/SKILL.MD"
+echo k >"$project/notes/keep.txt"
+repo_git "$project" add -A
+repo_git "$project" commit -q -m "Write prose"
+head=$(git -C "$project" rev-parse HEAD)
+out=$(push --checked --sweep "$sweep" --test "$suite_cmd")
+check "checked prose: exits 4" "4" "$?"
+check "checked prose: the files named, the only fail" "fail prose: 4 files: README, notes/SKILL.MD, sub/CHANGELOG.txt, sub/docs/guide.txt" \
+    "$(printf '%s\n' "$out" | grep '^fail')"
+check "checked prose: nothing pushed" "$start" "$(git -C "$remote" rev-parse main)"
+out=$(push --checked --check --sweep "$sweep" --test "$suite_cmd")
+check "checked prose, --check: exits 4" "4" "$?"
+out=$(push --sweep "$sweep" --test "$suite_cmd")
+check "prose without --checked: no prose line" "" "$(printf '%s\n' "$out" | grep ' prose: ')"
+check "prose without --checked: pushed" "$head" "$(git -C "$remote" rev-parse main)"
+check "prose without --checked: recorded unmarked" "5" "$(pushed_record | awk '{ print NF }')"
+
+# A rename out of docs/ counts its old side.
+new_project
+mkdir -p "$project/docs"
+echo moved >"$project/docs/a.txt"
+repo_git "$project" add -A
+repo_git "$project" commit -q -m "Add a doc"
+repo_git "$project" push -q origin main 2>/dev/null
+start=$(git -C "$project" rev-parse HEAD)
+remote_main=$start
+repo_git "$project" mv docs/a.txt a.txt
+repo_git "$project" commit -q -m "Move it"
+out=$(push --checked --check --sweep "$sweep" --test "$suite_cmd")
+check "checked rename: the old side counts" "4 fail prose: 1 file: docs/a.txt" "$? $(printf '%s\n' "$out" | grep '^fail')"
+
+# Prose and another fail: exit 2, as any fail.
+new_project
+echo x >"$project/README.md"
+repo_git "$project" add -A
+repo_git "$project" commit -q -m "Readme"
+touch "$work/sweep-hit"
+out=$(push --checked --sweep "$sweep" --test "$suite_cmd")
+check "checked prose and sweep hit: exits 2" "2" "$?"
+check "checked prose and sweep hit: both named" "fail sweep: exit 1 over $(short "$start")..$(short HEAD)
+fail prose: 1 file: README.md" "$(printf '%s\n' "$out" | grep '^fail')"
+check "checked prose and sweep hit: nothing pushed" "$start" "$(git -C "$remote" rev-parse main)"
+command rm -f "$work/sweep-hit"
+new_project
+touch "$work/suite-fail"
+out=$(push --checked --sweep "$sweep" --test "$suite_cmd")
+check "checked test fails: exits 2" "2" "$?"
+check "checked test fails: nothing pushed" "$start" "$(git -C "$remote" rev-parse main)"
+command rm -f "$work/suite-fail"
+
+# With a Distribution repo.
+new_dist 1
+out=$(dpush --checked --check --sweep "$sweep" --test "$suite_cmd")
+check "checked dist, no --dist-test: refused" "1 Error: --checked needs --dist-test: $project names Distribution repo $dist, and a checked push counts on its suite passing" \
+    "$? $(printf '%s\n' "$out" | tail -n 1)"
+mkdir -p "$dist/docs"
+echo d >"$dist/docs/x.txt"
+repo_git "$dist" add -A
+repo_git "$dist" commit -q -m "Doc"
+out=$(dpush --checked --sweep "$sweep" --test "$suite_cmd" --dist-test "$suite_cmd")
+check "checked dist prose: exits 4" "4" "$?"
+check "checked dist prose: names the Distribution repo's file" "ok project prose: no README, CHANGELOG, docs/ or .md file changed
+fail distribution prose: 1 file: docs/x.txt" "$(printf '%s\n' "$out" | grep ' prose: ')"
+nothing_pushed "checked dist prose"
+
+new_dist 1
+out=$(dpush --checked --sweep "$sweep" --test "$suite_cmd" --dist-test "$suite_cmd")
+check "checked dist push: exits 0" "0" "$?"
+check "checked dist push: both pushed" "$head $dist_head" "$(git -C "$remote" rev-parse main) $(git -C "$dist_remote" rev-parse main)"
+check "checked dist push: both marked, each with its own checks" \
+    "origin/main checked-push ok project marker
+distribution:origin/main checked-push ok distribution marker" \
+    "$(pushed_record | awk -F "$TAB" '{ split($1, a, " "); split($3, c, ":"); print a[2], a[6], c[1] }')"
+printf '{"sessionId": "s1", "children": []}\n' >"$CLAUDE_CONFIG_DIR/jobs/3fb49286/state.json"
+out=$(sh "$scripts/actions.sh" --id 3fb49286 --dir "$project" --start "$start" </dev/null)
+check "checked dist push: actions.sh lists both pushes" "branch origin/main pushed by the supervisor under checked-push
+branch distribution:origin/main pushed by the supervisor under checked-push" \
+    "$(printf '%s\n' "$out" | sed 's/ (checked-push.*//')"
+
+new_dist
+out=$(dpush --checked --check --sweep "$sweep" --test "$suite_cmd" --dist-test "$suite_cmd")
+check "checked dist only: the Project's prose line" "0 ok project prose: nothing to push" "$? $(printf '%s\n' "$out" | grep '^ok project prose')"
+command rm -f "$work/grants"
+
 echo "supervise-push: $pass passed, $fail failed"
 [ "$fail" = 0 ]

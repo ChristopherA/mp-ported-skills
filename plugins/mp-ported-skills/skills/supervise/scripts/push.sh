@@ -340,7 +340,7 @@ check_repo() {
             k=$(printf '%s\n' "$prose" | grep -c '^')
             if [ "$k" = 1 ]; then n="1 file"; else n="$k files"; fi
             # Its own failure: the push still goes, on the maintainer's yes.
-            printf 'fail %sprose: %s: %s\n' "$label" "$n" "$(printf '%s\n' "$prose" | sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/, /g')"
+            printf 'fail %sprose: %s: %s\n' "$label" "$n" "$(printf '%s\n' "$prose" | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')"
             prose_failed=1
         fi
     fi
