@@ -556,6 +556,21 @@ check "checked code-only push: actions.sh names the grant, range and checks" \
     "branch origin/main pushed by the supervisor under checked-push (checked-push: code-only pushes): $(short "$start")..$(short "$head"); holds the worker's commits; checks: ok marker: no worker marker in the checkout; ok tree: clean; ok fast-forward: 2 ahead of origin/main, 0 behind; ok start: $(short "$start") is on origin/main; ok version: plugin/.claude-plugin/plugin.json 0.8.22 -> 0.8.23 (patch); ok sweep: clean over $(short "$start")..$(short "$head"); ok test: $suite_cmd; ok prose: no README, CHANGELOG, docs/ or .md file changed" \
     "$(sh "$scripts/actions.sh" --id 3fb49286 --dir "$project" --start "$start" </dev/null)"
 
+# A git diff that fails is no pass: the prose check fails, with nothing
+# pushed and no question, since the changed files are unknown.
+new_project
+real_git=$(command -v git)
+mkdir -p "$work/diff-fails"
+printf '#!/bin/sh\nfor a; do [ "$a" != --no-renames ] || { echo "fatal: diff failed" >&2; exit 128; }; done\nexec "%s" "$@"\n' "$real_git" \
+    >"$work/diff-fails/git"
+chmod +x "$work/diff-fails/git"
+check "checked diff fails: the fake git is found first" "$work/diff-fails/git" "$(PATH="$work/diff-fails:$PATH"; command -v git)"
+out=$(PATH="$work/diff-fails:$PATH"; export PATH; push --checked --sweep "$sweep" --test "$suite_cmd")
+check "checked diff fails: exits 2" "2" "$?"
+check "checked diff fails: the prose check fails, by name" "fail prose: git diff failed, so the changed files are unknown" \
+    "$(printf '%s\n' "$out" | grep '^fail')"
+check "checked diff fails: nothing pushed" "$start" "$(git -C "$remote" rev-parse main)"
+
 # Prose in the range: exit 4, the files named, nothing pushed; the same push
 # without --checked goes, as on the maintainer's yes.
 new_project
@@ -641,6 +656,13 @@ out=$(sh "$scripts/actions.sh" --id 3fb49286 --dir "$project" --start "$start" <
 check "checked dist push: actions.sh lists both pushes" "branch origin/main pushed by the supervisor under checked-push
 branch distribution:origin/main pushed by the supervisor under checked-push" \
     "$(printf '%s\n' "$out" | sed 's/ (checked-push.*//')"
+# A later unmarked Distribution push (on the maintainer's yes) leaves no
+# checked line, and no blank line in its place.
+printf '3fb49286 distribution:origin/main %s %s 2026-10-24T00:00:00Z\n' "$dist_head" "$dist_head" \
+    >>"$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-pushed)"
+out=$(sh "$scripts/actions.sh" --id 3fb49286 --dir "$project" --start "$start" </dev/null; echo end)
+check "checked dist push, then an unmarked one: only the Project's line" "branch origin/main pushed by the supervisor under checked-push
+end" "$(printf '%s\n' "$out" | sed 's/ (checked-push.*//')"
 
 new_dist
 out=$(dpush --checked --check --sweep "$sweep" --test "$suite_cmd" --dist-test "$suite_cmd")

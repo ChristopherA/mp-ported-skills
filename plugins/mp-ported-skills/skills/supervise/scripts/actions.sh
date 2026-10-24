@@ -504,7 +504,8 @@ if commits=$(git -C "$DIR" rev-list "$START..HEAD" 2>/dev/null); then
     # listed from the record alone.
     if [ -f "$pushed" ]; then
         for b in $(awk -v id="$ID" '$1 == id && $2 ~ /^distribution:/ && $6 == "checked-push" { print $2 }' "$pushed" | sort -u); do
-            add "$(checked_push "$pushed" "$ID" "$b")"
+            checked=$(checked_push "$pushed" "$ID" "$b")
+            [ -z "$checked" ] || add "$checked"
         done
     fi
 else

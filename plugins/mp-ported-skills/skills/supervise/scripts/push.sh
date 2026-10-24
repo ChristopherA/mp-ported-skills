@@ -178,9 +178,11 @@ ok() { printf 'ok %s%s\n' "$label" "$1"; rchecks="${rchecks:+$rchecks; }ok $labe
 bad() { printf 'fail %s%s\n' "$label" "$1"; failed=1; }
 
 # prose_files <repo> <up> <tip>: the paths the range adds, changes or
-# removes that are prose, one a line.
+# removes that are prose, one a line. Returns 1 when git diff fails, so an
+# unread range never reads as one with no prose.
 prose_files() {
-    git -C "$1" diff --no-renames --name-only "$2" "$3" | while IFS= read -r p; do
+    names=$(git -C "$1" diff --no-renames --name-only "$2" "$3") || return 1
+    printf '%s\n' "$names" | while IFS= read -r p; do
         case "/$p" in
             (*/README* | */CHANGELOG* | */docs/* | *.[mM][dD]) printf '%s\n' "$p" ;;
         esac
@@ -333,8 +335,9 @@ check_repo() {
     elif [ "$ahead" = 0 ]; then
         ok "prose: nothing to push"
     else
-        prose=$(prose_files "$repo" "$up" "$tip")
-        if [ -z "$prose" ]; then
+        if ! prose=$(prose_files "$repo" "$up" "$tip"); then
+            bad "prose: git diff failed, so the changed files are unknown"
+        elif [ -z "$prose" ]; then
             ok "prose: no README, CHANGELOG, docs/ or .md file changed"
         else
             k=$(printf '%s\n' "$prose" | grep -c '^')
