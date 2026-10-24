@@ -9,7 +9,8 @@ Now the supervisor makes that push itself, on the maintainer's go-ahead given in
 - a fast-forward of the folder's branch onto its upstream, with something to push;
 - the worker's start already on the upstream, so no earlier unpushed commit goes out unseen;
 - every `.claude-plugin/plugin.json` version change a patch bump at most;
-- the sweep, run over `<upstream>..HEAD`, exits 0.
+- the sweep, run over `<upstream>..HEAD`, exits 0;
+- with `--test` (or `--dist-test` in the Distribution repo, #187), the Project's suite, run there the way a worker runs it, exits 0; a repo with nothing to push is not tested.
 
 It prints each check as `ok` or `fail`, with the commits to go. `--check` stops there. Without it, a full pass pushes only the commit it checked to the branch's upstream (`git push <remote> <sha>:<upstream ref>`). It appends `<worker id> <upstream> <old> <new> <time>` to the checkout's `git rev-parse --git-path mp-supervise-pushed`, so `actions.sh`, and `record.sh` through it, label that branch `pushed by the supervisor on the maintainer's approval` rather than the worker's `ungranted` push, and `record.sh` does not count the worker's wait for the push as a wait on a human while no prompt reached the worker between the block and the push (#156); a line with no time clears no wait. The skill's new Push on approval section runs `--check`, asks the maintainer one question when everything passes, and on an explicit yes runs the push, which repeats every check. A failed check is reported by name and nothing is asked or pushed.
 
