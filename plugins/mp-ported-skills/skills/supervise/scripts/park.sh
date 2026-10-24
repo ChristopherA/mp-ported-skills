@@ -1,6 +1,6 @@
 #!/bin/sh
-# park.sh -- sourced by resuming's state.sh: how a parked ticket and a
-# parked worker are told apart (#158).
+# park.sh -- sourced by resuming's state.sh, launch.sh and watch.sh: how a
+# parked ticket and a parked worker are told apart (#158).
 #
 # An unattended worker that reaches a decision only the maintainer can make
 # parks its ticket: it posts the question on the ticket as a comment opening
