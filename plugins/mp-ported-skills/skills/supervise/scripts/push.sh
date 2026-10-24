@@ -36,7 +36,9 @@
 #                 command in the Distribution repo, run there with sh -c,
 #                 exits 0: `ok test: CMD`. On a failure, `fail test: CMD`
 #                 and the suite's last 40 lines, indented, after a note of
-#                 how many came before. Without the option, no test line
+#                 how many came before. A repo with nothing to push is not
+#                 tested: `ok test: nothing to push`. Without the option,
+#                 no test line
 # Before them it prints `push <branch> to <upstream>: UP..HEAD` and a
 # `commit <sha> <subject>` line for each commit in the range.
 #
@@ -243,7 +245,7 @@ check_repo() {
         # An empty range has nothing to sweep, and a sweep may refuse one.
         ok "sweep: nothing to push"
     else
-        swept=$(cd "$repo" && sh -c "$SWEEP"' --range "$1"' sh "$up..$tip" </dev/null 2>&1)
+        swept=$(CDPATH= cd -- "$repo" && sh -c "$SWEEP"' --range "$1"' sh "$up..$tip" </dev/null 2>&1)
         rc=$?
         if [ "$rc" = 0 ]; then
             ok "sweep: clean over $range"
@@ -253,8 +255,13 @@ check_repo() {
         fi
     fi
 
-    if [ -n "$rtest" ]; then
-        tested=$(cd "$repo" && sh -c "$rtest" </dev/null 2>&1)
+    if [ -z "$rtest" ]; then
+        :
+    elif [ "$ahead" = 0 ]; then
+        # Nothing goes out from this repo, so its suite gates nothing.
+        ok "test: nothing to push"
+    else
+        tested=$(CDPATH= cd -- "$repo" && sh -c "$rtest" </dev/null 2>&1)
         rc=$?
         if [ "$rc" = 0 ]; then
             ok "test: $rtest"
@@ -262,11 +269,13 @@ check_repo() {
             bad "test: $rtest"
             # A whole suite's output would fill the supervisor's context;
             # its failures and summary come last.
-            lines=$(printf '%s\n' "$tested" | grep -c '^')
-            if [ "$lines" -gt 40 ]; then
-                echo "  ... $((lines - 40)) earlier lines not shown"
+            if [ -n "$tested" ]; then
+                lines=$(printf '%s\n' "$tested" | grep -c '^')
+                if [ "$lines" -gt 40 ]; then
+                    echo "  ... $((lines - 40)) earlier lines not shown"
+                fi
+                printf '%s\n' "$tested" | tail -n 40 | sed 's/^/  /'
             fi
-            printf '%s\n' "$tested" | tail -n 40 | sed 's/^/  /'
         fi
     fi
 }

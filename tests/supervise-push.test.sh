@@ -443,6 +443,8 @@ touch "$work/suite-fail"
 refused "test fails" "fail test: $suite_cmd" --check --sweep "$sweep" --test "$suite_cmd"
 check "test fails: its output is shown, indented" "  suite: starting
   FAIL one check" "$(push --check --sweep "$sweep" --test "$suite_cmd" | grep '^  ')"
+printf '#!/bin/sh\nexit 1\n' >"$work/silent.sh"
+check "test fails silently: no output lines" "" "$(push --check --sweep "$sweep" --test "sh $work/silent.sh" | grep '^  ')"
 refused "test fails, no --check" "fail test: $suite_cmd" --sweep "$sweep" --test "$suite_cmd"
 
 new_project
@@ -478,6 +480,13 @@ command rm -f "$work/suite-log"
 out=$(dpush --check --sweep "$sweep" --dist-test "$suite_cmd")
 check "dist test only: the Distribution repo alone is tested" "ok distribution test: $suite_cmd" "$(printf '%s\n' "$out" | grep ' test: ')"
 check "dist test only: run there" "$dist" "$(command cat "$work/suite-log")"
+
+new_dist
+command rm -f "$work/suite-log"
+out=$(dpush --check --sweep "$sweep" --test "$suite_cmd" --dist-test "$suite_cmd")
+check "dist test, project has nothing to push: not tested" "ok project test: nothing to push
+ok distribution test: $suite_cmd" "$(printf '%s\n' "$out" | grep ' test: ')"
+check "dist test, project has nothing to push: only the Distribution repo ran" "$dist" "$(command cat "$work/suite-log")"
 
 dist_test_refused() { # <name> <expected fail lines>
     out=$(dpush --sweep "$sweep" --test "$suite_cmd" --dist-test "$suite_cmd")
