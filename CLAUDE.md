@@ -80,6 +80,10 @@ A live run of a skill that launches `/implement` workers is the maintainer's to 
 
 A test that puts a fake command on `PATH` makes it executable and checks, before any call that could reach the real one, that `command -v` finds the fake, as `tests/supervise.test.sh` does for `claude`. A fake written without `chmod +x` is skipped silently: its launch tests ran the real `claude --bg`, which only its folder-trust check stopped.
 
+A fake that hands on to the real command drops its own folder from `PATH` and calls the command by name, never by a path the test took with `command -v`. Run the way a worker runs the suite, that path is the `worker-bin` wrapper, which finds the fake again: in #188, a fake `git` built that way hung `tests/supervise-push.test.sh` for eight hours in the worker-style run, while the plain run passed.
+
+A check that output holds no blank line captures it with a sentinel, `out=$(cmd; echo end)`. `$( )` strips trailing newlines, so a blank last line reads as absent: in #188, a check for a blank line `actions.sh` printed last passed before the fix.
+
 A stub that stands in for a real command refuses what the real one refuses, with the same exit status, as the sweep stub in `tests/supervise-push.test.sh` exits 2 on an empty range. A stub that accepts every input passes a case the real command fails: `push.sh` swept a repo with nothing to push, the real sweep exited 2, and a live push was refused while its test, on a stub that took the empty range, passed (#179).
 
 ## Grant actions

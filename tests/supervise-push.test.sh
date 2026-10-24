@@ -559,9 +559,12 @@ check "checked code-only push: actions.sh names the grant, range and checks" \
 # A git diff that fails is no pass: the prose check fails, with nothing
 # pushed and no question, since the changed files are unknown.
 new_project
-real_git=$(command -v git)
+# The fake drops its own folder from PATH and runs git again, so it reaches
+# the run's own git: the worker-bin wrapper when the suite runs the way a
+# worker runs it. A path to `command -v git` taken here would be that
+# wrapper, which then finds the fake again.
 mkdir -p "$work/diff-fails"
-printf '#!/bin/sh\nfor a; do [ "$a" != --no-renames ] || { echo "fatal: diff failed" >&2; exit 128; }; done\nexec "%s" "$@"\n' "$real_git" \
+printf '#!/bin/sh\nfor a; do [ "$a" != --no-renames ] || { echo "fatal: diff failed" >&2; exit 128; }; done\nPATH=${PATH#*:}; export PATH\nexec git "$@"\n' \
     >"$work/diff-fails/git"
 chmod +x "$work/diff-fails/git"
 check "checked diff fails: the fake git is found first" "$work/diff-fails/git" "$(PATH="$work/diff-fails:$PATH"; command -v git)"
