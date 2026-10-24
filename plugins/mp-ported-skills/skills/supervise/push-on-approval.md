@@ -2,7 +2,7 @@
 
 Part of `/supervise`. `SKILL.md`, beside this file, sends a run here at the step that needs it. `${CLAUDE_SKILL_DIR}` in the commands below is the folder holding this file and `SKILL.md`: Claude Code fills it in only in `SKILL.md`, so write that folder out when you run them.
 
-A worker blocked on a `git push` no grant covers has finished its work and committed it. The capture runs first (Capture, in `SKILL.md`), so this runs once, after it, over the work and any commits the capture made. The supervisor checks the commits, asks the maintainer once, and on a yes pushes them itself, so the push needs no terminal and no `!` command and works from a remote client (docs/adr/0007).
+A worker blocked on a `git push` no grant covers has finished its work and committed it. The capture runs first (Capture, in `SKILL.md`), so this runs once, after it, over the work and any commits the capture made. The supervisor checks the commits, asks the maintainer once (unless it is a checked push, below), and on a yes pushes them itself, so the push needs no terminal and no `!` command and works from a remote client (docs/adr/0007).
 
 With a Distribution repo, the worker's ticket waits on that push too (#186): while the Distribution repo holds commits its upstream lacks, the hook and the wrappers refuse the worker's `gh issue close`, even under an `issue-close` grant, and the worker ends on `Waiting on: git -C <dist> push origin <branch>; gh issue close <N>`. Steps 3 and 4 settle that close with `close.sh`, once the maintainer has answered the push.
 
