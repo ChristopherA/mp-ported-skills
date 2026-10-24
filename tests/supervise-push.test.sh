@@ -408,5 +408,90 @@ new_project
 out=$(sh "$scripts/push.sh" --dir "$project" --id 3fb49286 --start "$start" --dist-start "$start" --sweep "$sweep" </dev/null 2>&1)
 check "dist usage: --dist-start with no Distribution repo" "1 Error: --dist-start given, but $project names no Distribution repo" "$? $out"
 
+# --- --test and --dist-test: the suite as a checked line (#187) -------------
+# The suite stub: records the folder it runs in to suite-log; prints a
+# failure and exits 1, as a failing `sh tests/x.test.sh` or `npm test` does,
+# when $work/suite-fail exists, empty or naming the folder it runs in. With
+# suite-long there, it prints 50 numbered lines before failing.
+suite="$work/suite.sh"
+cat >"$suite" <<EOF
+#!/bin/sh
+pwd -P >>"$work/suite-log"
+echo 'suite: starting'
+if [ -f "$work/suite-fail" ] && { [ ! -s "$work/suite-fail" ] || [ "\$(command cat "$work/suite-fail")" = "\$(pwd -P)" ]; }; then
+    if [ -f "$work/suite-long" ]; then i=1; while [ \$i -le 50 ]; do echo "line \$i"; i=\$((i + 1)); done; fi
+    echo 'FAIL one check'
+    exit 1
+fi
+echo 'suite: 3 passed, 0 failed'
+EOF
+chmod +x "$suite"
+suite_cmd="sh $suite"
+command rm -f "$work/suite-fail" "$work/suite-long" "$work/suite-log"
+
+new_project
+out=$(push --check --sweep "$sweep" --test "$suite_cmd")
+check "test pass: exits 0" "0" "$?"
+check "test pass: an ok line after the sweep" "ok sweep: clean over $(short "$start")..$(short "$head")
+ok test: $suite_cmd" "$(printf '%s\n' "$out" | tail -n 2)"
+check "test pass: the suite runs in the Project" "$project" "$(command cat "$work/suite-log")"
+check "test pass: its output is not shown" "" "$(printf '%s\n' "$out" | grep '^  ')"
+check "test pass: nothing pushed under --check" "$start" "$(git -C "$remote" rev-parse main)"
+
+new_project
+touch "$work/suite-fail"
+refused "test fails" "fail test: $suite_cmd" --check --sweep "$sweep" --test "$suite_cmd"
+check "test fails: its output is shown, indented" "  suite: starting
+  FAIL one check" "$(push --check --sweep "$sweep" --test "$suite_cmd" | grep '^  ')"
+refused "test fails, no --check" "fail test: $suite_cmd" --sweep "$sweep" --test "$suite_cmd"
+
+new_project
+touch "$work/suite-fail" "$work/suite-long"
+out=$(push --check --sweep "$sweep" --test "$suite_cmd")
+check "test fails long: the last 40 lines, after a note of the cut" "  ... 12 earlier lines not shown
+  line 12" "$(printf '%s\n' "$out" | grep '^  ' | head -n 2)"
+check "test fails long: ends on the suite's last line" "  FAIL one check" "$(printf '%s\n' "$out" | tail -n 1)"
+check "test fails long: 41 indented lines" "41" "$(printf '%s\n' "$out" | grep -c '^  ')"
+command rm -f "$work/suite-fail" "$work/suite-long"
+
+new_project
+command rm -f "$work/suite-log"
+out=$(push --sweep "$sweep" --test "$suite_cmd")
+check "test pass, push: exits 0" "0" "$?"
+check "test pass, push: pushed" "$head" "$(git -C "$remote" rev-parse main)"
+
+new_project
+out=$(sh "$scripts/push.sh" --dir "$project" --id 3fb49286 --start "$start" --sweep "$sweep" --dist-test "$suite_cmd" --check </dev/null 2>&1)
+check "test usage: --dist-test with no Distribution repo" "1 Error: --dist-test given, but $project names no Distribution repo" "$? $out"
+
+new_dist 1
+command rm -f "$work/suite-log"
+out=$(dpush --check --sweep "$sweep" --test "$suite_cmd" --dist-test "$suite_cmd")
+check "dist test pass: exits 0" "0" "$?"
+check "dist test pass: a line per repo" "ok project test: $suite_cmd
+ok distribution test: $suite_cmd" "$(printf '%s\n' "$out" | grep ' test: ')"
+check "dist test pass: each suite runs in its repo" "$project
+$dist" "$(command cat "$work/suite-log")"
+
+new_dist 1
+command rm -f "$work/suite-log"
+out=$(dpush --check --sweep "$sweep" --dist-test "$suite_cmd")
+check "dist test only: the Distribution repo alone is tested" "ok distribution test: $suite_cmd" "$(printf '%s\n' "$out" | grep ' test: ')"
+check "dist test only: run there" "$dist" "$(command cat "$work/suite-log")"
+
+dist_test_refused() { # <name> <expected fail lines>
+    out=$(dpush --sweep "$sweep" --test "$suite_cmd" --dist-test "$suite_cmd")
+    check "$1: exits 2" "2" "$?"
+    check "$1: says which" "$2" "$(printf '%s\n' "$out" | grep '^fail')"
+    nothing_pushed "$1"
+}
+new_dist 1
+printf '%s\n' "$dist" >"$work/suite-fail"
+dist_test_refused "dist test fails" "fail distribution test: $suite_cmd"
+new_dist 1
+printf '%s\n' "$project" >"$work/suite-fail"
+dist_test_refused "project test fails, dist passes" "fail project test: $suite_cmd"
+command rm -f "$work/suite-fail"
+
 echo "supervise-push: $pass passed, $fail failed"
 [ "$fail" = 0 ]

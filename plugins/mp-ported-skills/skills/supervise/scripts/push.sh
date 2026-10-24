@@ -32,6 +32,11 @@
 #                 indented. CMD is shell code: give one command, since the
 #                 range is appended to its last one. A repo with nothing to
 #                 push is not swept: `ok sweep: nothing to push`
+#   test          the --test command in the Project, or the --dist-test
+#                 command in the Distribution repo, run there with sh -c,
+#                 exits 0: `ok test: CMD`. On a failure, `fail test: CMD`
+#                 and the suite's last 40 lines, indented, after a note of
+#                 how many came before. Without the option, no test line
 # Before them it prints `push <branch> to <upstream>: UP..HEAD` and a
 # `commit <sha> <subject>` line for each commit in the range.
 #
@@ -52,10 +57,11 @@
 # there a push goes only on a standing grant.
 #
 # Usage:
-#   push.sh --dir DIR --id ID --start SHA [--dist-start SHA] (--sweep CMD | --no-sweep) [--check]
+#   push.sh --dir DIR --id ID --start SHA [--dist-start SHA] (--sweep CMD | --no-sweep)
+#           [--test CMD] [--dist-test CMD] [--check]
 #
 # --dist-start is required when DIR names a Distribution repo, and refused
-# when it names none.
+# when it names none; --dist-test is refused when it names none.
 #
 # Exits 0 when every check passed (and, without --check, the push landed);
 # 1 on a usage error or in a background session; 2 when a check failed,
@@ -70,6 +76,8 @@ START=""
 DIST_START=""
 SWEEP=""
 NO_SWEEP=0
+TEST=""
+DIST_TEST=""
 CHECK=0
 
 need_value() { [ $# -ge 2 ] || { printf 'Error: %s needs a value\n' "$1" >&2; exit 1; }; }
@@ -81,9 +89,11 @@ while [ $# -gt 0 ]; do
         --dist-start) need_value "$@"; DIST_START="$2"; shift 2 ;;
         --sweep)      need_value "$@"; SWEEP="$2"; shift 2 ;;
         --no-sweep)   NO_SWEEP=1; shift ;;
+        --test)       need_value "$@"; TEST="$2"; shift 2 ;;
+        --dist-test)  need_value "$@"; DIST_TEST="$2"; shift 2 ;;
         --check)      CHECK=1; shift ;;
         --help)
-            printf 'Usage: push.sh --dir DIR --id ID --start SHA [--dist-start SHA] (--sweep CMD | --no-sweep) [--check]\n'
+            printf 'Usage: push.sh --dir DIR --id ID --start SHA [--dist-start SHA] (--sweep CMD | --no-sweep) [--test CMD] [--dist-test CMD] [--check]\n'
             printf 'Checks a stopped worker'\''s commits and, without --check, pushes them to the branch'\''s upstream.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
@@ -119,6 +129,8 @@ if [ -n "$DIST" ]; then
         fail "not a commit in Distribution repo $DIST: $DIST_START"
 elif [ -n "$DIST_START" ]; then
     fail "--dist-start given, but $DIR names no Distribution repo"
+elif [ -n "$DIST_TEST" ]; then
+    fail "--dist-test given, but $DIR names no Distribution repo"
 fi
 
 failed=0
@@ -130,12 +142,12 @@ version_parts() {
     printf '%s\n' "$1" | sed -n 's/^\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\)$/\1 \2 \3/p'
 }
 
-# check_repo <repo> <start> <label>: print the repo's push line, commits and
+# check_repo <repo> <start> <label> <test>: print the repo's push line, commits and
 # checks, each named by <label> ("" with one repo). Sets remote, merge, up,
 # tip, upname, range and ahead for the push; returns 1, with failed set,
 # when the repo cannot be read far enough to check its commits.
 check_repo() {
-    repo=$1 rstart=$2 label=$3
+    repo=$1 rstart=$2 label=$3 rtest=$4
     short() { git -C "$repo" rev-parse --short "$1"; }
     ahead=0
     branch=$(git -C "$repo" symbolic-ref -q --short HEAD) || { bad "branch: HEAD is detached"; return 1; }
@@ -240,19 +252,36 @@ check_repo() {
             printf '%s\n' "$swept" | sed 's/^/  /'
         fi
     fi
+
+    if [ -n "$rtest" ]; then
+        tested=$(cd "$repo" && sh -c "$rtest" </dev/null 2>&1)
+        rc=$?
+        if [ "$rc" = 0 ]; then
+            ok "test: $rtest"
+        else
+            bad "test: $rtest"
+            # A whole suite's output would fill the supervisor's context;
+            # its failures and summary come last.
+            lines=$(printf '%s\n' "$tested" | grep -c '^')
+            if [ "$lines" -gt 40 ]; then
+                echo "  ... $((lines - 40)) earlier lines not shown"
+            fi
+            printf '%s\n' "$tested" | tail -n 40 | sed 's/^/  /'
+        fi
+    fi
 }
 
 # Each repo's push: <remote> <merge> <up> <tip> <upname> <range> <repo>,
 # one line each, for the repos with something to push.
 pushes=""
 if [ -z "$DIST" ]; then
-    check_repo "$DIR" "$START" "" || exit 2
+    check_repo "$DIR" "$START" "" "$TEST" || exit 2
     pushes="$remote $merge $up $tip $upname $range $DIR"
 else
-    if check_repo "$DIR" "$START" "project " && [ "$ahead" != 0 ]; then
+    if check_repo "$DIR" "$START" "project " "$TEST" && [ "$ahead" != 0 ]; then
         pushes="$remote $merge $up $tip $upname $range $DIR"
     fi
-    if check_repo "$DIST" "$DIST_START" "distribution " && [ "$ahead" != 0 ]; then
+    if check_repo "$DIST" "$DIST_START" "distribution " "$DIST_TEST" && [ "$ahead" != 0 ]; then
         pushes="${pushes:+$pushes
 }$remote $merge $up $tip $upname $range $DIST"
     fi
