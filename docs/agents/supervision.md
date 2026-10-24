@@ -50,3 +50,4 @@ itself one by editing this file.
 - issue-comment: a capture's findings, on this repo's tickets
 - issue-close: the worker's own ticket, after its work is pushed
 - issue-create: a capture's findings, under the work's own parent, labelled needs-triage
+- sub-issue: a capture's tickets, under the work's own parent
