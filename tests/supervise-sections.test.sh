@@ -86,5 +86,43 @@ for heading in '## 1. Step' '## 2. Launch' '## 3. Watch' '## 4. Report' '### Sto
 done
 check "SKILL.md keeps the done item" yes "$(contains "$skill" '- **`done`**:')"
 
+# The supervisor captures itself at each pause, not only at the end (#205):
+# in the Report step, after each worker's report and before a question that
+# ends its turn, in that order; and in a loop, between tickets, before
+# next.sh, with the Zone stop's capture still last.
+line_of() { # <file> <fixed string> -- first line number, or 0
+    n=$(grep -n -F -- "$2" "$1" | head -n 1 | cut -d: -f1)
+    echo "${n:-0}"
+}
+before() { # <a> <b> -- yes when 0 < a < b
+    if [ "$1" -gt 0 ] && [ "$1" -lt "$2" ]; then echo yes; else echo no; fi
+}
+report=$(line_of "$skill" '## 4. Report')
+own=$(line_of "$skill" '### Capturing this session')
+after_report=$(line_of "$skill" "1. **After each worker's report**")
+before_question=$(line_of "$skill" '2. **Before a question to the maintainer**')
+worker_capture=$(line_of "$skill" '## Capture')
+check "SKILL.md's own capture is in the Report step" yes "$(before "$report" "$own")"
+check "SKILL.md's own capture comes before the worker's Capture" yes "$(before "$own" "$worker_capture")"
+check "the capture after a report comes first" yes "$(before "$own" "$after_report")"
+check "the capture before a question comes second" yes "$(before "$after_report" "$before_question")"
+check "the own capture's list ends before Capture" yes "$(before "$before_question" "$worker_capture")"
+check "SKILL.md says each capture covers only what changed" yes \
+    "$(contains "$skill" 'Each capture covers only what changed since the last one')"
+check "Done when names the capture after each report" yes \
+    "$(contains "$skill" "this session's capture after each worker's report")"
+
+loop="$dir/loop.md"
+between=$(line_of "$loop" 'Between tickets, first capture this session')
+next_cmd=$(line_of "$loop" 'next.sh" --dir')
+zone_stop=$(line_of "$loop" '## Zone stop')
+check "loop.md captures between tickets before next.sh" yes "$(before "$between" "$next_cmd")"
+check "loop.md names the Report step's own capture" yes \
+    "$(contains "$loop" "(Capturing this session, in \`SKILL.md\`'s Report step)")"
+final=$(line_of "$loop" '3. **Capture.** After the final report')
+check "loop.md keeps the final capture in Zone stop" yes "$(before "$zone_stop" "$final")"
+check "the final capture covers what changed since the last ticket's" yes \
+    "$(contains "$loop" 'covering only what changed since the capture after the last ticket')"
+
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

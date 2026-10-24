@@ -16,7 +16,7 @@ A ticket that continued after a zone capture (Zone capture, `zone-capture.md`) i
 
 A finished worker is stopped, not removed: `record.sh` reads its job after the stop, and `launch.sh` counts a stopped session as not live, so it stays listed in `claude agents` until the maintainer removes it.
 
-Between tickets, read what comes next, passing every ticket this loop ran:
+Between tickets, first capture this session when anything is new since its last capture (Capturing this session, in `SKILL.md`'s Report step), so a compaction in the next ticket's watch loses nothing the last one taught. Then read what comes next, passing every ticket this loop ran:
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/next.sh" --dir "<project folder>" --ran "<N M ...>" --session "${CLAUDE_SESSION_ID}" --session-dir "$PWD" </dev/null
@@ -46,7 +46,7 @@ A loop that runs past this session's zone makes its stop-or-continue calls, and 
 1. **Evaluate.** Post a loop summary on the tickets' parent. Read each ticket's parent in the Project folder with `gh api "repos/{owner}/{repo}/issues/<N>/parent" --jq .number`, which exits 1 with `No parent issue found` for a ticket with none; post the summary on each distinct parent, or on the last ticket run when none has one. Write it to `<scratchpad>/loop-summary.md`, then post it with `gh issue comment <parent> --body-file "<scratchpad>/loop-summary.md"`. It holds the `stop zone` line, and for each ticket the loop ran, in order: its number, the worker's id, its outcome, any gate it hit (a routine answer, a push or post on approval, a refusal), and its run record, as posted, with the URL of that comment. So that each record is still at hand, in a loop save each ticket's record as `<scratchpad>/run-record-<N>.md`, not the one `run-record.md`.
 Like the run record, the summary is a comment the supervisor posts without asking: it holds what the run records already hold.
 2. **List what waits on the human.** In the final report, list each push, merge or issue close the loop reached that no grant covered and that was not taken on the maintainer's yes, from each ticket's `actions.sh` `ungranted` lines and its capture's report, each with the command that takes it, in a fenced code block. Take none of them: each still needs the maintainer's yes, asked as `push-on-approval.md` or `post-on-approval.md` says.
-3. **Capture.** After the final report, run `/mp-ported-skills:capturing` in this session, last, so the maintainer can `/clear` and start the next supervisor session from the tracker alone.
+3. **Capture.** After the final report, run `/mp-ported-skills:capturing` in this session, last, covering only what changed since the capture after the last ticket, so the maintainer can `/clear` and start the next supervisor session from the tracker alone.
 
 The final report says the loop stopped because the supervisor reached its zone stop, with the reading `next.sh` printed.
 
