@@ -1192,6 +1192,26 @@ check "launch: a grant.sh error exits 1" "1" "$rc"
 check "launch: a grant.sh error never launched" "no" "$([ -f "$fake/args" ] && echo yes || echo no)"
 check "launch: a grant.sh error says why" "grant.sh: Error: broken
 Error: grant.sh failed for push, so the worker's grants are unknown; not launched" "$out"
+# A checked-push grant (#188) is listed, and the worker is told it covers no
+# push of its own: its push still waits, for the supervisor.
+checked="$work/checked"
+git init -q --bare "$work/checked.git"
+git init -q -b main "$checked"
+checked_git() { git -C "$checked" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@" >/dev/null 2>&1; }
+tracker_docs "$checked"
+printf '# Supervision\n\n## Grants\n\n- checked-push: code-only pushes\n' >"$checked/docs/agents/supervision.md"
+checked_git add docs
+checked_git commit -m grants
+checked_git remote add origin "$work/checked.git"
+checked_git push origin main
+checked_git remote set-head origin main
+out=$(launch_in "$checked" --ticket 56 2>/dev/null); rc=$?
+check "launch checked-push: exit 0" "0 c2a368ee" "$rc $out"
+check "launch checked-push: lists the grant" "- checked-push: code-only pushes" \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed -n 3p)"
+check "launch checked-push: the worker's push still waits" "checked-push is the supervisor's grant, not yours: it covers no push of yours. End your turn on \`Waiting on: git push origin main\` as with no push grant; /supervise pushes after your turn ends, without asking when every check passes." \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | grep '^checked-push is')"
+command rm -f "$(git -C "$checked" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
 
 # --- release.sh --------------------------------------------------------------
 echo c2a368ee >"$marker"

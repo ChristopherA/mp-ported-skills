@@ -21,7 +21,9 @@
 # default branch as committed on origin, that already lets a worker's
 # /implement take the action without asking (#58, #88). A job that maps to
 # no shared action -- a plugin update, say -- is always ungranted: there is
-# nothing in supervision.md for it to match.
+# nothing in supervision.md for it to match. checked-push (#188) is not an
+# action here: it covers only /supervise's own push after the worker's
+# turn, so a capture's push job maps to push or distribution-push.
 #
 # Usage:
 #   before-clear.sh --action <push|distribution-push|pr-create|pr-merge|issue-close|issue-comment|issue-create|sub-issue|label|other> [--dir DIR]

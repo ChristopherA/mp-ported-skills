@@ -19,6 +19,9 @@
 #           gh api link or reorder, or label for a `Waiting on:` gh issue
 #           edit that only adds or removes labels) that grant.sh finds granted on the
 #           default branch as committed on origin, asked about anyway.
+#           checked-push (#188) is never one: it covers only the
+#           supervisor's own push, so a worker's `Waiting on: git push`
+#           under it alone is not answered here.
 # Anything else is not: a question that offers a choice (" or "), names
 # another ticket or several actions, an action no grant covers, a block that
 # is not a question (a permission prompt), and a question already answered

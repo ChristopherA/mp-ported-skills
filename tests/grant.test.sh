@@ -148,6 +148,21 @@ commit_file "$repo" docs/agents/supervision.md \
 push_main "$repo"
 out=$(grant distribution-push); rc=$?
 check "push: distribution-push not granted" "1 " "$rc $out"
+out=$(grant checked-push); rc=$?
+check "push: checked-push not granted" "1 " "$rc $out"
+
+# checked-push (#188), a grant of its own: it covers no push, nor push it.
+commit_file "$repo" docs/agents/supervision.md \
+'## Grants
+
+- checked-push: code-only pushes
+' "grant checked-push"
+push_main "$repo"
+check "checked-push: cites the whole bullet" "checked-push: code-only pushes" "$(grant checked-push)"
+out=$(grant push); rc=$?
+check "checked-push: push not granted" "1 " "$rc $out"
+out=$(grant distribution-push); rc=$?
+check "checked-push: distribution-push not granted" "1 " "$rc $out"
 
 # issue-comment and issue-create (#110), each granted on its own.
 commit_file "$repo" docs/agents/supervision.md \

@@ -278,6 +278,8 @@ check "supervision-doc write: file created" "./docs/agents/supervision.md" "$(cd
 has "supervision-doc write: has a Grants heading" "## Grants" "$(cat "$proj/docs/agents/supervision.md")"
 has "supervision-doc write: says an empty file grants nothing" "grants nothing" "$(cat "$proj/docs/agents/supervision.md")"
 has "supervision-doc write: lists distribution-push" "       distribution-push" "$(cat "$proj/docs/agents/supervision.md")"
+has "supervision-doc write: lists checked-push" "       checked-push   the supervisor's own push" "$(cat "$proj/docs/agents/supervision.md")"
+has "supervision-doc write: checked-push is not granted with distribution-push" "grant it with distribution-push" "$(cat "$proj/docs/agents/supervision.md")"
 has "supervision-doc write: lists label" "       label          gh issue edit with only --add-label or" "$(cat "$proj/docs/agents/supervision.md")"
 has "supervision-doc write: label's example" "- label: a capture's in-motion and live-check relabels" "$(cat "$proj/docs/agents/supervision.md")"
 has "supervision-doc write: says what it did" "written, in project $proj" "$out"

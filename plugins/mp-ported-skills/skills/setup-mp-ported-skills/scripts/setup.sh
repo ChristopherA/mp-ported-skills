@@ -379,6 +379,14 @@ itself one by editing this file.
        distribution-push
                       the same, in the Distribution repo that
                       docs/agents/distribution-repo.md names
+       checked-push   the supervisor's own push, after the worker's turn
+                      ends, without asking: only when every push.sh
+                      --check line is ok, the test suite's included, and
+                      no README*, CHANGELOG*, docs/ or .md file changed
+                      in either repo. Never a worker's own push. Do not
+                      grant it with distribution-push, under which the
+                      worker pushes the Distribution repo itself, with
+                      none of these checks.
        pr-create      gh pr create
        pr-merge       gh pr merge
        issue-close    gh issue close. Held while the Distribution repo

@@ -313,12 +313,14 @@ marker=$(marker_path "$DIR")
 errs=$(mktemp) || fail "mktemp failed, so the grants cannot be read; not launched"
 granted=""
 push_granted=""
-actions="push pr-create pr-merge issue-close issue-comment issue-create sub-issue label"
+checked_granted=""
+actions="push pr-create pr-merge issue-close issue-comment issue-create sub-issue label checked-push"
 [ -z "$DIST" ] || actions="$actions distribution-push"
 for action in $actions; do
     cited=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$action" </dev/null 2>"$errs") &&
         granted="$granted
-- $cited" && { [ "$action" != push ] || push_granted=1; }
+- $cited" && { [ "$action" != push ] || push_granted=1; } &&
+        { [ "$action" != checked-push ] || checked_granted=1; }
     if grep -q '^Error' "$errs"; then
         printf 'grant.sh: %s\n' "$(command cat "$errs")" >&2
         command rm -f "$errs"
@@ -334,6 +336,10 @@ if [ -n "$granted" ]; then
 A shared action one of these grants covers goes ahead without asking: when /implement or a capture reaches it, take it, and do not end your turn to ask first."
     [ -z "$push_granted" ] || GRANTS="$GRANTS
 A granted push goes ahead as soon as its grant's conditions hold, before any capture: the supervisor sends /mp-ported-skills:capturing after your turn ends. A commit that capture makes is pushed under the push grant only when the grant's note names a capture's commits, as \`its capture's commits included\` does; otherwise end the capture's turn on \`Waiting on: git push origin $default\`."
+    # checked-push (#188) is read only by the supervisor's Push on approval:
+    # no command maps to it, so without a push grant the worker's push waits.
+    [ -z "$checked_granted" ] || [ -n "$push_granted" ] || GRANTS="$GRANTS
+checked-push is the supervisor's grant, not yours: it covers no push of yours. End your turn on \`Waiting on: git push origin $default\` as with no push grant; /supervise pushes after your turn ends, without asking when every check passes."
 else
     GRANTS="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/$default, holds no standing grant."
 fi
