@@ -16,7 +16,7 @@ A ticket that continued after a zone capture (Zone capture, `zone-capture.md`) i
 
 A finished worker is stopped, not removed: `record.sh` reads its job after the stop, and `launch.sh` counts a stopped session as not live, so it stays listed in `claude agents` until the maintainer removes it.
 
-Between tickets, first capture this session when anything is new since its last capture (Capturing this session, in `SKILL.md`'s Report step), so a compaction in the next ticket's watch loses nothing the last one taught. Then read what comes next, passing every ticket this loop ran:
+Between tickets, first capture this session when anything is new since its last capture (Capturing this session, `SKILL.md`), so a compaction in the next ticket's watch loses nothing the last one taught. Then read what comes next, passing every ticket this loop ran:
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/next.sh" --dir "<project folder>" --ran "<N M ...>" --session "${CLAUDE_SESSION_ID}" --session-dir "$PWD" </dev/null

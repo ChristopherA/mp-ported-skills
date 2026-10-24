@@ -11,8 +11,9 @@
 # SKILL.md), and that every file a read instruction names exists. A step
 # that sends the reader to a moved file, in SKILL.md or another moved
 # file, tells the reader to read it; a mention that only says where a
-# section lives names the file in parentheses. Reads only files in this
-# checkout.
+# section lives names the file in parentheses. It also checks where the
+# supervisor's own capture sits on that path, in SKILL.md's Report step and
+# in loop.md (#205). Reads only files in this checkout.
 #
 # Usage: sh tests/supervise-sections.test.sh
 
@@ -88,24 +89,24 @@ check "SKILL.md keeps the done item" yes "$(contains "$skill" '- **`done`**:')"
 
 # The supervisor captures itself at each pause, not only at the end (#205):
 # in the Report step, after each worker's report and before a question that
-# ends its turn, in that order; and in a loop, between tickets, before
+# ends its turn, listed in that order; and in a loop, between tickets, before
 # next.sh, with the Zone stop's capture still last.
-line_of() { # <file> <fixed string> -- first line number, or 0
+line_no() { # <file> <fixed string> -- first line number, or 0
     n=$(grep -n -F -- "$2" "$1" | head -n 1 | cut -d: -f1)
     echo "${n:-0}"
 }
 before() { # <a> <b> -- yes when 0 < a < b
     if [ "$1" -gt 0 ] && [ "$1" -lt "$2" ]; then echo yes; else echo no; fi
 }
-report=$(line_of "$skill" '## 4. Report')
-own=$(line_of "$skill" '### Capturing this session')
-after_report=$(line_of "$skill" "1. **After each worker's report**")
-before_question=$(line_of "$skill" '2. **Before a question to the maintainer**')
-worker_capture=$(line_of "$skill" '## Capture')
+report=$(line_no "$skill" '## 4. Report')
+own=$(line_no "$skill" '### Capturing this session')
+after_report=$(line_no "$skill" "1. **After each worker's report**")
+before_question=$(line_no "$skill" '2. **Before a question to the maintainer**')
+worker_capture=$(line_no "$skill" '## Capture')
 check "SKILL.md's own capture is in the Report step" yes "$(before "$report" "$own")"
 check "SKILL.md's own capture comes before the worker's Capture" yes "$(before "$own" "$worker_capture")"
-check "the capture after a report comes first" yes "$(before "$own" "$after_report")"
-check "the capture before a question comes second" yes "$(before "$after_report" "$before_question")"
+check "the capture after a report is listed first" yes "$(before "$own" "$after_report")"
+check "the capture before a question is listed second" yes "$(before "$after_report" "$before_question")"
 check "the own capture's list ends before Capture" yes "$(before "$before_question" "$worker_capture")"
 check "SKILL.md says each capture covers only what changed" yes \
     "$(contains "$skill" 'Each capture covers only what changed since the last one')"
@@ -113,13 +114,13 @@ check "Done when names the capture after each report" yes \
     "$(contains "$skill" "this session's capture after each worker's report")"
 
 loop="$dir/loop.md"
-between=$(line_of "$loop" 'Between tickets, first capture this session')
-next_cmd=$(line_of "$loop" 'next.sh" --dir')
-zone_stop=$(line_of "$loop" '## Zone stop')
+between=$(line_no "$loop" 'Between tickets, first capture this session')
+next_cmd=$(line_no "$loop" 'next.sh" --dir')
+zone_stop=$(line_no "$loop" '## Zone stop')
 check "loop.md captures between tickets before next.sh" yes "$(before "$between" "$next_cmd")"
 check "loop.md names the Report step's own capture" yes \
-    "$(contains "$loop" "(Capturing this session, in \`SKILL.md\`'s Report step)")"
-final=$(line_of "$loop" '3. **Capture.** After the final report')
+    "$(contains "$loop" "(Capturing this session, \`SKILL.md\`)")"
+final=$(line_no "$loop" '3. **Capture.** After the final report')
 check "loop.md keeps the final capture in Zone stop" yes "$(before "$zone_stop" "$final")"
 check "the final capture covers what changed since the last ticket's" yes \
     "$(contains "$loop" 'covering only what changed since the capture after the last ticket')"
