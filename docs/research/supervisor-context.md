@@ -115,10 +115,10 @@ Acceptance: a clean ticket's cost to the supervisor, measured as in `docs/resear
 From the numbers above, at plugin 0.8.81:
 
 - A loop starts at about 85k, 57% of zone: 69.3k fixed, about 12.9k for `SKILL.md` (34,140 bytes) and about 3.3k for `loop.md` (8,639 bytes).
-- `next.sh` stops the loop at 90% of zone, 135k, checked between tickets, so a ticket started just under it runs on past it.
+- `next.sh` stopped the loop at 90% of zone, 135k, checked between tickets, so a ticket started just under it runs on past it. #193 moved the stop to 100% of zone, 150k, and accepted the wrap-up's overrun.
 - At 7.7k to 9.6k a clean ticket, the reading after k tickets is 85k plus k times that. The loop starts its seventh clean ticket at 7.7k a ticket (131k after six) and stops after six at 9.6k (143k, 95%). So **6 to 7 clean tickets** in one session.
 - A ticket that blocks once on a question costs 1k to 3k more, which takes a ticket off only at the high end (at 9.6k a ticket, 5 tickets and 3k reach 136k, past the stop). One with a zone capture costs about twice a clean one and takes one ticket off: **5 to 6**, or 6 to 7 for a single cheap block.
-- The wrap-up after the zone stop, a loop summary and the supervisor's own capture (8k to 15k), starts at 90% to 96% of zone, so it ends past 100%. A zone stop that left room for the capture would start no ticket past about 135k less one ticket and the capture, near 75% of zone, and the loop would run one ticket fewer.
+- The wrap-up after the zone stop, a loop summary and the supervisor's own capture (8k to 15k), starts at 90% to 96% of zone, so it ends past 100%. A zone stop that left room for the capture would start no ticket past about 135k less one ticket and the capture, near 75% of zone, and the loop would run one ticket fewer. #193 chose the other way: the loop now starts tickets until 100% of zone, and the wrap-up runs past the zone, below the auto-compact point.
 
 The zone stop (#78) reads this session's zone through the glance, from the status line's record of its context window, while `supervisor context` reads the transcript's per-call usage: the same size from two sources. The next loop's records and glance lines, side by side, show whether they agree.
 

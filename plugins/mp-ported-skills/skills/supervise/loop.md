@@ -30,7 +30,7 @@ It fetches, then prints `next implement #M` (exit 0), after a `scripts <version>
 - `not-landed`: uncommitted paths, no upstream, or commits the upstream lacks. The next ticket starts from the default branch as pushed, so the loop waits for the maintainer rather than stacking work.
 - `behind`: the upstream moved on, so the next worker would start from an old commit.
 - `count-reached`: the loop ran the N tickets `--loop N` asked for. It is read after the three above, so a last ticket whose work did not land is still reported as `held`, `not-landed` or `behind`.
-- `zone`: this session's zone reading is at or past the point the loop stops at (90% of zone), so it starts no more tickets and wraps up (Zone stop, below). It is read after the four above.
+- `zone`: this session's zone reading is at or past the point the loop stops at (100% of zone), so it starts no more tickets and wraps up (Zone stop, below). It is read after the four above.
 - `nothing-left`: `state.sh`'s next step is nothing in motion.
 - `other-step`: any other step than `/implement` of a `ready-for-agent` ticket.
 - `repeat`: `state.sh` still recommends a ticket this loop already ran, which happens when its work went in without `Closes #N`; running it again would rebuild it.
@@ -41,7 +41,7 @@ The `scripts` line names the newest installed version of this plugin (a cache fo
 
 ## Zone stop
 
-A loop that runs past this session's zone makes its stop-or-continue calls, and its wrap-up, from where sessions stop working well (#78). So `next.sh` stops the loop at 90% of zone, below 100% so the wrap-up runs inside the zone: in the #141 to #143 loop each ticket added 6 to 10 points. The check comes between tickets, so the running worker has already finished, been captured, landed and been stopped. On `stop zone`:
+A loop that runs past this session's zone makes its stop-or-continue calls, and its wrap-up, from where sessions stop working well (#78). So `next.sh` stops the loop at 100% of zone (#193). The wrap-up then runs past the zone: in the #141 to #143 loop each ticket added 6 to 10 points, a ticket started just under 100% can end near 108%, and the loop summary and this session's capture add 8k to 17k more, so keep the wrap-up short. The stop stays below the auto-compact point, about 106% of zone, so the session reads it before it compacts. The check comes between tickets, so the running worker has already finished, been captured, landed and been stopped. On `stop zone`:
 
 1. **Evaluate.** Post a loop summary on the tickets' parent. Read each ticket's parent in the Project folder with `gh api "repos/{owner}/{repo}/issues/<N>/parent" --jq .number`, which exits 1 with `No parent issue found` for a ticket with none; post the summary on each distinct parent, or on the last ticket run when none has one. Write it to `<scratchpad>/loop-summary.md`, then post it with `gh issue comment <parent> --body-file "<scratchpad>/loop-summary.md"`. It holds the `stop zone` line, and for each ticket the loop ran, in order: its number, the worker's id, its outcome, any gate it hit (a routine answer, a push or post on approval, a refusal), and its run record, as posted, with the URL of that comment. So that each record is still at hand, in a loop save each ticket's record as `<scratchpad>/run-record-<N>.md`, not the one `run-record.md`.
 Like the run record, the summary is a comment the supervisor posts without asking: it holds what the run records already hold.

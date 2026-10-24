@@ -17,8 +17,8 @@
 #                 --loop N asked for (#149). Checked after the landing
 #                 checks above, so a ticket that did not land still says so
 #   zone          --session was given and that supervisor session's zone
-#                 reading is at or past ZONE_STOP (#78), so the loop wraps
-#                 up while the session is still in its zone
+#                 reading is at or past ZONE_STOP (#78), so the loop
+#                 wraps up
 #   nothing-left  state.sh's next step is case 7, nothing in motion
 #   other-step    any other step than /implement of a ready-for-agent
 #                 ticket, as step.sh reads it
@@ -58,11 +58,11 @@
 set -u
 
 # The supervisor's zone reading, in % of zone, at which the loop starts no
-# more tickets. Below 100 so the wrap-up (loop summary, capture) runs inside
-# the zone: in the #141 to #143 loop each ticket added 6 to 10 points. It
-# must stay below the auto-compact point of the smallest window, 106% of
-# zone for 200k tokens at 80% (tests/supervise-next.test.sh).
-ZONE_STOP=90
+# more tickets (#193). The wrap-up (loop summary, capture) runs past the
+# zone: in the #141 to #143 loop each ticket added 6 to 10 points. It must
+# stay below the auto-compact point of the smallest window, 106% of zone
+# for 200k tokens at 80% (tests/supervise-next.test.sh).
+ZONE_STOP=100
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/marker.sh"
