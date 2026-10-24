@@ -5,7 +5,8 @@
 # docs/agents/issue-tracker.md names GitHub, the tracker through `gh`. Prints
 # state lines, then `next: <case> ...` for the first of the seven weighing
 # cases that applies and `runner-up: ...` for the second (case 7's suggestions
-# when no other applies). A ticket labelled `parked` is never a step. Prints
+# when no other applies). A ticket labelled `parked` is never a step, nor is
+# one whose newest comment is a worker's park question (#158). Prints
 # what each ready ticket unblocks (`unblocks:`), and what the next step's and
 # runner-up's tickets unblock, without changing the step. When the working
 # tree's docs/agents/distribution-repo.md names a Distribution repo (#142),
