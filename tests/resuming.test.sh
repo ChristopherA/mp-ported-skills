@@ -243,6 +243,29 @@ out=$(run)
 check "case 2: skips a parked ticket" "6 by hand (Low): #81 t81" "$(next "$out")"
 has "case 2: parked is not ready" "ready, blockers closed: none" "$out"
 
+# A ticket whose newest comment is a worker's park question (#158) is passed
+# over until someone replies, read from every page of its comments.
+printf '[{"user":{"login":"me"},"body":"## Agent Brief"},{"user":{"login":"me"},"body":"\\n## Parked\\n\\nWhich name?"}]' >"$FAKE_GH/comments-88.json"
+issues "$(list "$(issue 87 ready-for-agent)" "$(issue 88 ready-for-agent | jq -c '.comments = 2')")"
+out=$(run)
+check "park comment: not ready" "#87 t87" "$(line_of "$out" "ready, blockers closed")"
+check "park comment: reported as awaiting a reply" "#88 t88" "$(line_of "$out" "parked, awaiting reply")"
+check "park comment: the other ticket is the step" "2 /implement #87 (you type it; user-invoked): #87 t87" "$(next "$out")"
+printf '[{"user":{"login":"me"},"body":"## Parked: which name?"}]' >"$FAKE_GH/comments-88.json"
+check "park comment: heading with its question on the line" "#87 t87" "$(line_of "$(run)" "ready, blockers closed")"
+printf '[{"user":{"login":"me"},"body":"Not ## Parked"},{"user":{"login":"me"},"body":"## Parkedness"}]' >"$FAKE_GH/comments-88.json"
+check "park comment: only the heading opening a comment" "#87 t87; #88 t88" "$(line_of "$(run)" "ready, blockers closed")"
+printf '[{"user":{"login":"me"},"body":"## Parked\\nWhich name?"},{"user":{"login":"reporter"},"body":"Use foo."}]' >"$FAKE_GH/comments-88.json"
+out=$(run)
+check "park comment: a reply re-arms it" "#87 t87; #88 t88" "$(line_of "$out" "ready, blockers closed")"
+check "park comment: no line with none parked" "" "$(printf '%s\n' "$out" | grep '^parked, awaiting reply')"
+printf '[{"user":{"login":"me"},"body":"## Parked\\nWhich name?"}]' >"$FAKE_GH/comments-88.page2.json"
+check "park comment: the newest on the second page" "#87 t87" "$(line_of "$(run)" "ready, blockers closed")"
+command rm -f "$FAKE_GH/comments-88.page2.json"
+printf 'not json' >"$FAKE_GH/comments-88.json"
+check "park comment: comments unreadable, not parked" "#87 t87; #88 t88" "$(line_of "$(run)" "ready, blockers closed")"
+command rm -f "$FAKE_GH/comments-88.json"
+
 # Blockers as bullets under a Blocked by heading, any level or case, up to the
 # next heading.
 issues "$(list "$(issue 31 needs-triage)" \
@@ -341,6 +364,13 @@ list "$(issue 26 ready-for-human,parked)" "$(issue 28 ready-for-agent)" >"$FAKE_
 check "in-motion parent: skips a parked child" "1 work in flight: in motion #24 t24; next child #28 (ready-for-agent, /implement #28, you type it; user-invoked): t28" "$(next "$(run)")"
 list "$(issue 26 ready-for-human,parked)" >"$FAKE_GH/sub-24.json"
 check "in-motion parent: only a parked child" "1 work in flight: in motion #24 t24; every open child blocked: #26 parked" "$(next "$(run)")"
+# A child whose newest comment is a park question (#158) is passed over too.
+printf '[{"user":{"login":"me"},"body":"## Parked\\nWhich name?"}]' >"$FAKE_GH/comments-27.json"
+list "$(issue 27 ready-for-agent | jq -c '.comments = 1')" "$(issue 28 ready-for-agent)" >"$FAKE_GH/sub-24.json"
+check "in-motion parent: skips a child awaiting a reply" "1 work in flight: in motion #24 t24; next child #28 (ready-for-agent, /implement #28, you type it; user-invoked): t28" "$(next "$(run)")"
+list "$(issue 27 ready-for-agent | jq -c '.comments = 1')" >"$FAKE_GH/sub-24.json"
+check "in-motion parent: only a child awaiting a reply" "1 work in flight: in motion #24 t24; every open child blocked: #27 parked: awaiting reply" "$(next "$(run)")"
+command rm -f "$FAKE_GH/comments-27.json"
 list "$(closed 26 ready-for-human)" "$(closed 28 ready-for-agent)" >"$FAKE_GH/sub-24.json"
 check "in-motion parent: children all closed" "1 work in flight: in motion #24 t24" "$(next "$(run)")"
 command rm -f "$FAKE_GH/sub-24.json"
@@ -576,6 +606,11 @@ out=$(run)
 check "reorder: a parked child is not queued" "#52" "$(queue "$out")"
 check "reorder: a parked child is not moved" \
     "#56 (open child 5 of #24) ahead of #54 (open child 3): $(move 24 56 54); queue after: #52 #56" "$(reorder "$out")"
+# Nor is a child awaiting a reply to its park question (#158).
+printf '[{"user":{"login":"me"},"body":"## Parked\\nWhich name?"}]' >"$FAKE_GH/comments-53.json"
+kids "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent | jq -c '.comments = 1')" "$(issue 56 ready-for-agent)"
+check "queue: a child awaiting a reply is not queued" "#52 #56" "$(queue "$(run)")"
+command rm -f "$FAKE_GH/comments-53.json"
 # A not-ready child ends the queue as a by-hand one does. The child moved
 # ahead of it also frees a child waiting on it ahead in the order.
 kids "$(issue 52 ready-for-agent)" "$(issue 56 ready-for-agent 0 'Blocked by: #55')" "$(issue 57 enhancement)" \

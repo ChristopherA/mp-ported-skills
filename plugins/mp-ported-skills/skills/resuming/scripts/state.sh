@@ -38,6 +38,8 @@ distribution="$supervise_scripts/distribution.sh"
 # step it takes, and which background sessions are live.
 . "$supervise_scripts/accept.sh"
 . "$supervise_scripts/live.sh"
+# The park comment's heading, shared with launch.sh's prompt text (#158).
+. "$supervise_scripts/park.sh"
 
 cd "$dir" 2>/dev/null || exit 0
 
@@ -79,9 +81,10 @@ next_child() {
         { printf '; sub-issues not read'; return; }
     kids=$(printf '%s' "$subs" | jq -c --arg repo "$repo_slug" --argjson open "$open_nums" "$body_blockers"'
         [.[] | select(.state == "open")
-         | {n: .number, id: .id, t: .title, l: [.labels[].name],
+         | {n: .number, id: .id, t: .title, l: [.labels[].name], c: .comments,
             dep: (.issue_dependencies_summary.blocked_by // 0),
             line: [body_blockers[] | select(. as $b | $open | index($b))]}]')
+    kids=$(mark_parked "$kids")
     [ "$(printf '%s' "$kids" | jq length)" = 0 ] && return
     # Kept for the /supervise queue, which replays this pick: this function
     # runs in a command substitution, so a variable would not outlive it.
@@ -98,7 +101,12 @@ next_child() {
     blocked=
     for k in $(printf '%s' "$kids" | jq -r '.[].n'); do
         if printf '%s' "$kids" | jq -e --argjson k "$k" '.[] | select(.n == $k) | .l | index("parked")' >/dev/null; then
-            blocked="$blocked, #$k parked"; continue
+            if printf '%s' "$kids" | jq -e --argjson k "$k" '.[] | select(.n == $k) | .pk' >/dev/null; then
+                blocked="$blocked, #$k parked: awaiting reply"
+            else
+                blocked="$blocked, #$k parked"
+            fi
+            continue
         fi
         by=$(printf '%s' "$kids" | jq -r --argjson k "$k" '.[] | select(.n == $k) | .line[]')
         if [ "$(printf '%s' "$kids" | jq --argjson k "$k" '.[] | select(.n == $k) | .dep')" -gt 0 ]; then
@@ -112,6 +120,37 @@ $(open_link_blockers "$k" | jq -r '.[]')"
     done
     blocked=$(printf '%s' "$blocked" | sed 's/ ,/,/g; s/ $//')
     printf '; every open child blocked: %s' "${blocked#, }"
+}
+
+# awaiting_reply <n>: whether ticket #n's newest comment is a worker's park
+# question, a comment opening with park.sh's heading (#158): no step takes
+# the ticket until a later comment, from anyone, answers it. Reads every
+# page, merged as in next_child; a ticket whose comments cannot be read is
+# not parked. Each read spends the time budget, so the answer is kept in
+# $tmp: next_child runs in a command substitution, and asks again.
+awaiting_reply() {
+    f="$tmp/park-$1"
+    if [ ! -f "$f" ]; then
+        gh api "repos/{owner}/{repo}/issues/$1/comments?per_page=100" --paginate 2>/dev/null |
+            jq -rs "$park_def"'add | last.body // "" | parked' >"$f" 2>/dev/null || echo false >"$f"
+    fi
+    [ "$(cat "$f")" = true ]
+}
+
+# mark_parked <rows json>: the rows with each one whose newest comment is a
+# park question (awaiting_reply) labelled `parked` for every test below that
+# skips one, and flagged `pk` for the reports that name it. Only a row that
+# could otherwise be a step is read: open, ready-for-agent, with comments,
+# no open blocker and no `parked` label. Reads $open_nums and $t_agent.
+mark_parked() {
+    pk=
+    for n in $(printf '%s' "$1" | jq -r --argjson open "$open_nums" --arg ta "$t_agent" '
+        .[] | select((.l | index($ta)) and (.c // 0) > 0 and .dep == 0 and (.l | index("parked") | not)
+                     and ([.line[] | select(. as $b | $open | index($b))] | length == 0)) | .n'); do
+        awaiting_reply "$n" && pk="$pk $n"
+    done
+    printf '%s' "$1" | jq -c --arg pk "$pk" '($pk | split(" ") | map(select(. != "") | tonumber)) as $pk
+        | map(if (.n as $n | $pk | index($n)) then .l += ["parked"] | .pk = true else . end)'
 }
 
 # open_link_blockers <n>: a JSON array of the open tickets GitHub links as
@@ -326,6 +365,9 @@ gather() {
                 'add | any(.[]; .event == "reopened" and (.created_at | fromdateiso8601) > $at)' >/dev/null 2>&1 &&
                 fixed_nums=$(printf '%s' "$fixed_nums" | jq -c --argjson n "$n" 'map(select(. != $n))')
         done
+        # A ticket awaiting a reply to its park question is parked (#158).
+        rows=$(mark_parked "$rows")
+        awaiting=$(printf '%s' "$rows" | jq -r 'map(select(.pk) | "#\(.n) \(.t)") | join("; ")')
         count() { printf '%s' "$rows" | jq --arg r "$1" '[.[] | select(.role == $r)] | length'; }
 
         # Open tickets the default branch already closes.
@@ -423,6 +465,7 @@ gather() {
         echo "issues: $n_unl unlabelled, $n_triage $t_triage, $n_info $t_info (replied: ${replied:-none}), $n_agent $t_agent, $n_human $t_human, $n_map wayfinder:map"
         echo "in motion: ${moving:-none}"
         echo "ready, blockers closed: ${ready:-none}"
+        [ -n "$awaiting" ] && echo "parked, awaiting reply: $awaiting"
         echo "unblocks: ${unblocks:-none}"
         echo "by hand, blockers closed: ${hand:-none}"
         echo "open but closed by a commit on $default: ${stale:-none}"
