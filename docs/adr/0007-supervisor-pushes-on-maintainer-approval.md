@@ -18,6 +18,27 @@ A Project with a Distribution repo (#125) has both repos pushed this way (#141).
 
 The worker's gate does not change. `push.sh` refuses to push when `CLAUDE_CODE_SESSION_ATTENDED=0`, the background session's marker, and in such a session the git wrapper on its PATH would refuse the push inside it anyway. The hook and the wrappers are untouched.
 
+## A checked push (#188)
+
+The maintainer's yes on an all-`ok` `--check` added no check the scripts had not made: the question showed the commits and the check lines, not the diff. In #91's second loop that yes took 7 hours, with every line `ok` and the suite passing. So a supervisor push now has three modes:
+
+- **Push on approval**, the default: `push.sh --check`, one question, and the push on a yes.
+- **A worker-granted push** (`push`, or `distribution-push` for a Distribution repo, ADR 0005): the worker pushes itself in its build turn, with none of `push.sh`'s checks.
+- **A checked push**, under a `checked-push` grant in the Project's `supervision.md`: Push on approval runs `push.sh --check --checked` and, when it exits 0, pushes with `--checked` and asks nothing.
+
+`--checked` reads the grant itself through `grant.sh`, refuses `--no-sweep`, and requires `--test` (and `--dist-test` with a Distribution repo), so a missing suite never reads as a passing one. It adds one more check per repo, `prose`: any file the range adds, changes or removes that is a `README*` or `CHANGELOG*` file, under a `docs/` folder, or a `.md` file at any depth, both sides of a rename included, fails it. When `prose` is the only `fail`, `push.sh` exits 4 with nothing pushed, and the push goes back to the question, which names the files. Any other `fail` pushes nothing and asks nothing, as before. A checked push's record line carries ` checked-push`, a tab, the grant's citation, a tab, and that repo's `ok` lines, after the five fields above, so `actions.sh` labels it `pushed by the supervisor under checked-push (<citation>)` with the range and the checks, and `record.sh` names the wait it clears as one before the checked push, not a wait on a human.
+
+The grant covers one thing: the supervisor's push, all or nothing across the Project and its Distribution repo, as `push.sh` pushes them. No command maps to it in the classifier the hook and the wrappers share, so a worker's own push under only `checked-push` is refused exactly as with no grant, and no worker question (`answer.sh`) or capture job (`before-clear.sh`) maps to it. It should not be granted together with `distribution-push`, under which the worker pushes the Distribution repo itself, with none of these checks; the setup template and `docs/agents/supervision.md` say so.
+
+The maintainer chose this trade knowing its costs:
+
+- The sweep is pattern-based, so a private name it does not list goes public unread.
+- Nobody reads a public commit's message or diff before it is permanent. Commit messages are not narrowed; the sweep is their only check.
+- The prose scope keeps a human on what is most often read: README, changelog and docs. In this repo a skill change is a `SKILL.md` change, so most of its tickets still ask; in a TypeScript Project most go.
+- There is no notification: the record, `actions.sh` and the run record name the grant, the range and the check lines.
+
+If Claude Code's auto-mode classifier refuses the unasked push, the skill reports the refusal and falls back to asking; it does not retry in another form. Whether the classifier allows a checked push in a live unattended loop is still to be seen, and is recorded on #188.
+
 ## What the classifier allowed
 
 Claude Code's auto-mode classifier judges each supervisor push, and it is the one gate no file in this repo controls.
@@ -38,6 +59,7 @@ One thing is still open: whether the script push is allowed when the go-ahead co
 ## Consequences
 
 - `tests/supervise-push.test.sh` covers `push.sh` in a scratch Project with a bare remote and a stub sweep: a full `--check` pass, a push and its record, nothing left to push, and each failing check by name with nothing pushed (dirty tree, sweep hits with their output, a minor and a major bump, someone else's push upstream, an unpushed commit before the start, a marker still in place, a failed fetch, no upstream, a detached HEAD), and a plugin new or removed in the range, which passes as no bump. It also covers the usage errors, and a background session where `push.sh` refuses and the git wrapper still refuses a plain push. With a Distribution repo (#141) it covers both repos checked and pushed together, only the Distribution repo pushed and swept, with the Project's empty range passed over (the stub sweep, like the real one, exits 2 on an empty range), a failing check in either repo pushing neither, nothing to push in either, a second push refused after the first landed, and `--dist-start` missing or given with no Distribution repo. With a stub suite that exits 1 as a failing suite does (#187), it covers `--test` and `--dist-test` passing and failing in each repo, a failure refusing both `--check` and the push, a long failure cut to its last 40 lines, and `--dist-test` with no Distribution repo. It runs the same way with `worker-bin` first on PATH and `CLAUDE_CODE_SESSION_ATTENDED=0`. The same file checks that `actions.sh` labels a branch `push.sh` pushed for this worker, and does not for another worker's id, which, with no push in its transcript, reads `pushed by someone else` since #98.
+- With `--checked` (#188), the same file covers the grant missing or covering only `push`, `--no-sweep`, a missing `--test` or `--dist-test` (each exit 1), an all-`ok` code-only check and push with its record mark and `actions.sh` line, prose files in either repo (exit 4, files named, nothing pushed), a rename out of `docs/`, and prose beside a sweep hit or a failing suite (exit 2). `tests/deny-shared-actions.test.sh` and `tests/worker-bin.test.sh` check that a worker's push under only `checked-push` is refused.
 - The record file holds only pushes `push.sh` made. A push the maintainer makes any other way still reads as the worker's `ungranted` branch line. That is #98's to fix.
 - The sweep command is the maintainer's own tool, named in their instructions, not in this public plugin. `push.sh` takes it as an argument and requires either it or an explicit `--no-sweep`, so leaving the sweep out has to be a choice.
 - A settled worker is captured before Push on approval, not after (#109): a capture that ran after the push and committed needed a second round of stop, release, `push.sh --check`, test suite, question and push (#67, #98). Capturing first lets one round push the work and the capture's commits together, and `record.sh` runs after both. A worker whose own grant covers its push is the exception (#131): it pushes in its build turn, before the capture, and the capture's commits go under the same grant when its note names them (`its capture's commits included`), or through this route when it does not. `record.sh` reads the capture follow-up as the supervisor's prompt, so the build's push wait it follows is not a wait on a human.

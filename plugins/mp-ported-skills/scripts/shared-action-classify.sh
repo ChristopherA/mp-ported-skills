@@ -290,7 +290,9 @@ classify_gh() {
 # delete (#113), and a gh issue edit that changes more than labels (#184).
 # The two gh api POSTs above that name an issue comment or a new issue map
 # to that action (#110), the sub-issue link and reorder map to sub-issue
-# (#162), and a label-only gh issue edit maps to label (#184).
+# (#162), and a label-only gh issue edit maps to label (#184). No form maps
+# to checked-push (#188): it covers only the supervisor's own push.sh push,
+# so a worker's push under it alone is refused as with no grant.
 grant_action() { # <matched>
     case "$1" in
     "git push (piped"* | "gh (piped"*) ;;
