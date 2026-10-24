@@ -199,6 +199,26 @@ waiting_on "Captured.
 check "watch: two Waiting on lines need the last" "blocked input needed
 cwd /work/project
 needs sh /p/capturing/scripts/live-check.sh --apply 185" "$(watch_file done 9121ff49)"
+# An unattended worker that parks its ticket ends on a `Parked:` line naming
+# its question: parked, with the question on a line of its own (#158).
+waiting_on "Posted the question on #158 and put the work on parked-158.
+
+\`Parked: Should pid always win?\`"
+check "watch: a turn that ended on a Parked: line is parked" "parked
+cwd /work/project
+question Should pid always win?" "$(watch_file done 9121ff49)"
+check "watch: parked while the list says working" "parked
+cwd /work/project
+note claude agents still said working
+question Should pid always win?" "$(watch_file working-idle 9121ff49)"
+waiting_on "Parked: Should pid always win?
+\`Waiting on: git push origin main\`"
+check "watch: a Parked: line wins over a Waiting on: line" "parked
+cwd /work/project
+question Should pid always win?" "$(watch_file done 9121ff49)"
+waiting_on "Nothing here is Parked: for long."
+check "watch: Parked: mid-line is not parked" "done
+cwd /work/project" "$(watch_file done 9121ff49)"
 # The background service can mark that worker blocked with no waitingFor
 # before watch.sh sees it done. The `Waiting on:` line still names what it
 # waits on, and wins over the job's needs summary, which can name a side
@@ -444,6 +464,15 @@ check "watch --since: commits on an older worktree's branch are moved" "moved
 cwd $project
 branch kept
 commit $(git -C "$project" rev-parse --short kept) On kept" "$(watch_since working-busy c2a368ee)"
+# A parked worker leaves its work on a branch parked-<n>: it stays parked,
+# with the branch listed, not moved (#158).
+waiting_on "Parked: Should pid always win?"
+check "watch --since: a parked worker's branch keeps it parked" "parked
+cwd $project
+question Should pid always win?
+branch kept
+commit $(git -C "$project" rev-parse --short kept) On kept" "$(watch_since done 9121ff49)"
+command rm -rf "$cfg/projects"
 # A detached worktree's commits are on no branch, so they follow its line.
 project_git worktree add -q --detach "$project/.wt-detached"
 git -C "$project/.wt-detached" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q --allow-empty -m "Detached"
@@ -1160,6 +1189,13 @@ launch_in() { # <dir> [args...] -- launch.sh --dir <dir> with the fake claude
     echo "$fixtures/working-busy.json" >"$fake/seq"
     launch_run "$scripts" "$d" "$@"
 }
+# With issue-comment and sub-issue granted, the worker is told when and how
+# to park its ticket instead of waiting, naming the commit it starts from
+# (#158).
+park_text() { # <start> -- the park line for ticket 56 started at <start>
+    printf '%s' "Park the ticket instead of waiting when you reach a decision only the maintainer can make: a spec question, or a shared action no grant covers other than a push, an issue comment or a new issue, which /supervise asks the maintainer for after your turn ends. To park: commit any uncommitted work, put your commits on a local branch \`parked-56\` (\`git branch parked-56\`), and run \`git reset --hard $1\`, the commit you started from, so the checkout is clean for the next ticket; push nothing. Post your question on #56 under the issue-comment grant, as a comment whose first line is \`## Parked\` and which names the branch. Move #56 to the end of its parent's open sub-issues under the sub-issue grant: \`gh api repos/{owner}/{repo}/issues/56/parent\` names the parent (with none, skip this), and a PATCH to the parent's sub_issues/priority with sub_issue_id set to #56's id and after_id to the id of the last open child other than #56 moves it. Then end your turn on one line, \`Parked: <your question>\`."
+}
+park_line=$(park_text "$(git -C "$granted" rev-parse --short HEAD)")
 out=$(launch_in "$granted" --ticket 56 2>/dev/null); rc=$?
 check "launch with grants: exit 0" "0 c2a368ee" "$rc $out"
 check "launch with grants: lists the grants on origin, and only those" "You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/main (push is git push; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create; sub-issue is a gh api POST to an issue's sub_issues or a PATCH to its sub_issues/priority; label is gh issue edit with only --add-label or --remove-label):
@@ -1171,6 +1207,7 @@ check "launch with grants: lists the grants on origin, and only those" "You are 
 A shared action one of these grants covers goes ahead without asking: when /implement or a capture reaches it, take it, and do not end your turn to ask first.
 A granted push goes ahead as soon as its grant's conditions hold, before any capture: the supervisor sends /mp-ported-skills:capturing after your turn ends. A commit that capture makes is pushed under the push grant only when the grant's note names a capture's commits, as \`its capture's commits included\` does; otherwise end the capture's turn on \`Waiting on: git push origin main\`.
 A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create, a gh api link or reorder of a sub-issue, a label edit) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`.
+$park_line
 $read_once" \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d')"
 check "launch with grants: notes the grant committed only locally" "note: docs/agents/supervision.md grants pr-create on the working tree or current branch, not on the committed origin/main; ignored" \
@@ -1180,6 +1217,12 @@ check "launch with grants: the job's flags carry them" "--append-system-prompt" 
 check "launch with grants: a fully set-up Project reports every file present" "setup: docs/agents/issue-tracker.md present
 setup: docs/agents/triage-labels.md present
 setup: docs/agents/supervision.md present on origin/main" "$(setup_lines)"
+command rm -f "$(git -C "$granted" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
+# A continued worker parks back to the first worker's start.
+first=$(git -C "$granted" rev-parse --short HEAD~1)
+launch_in "$granted" --ticket 56 --continue "$first" >/dev/null 2>&1
+check "launch --continue: parks back to the first worker's start" "$(park_text "$first")" \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | grep '^Park ')"
 command rm -f "$(git -C "$granted" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
 # A grant.sh error is not read as "no grants": nothing launches.
 mkdir -p "$work/broken-scripts"
@@ -1211,6 +1254,8 @@ check "launch checked-push: lists the grant" "- checked-push: code-only pushes" 
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed -n 3p)"
 check "launch checked-push: the worker's push still waits" "checked-push is the supervisor's grant, not yours: it covers no push of yours. End your turn on \`Waiting on: git push origin main\` as with no push grant; /supervise pushes after your turn ends, without asking when every check passes." \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | grep '^checked-push is')"
+check "launch checked-push: without issue-comment and sub-issue, no park" "" \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | grep '^Park ')"
 command rm -f "$(git -C "$checked" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
 
 # --- release.sh --------------------------------------------------------------

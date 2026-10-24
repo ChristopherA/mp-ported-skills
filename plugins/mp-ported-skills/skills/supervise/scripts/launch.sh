@@ -95,6 +95,18 @@
 # its name ends `#N (continued)`. START is the first worker's start, a
 # commit in DIR.
 #
+# With issue-comment and sub-issue both granted, the worker is told to park
+# its ticket rather than wait when it reaches a decision only the maintainer
+# can make (#158): its work on a local branch parked-N, its checkout reset
+# to the commit it started from (START with --continue, else DIR's HEAD at
+# launch), a comment opening with park.sh's heading, the ticket moved to the
+# end of its parent's order, and a last line `Parked: <question>`, which
+# watch.sh reads as parked. A wait /supervise asks the maintainer about (a
+# push, an issue comment, a new issue) is not parked. Without both grants
+# the worker ends as before. In a Distribution repo it parks the same way,
+# back to that repo's HEAD at launch, or with --continue its upstream, since
+# the first worker's start there is not known.
+#
 # MODEL defaults to claude-sonnet-5 and must support auto mode, so a Haiku
 # model is refused. LEVEL is one of claude's effort levels (low, medium,
 # high, xhigh, max); without it the session runs at the model's default.
@@ -155,6 +167,7 @@
 set -u
 . "$(dirname -- "$0")/marker.sh"
 . "$(dirname -- "$0")/live.sh"
+. "$(dirname -- "$0")/park.sh"
 
 DIR=""
 TICKET=""
@@ -239,9 +252,11 @@ check_repo() {
 check_repo "$DIR" ""
 project_default=$default
 PROMPT="/mattpocock-skills:implement #$TICKET"
+start=$(git -C "$DIR" rev-parse --short HEAD)
 if [ -n "$CONTINUE" ]; then
     short=$(git -C "$DIR" rev-parse -q --verify --short "$CONTINUE^{commit}") ||
         fail "--continue needs a commit in $DIR, not '$CONTINUE'; not launched"
+    start=$short
     PROMPT="$PROMPT continues: an earlier worker on #$TICKET passed its capture threshold, ran /mp-ported-skills:capturing and was stopped. Its commits since $short and its capture's notes on #$TICKET are the work so far: build on them and finish the ticket."
 fi
 top=$(git -C "$DIR" rev-parse --show-toplevel)
@@ -314,13 +329,17 @@ errs=$(mktemp) || fail "mktemp failed, so the grants cannot be read; not launche
 granted=""
 push_granted=""
 checked_granted=""
+comment_granted=""
+sub_issue_granted=""
 actions="push pr-create pr-merge issue-close issue-comment issue-create sub-issue label checked-push"
 [ -z "$DIST" ] || actions="$actions distribution-push"
 for action in $actions; do
     cited=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$action" </dev/null 2>"$errs") &&
         granted="$granted
 - $cited" && { [ "$action" != push ] || push_granted=1; } &&
-        { [ "$action" != checked-push ] || checked_granted=1; }
+        { [ "$action" != checked-push ] || checked_granted=1; } &&
+        { [ "$action" != issue-comment ] || comment_granted=1; } &&
+        { [ "$action" != sub-issue ] || sub_issue_granted=1; }
     if grep -q '^Error' "$errs"; then
         printf 'grant.sh: %s\n' "$(command cat "$errs")" >&2
         command rm -f "$errs"
@@ -344,7 +363,10 @@ else
     GRANTS="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/$default, holds no standing grant."
 fi
 GRANTS="$GRANTS
-A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create, a gh api link or reorder of a sub-issue, a label edit) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin $default\`.
+A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create, a gh api link or reorder of a sub-issue, a label edit) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin $default\`."
+[ -z "$comment_granted" ] || [ -z "$sub_issue_granted" ] || GRANTS="$GRANTS
+Park the ticket instead of waiting when you reach a decision only the maintainer can make: a spec question, or a shared action no grant covers other than a push, an issue comment or a new issue, which /supervise asks the maintainer for after your turn ends. To park: commit any uncommitted work, put your commits on a local branch \`parked-$TICKET\` (\`git branch parked-$TICKET\`), and run \`git reset --hard $start\`, the commit you started from, so the checkout is clean for the next ticket; push nothing. Post your question on #$TICKET under the issue-comment grant, as a comment whose first line is \`$park_heading\` and which names the branch. Move #$TICKET to the end of its parent's open sub-issues under the sub-issue grant: \`gh api repos/{owner}/{repo}/issues/$TICKET/parent\` names the parent (with none, skip this), and a PATCH to the parent's sub_issues/priority with sub_issue_id set to #$TICKET's id and after_id to the id of the last open child other than #$TICKET moves it. Then end your turn on one line, \`Parked: <your question>\`."
+GRANTS="$GRANTS
 Read each file once: read a large file (over about 20KB, or a long one such as a SKILL.md or a test file) with Read in ranges, or grep -n it first and read the range you need, never whole with cat; read one file per call, since a result over the output limit is saved to a file and has to be read again; and do not print a file you have already read in this session unless it has changed since."
 [ -z "$DIST" ] || GRANTS="$GRANTS
 This Project's code lives in its Distribution repo, $DIST, named in docs/agents/distribution-repo.md. Make the ticket's code changes and commits there, by path (\`git -C $DIST\`), on its current branch, with no new branch or worktree; read the ticket and the Project's docs from this folder.

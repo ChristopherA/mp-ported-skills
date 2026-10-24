@@ -12,6 +12,9 @@
 #   blocked <what>     waiting on a human: `permission prompt`, `input needed`,
 #                      or `question` when claude agents names no waitingFor:
 #                      the worker asked in plain text (#85)
+#   parked             its turn ended on a line starting `Parked:`: an
+#                      unattended worker parked its ticket on a question
+#                      only the maintainer can answer (#158)
 #   capture-due        still working, and with --zone its context reading
 #                      is due for a capture at a safe point (zone.sh --due,
 #                      #60): the supervisor captures it and continues the
@@ -23,6 +26,9 @@
 # of zone` and the due line, and for a blocked session
 # `needs <text>`: the action a `Waiting on:` line names (below), or else what
 # its job's state.json under $CLAUDE_CONFIG_DIR names, when it names one.
+# A parked session's last line is `question <text>`, from its `Parked:` line,
+# before any lines --since adds; a `Parked:` line wins over a `Waiting on:`
+# line, and a branch --since lists (the worker's parked-<n>) keeps it parked.
 #
 # `hang` is a polling-loop state, not something a single classification can
 # see: it needs the session's transcript size at an earlier poll to compare
@@ -156,12 +162,13 @@ while [ $# -gt 0 ]; do
         --stall)    need_value "$@"; STALL="$2"; shift 2 ;;
         --help)
             printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--wait-blocked] [--detail PATH [--capture]] [--interval S] [--timeout S] [--stall S] | watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--wait-blocked] [--detail PATH [--capture]] --file PATH | watch.sh --dir DIR --snapshot\n'
-            printf 'Prints: working, moved, done, capture-due, hang, blocked <what>, stopped, gone or unknown <state>; then cwd, reading, needs, worktree, branch and commit lines.\n'
+            printf 'Prints: working, moved, done, parked, capture-due, hang, blocked <what>, stopped, gone or unknown <state>; then cwd, reading, needs, question, worktree, branch and commit lines.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
 done
 fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
+. "$(dirname -- "$0")/park.sh"
 if [ -n "$DIR" ]; then
     [ -d "$DIR" ] || fail "not a directory: $DIR"
     DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
@@ -314,6 +321,13 @@ waiting_on() {
     last_text "$1" | sed -n 's/^[`* ]*Waiting on: *//p' | sed 's/[`* ]*$//' | tail -n 1
 }
 
+# parked_on <session id>: the question a worker that parked its ticket asks,
+# from the last line starting `Parked:` in its last text (#158); empty when
+# none.
+parked_on() {
+    last_text "$1" | sed -n "$park_line_sed" | sed 's/[`* ]*$//' | tail -n 1
+}
+
 # QUESTION_JQ: defines the jq filter `asks`, true for a text whose last
 # non-blank line, less trailing markdown, ends on a question mark. record.sh
 # carries the same definition, and the same `Waiting on:` line test, to count
@@ -427,6 +441,8 @@ commits() {
 # is `blocked input needed`, with that action as its needs line in place of
 # the job's: the service can mark that worker blocked before it is seen
 # done, and the job's needs can name a side question from its report (#97).
+# A `Parked:` line, read the same way, makes it parked instead, with a
+# question line (#158).
 # A blocked one with no waitingFor and no such line, whose last text ends on
 # a statement rather than a question, is done, with a note (#114).
 # With --after, a done from the list whose transcript shows no turn end at
@@ -469,10 +485,15 @@ report() {
             fi ;;
     esac
     waits=""
+    parked=""
     case $out in
-        done* | "blocked question"*) waits=$(waiting_on "$(session_id_of "$1")") ;;
+        done* | "blocked question"*)
+            parked=$(parked_on "$(session_id_of "$1")")
+            [ -n "$parked" ] || waits=$(waiting_on "$(session_id_of "$1")") ;;
     esac
-    if [ -n "$waits" ]; then
+    if [ -n "$parked" ]; then
+        out=$(printf '%s\nquestion %s' "$(printf '%s\n' "$out" | sed '1s/.*/parked/')" "$parked")
+    elif [ -n "$waits" ]; then
         out=$(printf '%s\nneeds %s' "$(printf '%s\n' "$out" | sed '1s/.*/blocked input needed/')" "$waits")
     else
         case $out in
