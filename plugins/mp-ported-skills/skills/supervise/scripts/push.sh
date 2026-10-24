@@ -39,6 +39,13 @@
 #                 how many came before. A repo with nothing to push is not
 #                 tested: `ok test: nothing to push`. Without the option,
 #                 no test line
+#   prose         with --checked only: no file the range adds, changes or
+#                 removes is prose, a README* or CHANGELOG* file, a file
+#                 under a docs/ folder, or a *.md file, at any depth:
+#                 `ok prose: no README, CHANGELOG, docs/ or .md file
+#                 changed`, or `fail prose: N files: <path>, <path>`. A
+#                 repo with nothing to push is not read: `ok prose: nothing
+#                 to push`
 # Before them it prints `push <branch> to <upstream>: UP..HEAD` and a
 # `commit <sha> <subject>` line for each commit in the range.
 #
@@ -58,16 +65,26 @@
 # A push is refused in a background session (CLAUDE_CODE_SESSION_ATTENDED=0):
 # there a push goes only on a standing grant.
 #
+# --checked is the checked push (#188): the supervisor pushes with no
+# question to the maintainer, under the Project's `checked-push` grant,
+# which grant.sh reads from origin's default branch. It needs that grant,
+# --sweep, --test, and --dist-test with a Distribution repo, since the push
+# goes unread on the strength of those checks; it adds the prose check, and
+# records each push with ` checked-push`, a tab, the grant's citation, a
+# tab, and that repo's check lines joined by `; `, after the time.
+#
 # Usage:
 #   push.sh --dir DIR --id ID --start SHA [--dist-start SHA] (--sweep CMD | --no-sweep)
-#           [--test CMD] [--dist-test CMD] [--check]
+#           [--test CMD] [--dist-test CMD] [--checked] [--check]
 #
 # --dist-start is required when DIR names a Distribution repo, and refused
 # when it names none; --dist-test is refused when it names none.
 #
 # Exits 0 when every check passed (and, without --check, the push landed);
 # 1 on a usage error or in a background session; 2 when a check failed,
-# with nothing pushed; 3 when a push itself failed.
+# with nothing pushed; 3 when a push itself failed; 4, with --checked, when
+# the prose check was the only one that failed, with nothing pushed: the
+# push goes on the maintainer's approval instead, without --checked.
 
 set -u
 . "$(dirname -- "$0")/marker.sh"
@@ -81,6 +98,7 @@ NO_SWEEP=0
 TEST=""
 DIST_TEST=""
 CHECK=0
+CHECKED=0
 
 need_value() { [ $# -ge 2 ] || { printf 'Error: %s needs a value\n' "$1" >&2; exit 1; }; }
 while [ $# -gt 0 ]; do
@@ -94,8 +112,9 @@ while [ $# -gt 0 ]; do
         --test)       need_value "$@"; TEST="$2"; shift 2 ;;
         --dist-test)  need_value "$@"; DIST_TEST="$2"; shift 2 ;;
         --check)      CHECK=1; shift ;;
+        --checked)    CHECKED=1; shift ;;
         --help)
-            printf 'Usage: push.sh --dir DIR --id ID --start SHA [--dist-start SHA] (--sweep CMD | --no-sweep) [--test CMD] [--dist-test CMD] [--check]\n'
+            printf 'Usage: push.sh --dir DIR --id ID --start SHA [--dist-start SHA] (--sweep CMD | --no-sweep) [--test CMD] [--dist-test CMD] [--checked] [--check]\n'
             printf 'Checks a stopped worker'\''s commits and, without --check, pushes them to the branch'\''s upstream.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
@@ -135,9 +154,38 @@ elif [ -n "$DIST_TEST" ]; then
     fail "--dist-test given, but $DIR names no Distribution repo"
 fi
 
+CITATION=""
+if [ "$CHECKED" = 1 ]; then
+    [ "$NO_SWEEP" = 0 ] || fail "--checked needs --sweep: a checked push is not read by anyone, so its range is swept"
+    [ -n "$TEST" ] || fail "--checked needs --test: a checked push counts on the suite passing"
+    [ -z "$DIST" ] || [ -n "$DIST_TEST" ] ||
+        fail "--checked needs --dist-test: $DIR names Distribution repo $DIST, and a checked push counts on its suite passing"
+    errs=$(mktemp) || fail "mktemp failed, so the checked-push grant cannot be read"
+    CITATION=$(sh "$(dirname -- "$0")/grant.sh" --dir "$DIR" --action checked-push </dev/null 2>"$errs")
+    granted=$?
+    command cat "$errs" >&2
+    command rm -f "$errs"
+    [ "$granted" = 0 ] && [ -n "$CITATION" ] ||
+        fail "--checked needs a checked-push grant in docs/agents/supervision.md on origin's default branch, and $DIR has none"
+    CITATION=$(printf '%s' "$CITATION" | tr '\t' ' ')
+fi
+
 failed=0
-ok() { printf 'ok %s%s\n' "$label" "$1"; }
+prose_failed=0
+# The ok lines of the repo being checked, joined by "; ", for the record.
+rchecks=""
+ok() { printf 'ok %s%s\n' "$label" "$1"; rchecks="${rchecks:+$rchecks; }ok $label$1"; }
 bad() { printf 'fail %s%s\n' "$label" "$1"; failed=1; }
+
+# prose_files <repo> <up> <tip>: the paths the range adds, changes or
+# removes that are prose, one a line.
+prose_files() {
+    git -C "$1" diff --no-renames --name-only "$2" "$3" | while IFS= read -r p; do
+        case "/$p" in
+            (*/README* | */CHANGELOG* | */docs/* | *.[mM][dD]) printf '%s\n' "$p" ;;
+        esac
+    done
+}
 
 # version_parts <version>: "major minor patch", or empty when not X.Y.Z.
 version_parts() {
@@ -152,6 +200,7 @@ check_repo() {
     repo=$1 rstart=$2 label=$3 rtest=$4
     short() { git -C "$repo" rev-parse --short "$1"; }
     ahead=0
+    rchecks=""
     branch=$(git -C "$repo" symbolic-ref -q --short HEAD) || { bad "branch: HEAD is detached"; return 1; }
     remote=$(git -C "$repo" config "branch.$branch.remote")
     merge=$(git -C "$repo" config "branch.$branch.merge")
@@ -278,6 +327,23 @@ check_repo() {
             fi
         fi
     fi
+
+    if [ "$CHECKED" = 0 ]; then
+        :
+    elif [ "$ahead" = 0 ]; then
+        ok "prose: nothing to push"
+    else
+        prose=$(prose_files "$repo" "$up" "$tip")
+        if [ -z "$prose" ]; then
+            ok "prose: no README, CHANGELOG, docs/ or .md file changed"
+        else
+            k=$(printf '%s\n' "$prose" | grep -c '^')
+            if [ "$k" = 1 ]; then n="1 file"; else n="$k files"; fi
+            # Its own failure: the push still goes, on the maintainer's yes.
+            printf 'fail %sprose: %s: %s\n' "$label" "$n" "$(printf '%s\n' "$prose" | sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/, /g')"
+            prose_failed=1
+        fi
+    fi
 }
 
 # Each repo's push: <remote> <merge> <up> <tip> <upname> <range> <repo>,
@@ -286,19 +352,23 @@ pushes=""
 if [ -z "$DIST" ]; then
     check_repo "$DIR" "$START" "" "$TEST" || exit 2
     pushes="$remote $merge $up $tip $upname $range $DIR"
+    project_checks=$rchecks
 else
     if check_repo "$DIR" "$START" "project " "$TEST" && [ "$ahead" != 0 ]; then
         pushes="$remote $merge $up $tip $upname $range $DIR"
     fi
+    project_checks=$rchecks
     if check_repo "$DIST" "$DIST_START" "distribution " "$DIST_TEST" && [ "$ahead" != 0 ]; then
         pushes="${pushes:+$pushes
 }$remote $merge $up $tip $upname $range $DIST"
     fi
+    dist_checks=$rchecks
     label=""
     [ "$failed" = 1 ] || [ -n "$pushes" ] || bad "fast-forward: nothing to push in the Project or its Distribution repo"
 fi
 
 [ "$failed" = 0 ] || exit 2
+[ "$prose_failed" = 0 ] || exit 4
 [ "$CHECK" = 0 ] || exit 0
 
 # repo_name <repo>: how a pushed line names it.
@@ -327,7 +397,12 @@ printf '%s\n' "$pushes" | {
         name=$(repo_name "$repo" "$upname")
         echo "pushed $name $range"
         landed="${landed:+$landed, }$name"
-        printf '%s %s %s %s %s\n' "$ID" "$name" "$up" "$tip" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$record" ||
+        mark=""
+        if [ "$CHECKED" = 1 ]; then
+            if [ "$repo" = "$DIR" ]; then c=$project_checks; else c=$dist_checks; fi
+            mark=$(printf ' checked-push\t%s\t%s' "$CITATION" "$(printf '%s' "$c" | tr '\t' ' ')")
+        fi
+        printf '%s %s %s %s %s%s\n' "$ID" "$name" "$up" "$tip" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$mark" >>"$record" ||
             echo "note the push was not recorded in $record, so actions.sh will read $name as the worker's ungranted push"
     done
 } || exit 3

@@ -59,7 +59,8 @@ chmod +x "$sweep"
 n=0
 # new_project: a fresh Project in $project with a remote in $remote; $start
 # is the worker's start, on origin/main; the worker's two commits follow,
-# the second bumping the plugin from 0.8.22 to 0.8.23.
+# the second bumping the plugin from 0.8.22 to 0.8.23. When $work/grants
+# exists, the start commit holds it as docs/agents/supervision.md.
 new_project() {
     n=$((n + 1))
     remote="$work/remote$n.git"
@@ -68,6 +69,10 @@ new_project() {
     git init -q -b main "$project"
     mkdir -p "$project/plugin/.claude-plugin"
     printf '{"name": "p", "version": "0.8.22"}\n' >"$project/plugin/.claude-plugin/plugin.json"
+    if [ -f "$work/grants" ]; then
+        mkdir -p "$project/docs/agents"
+        command cp -f "$work/grants" "$project/docs/agents/supervision.md"
+    fi
     repo_git "$project" add -A
     repo_git "$project" commit -q -m start
     repo_git "$project" remote add origin "$remote"
