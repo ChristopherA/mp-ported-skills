@@ -305,6 +305,17 @@ check "distribution-push grant: and from a session in it, by its marker" "" \
     "$(decision 0 auto "git push origin main" "$hdist")"
 check "distribution-push grant alone: the Project's own push is refused" "deny" \
     "$(decision 0 auto "git push origin main" "$hproj")"
+# checked-push is read only by the supervisor's Push on approval (#188): a
+# worker's push under it alone, in either repo, is refused as with no grant.
+printf '## Grants\n\n- checked-push: code-only pushes\n' >"$hproj/docs/agents/supervision.md"
+dgit_in "$hproj" commit -q -am 'checked-push only'
+dgit_in "$hproj" push -q origin main 2>/dev/null
+check "checked-push grant alone: the Project's own push is refused" "deny" \
+    "$(decision 0 auto "git push origin main" "$hproj")"
+check "checked-push grant alone: a push into the Distribution repo is refused" "deny" \
+    "$(decision 0 auto "git -C $hdist push origin main" "$hproj")"
+check "checked-push grant alone: a session in the Distribution repo is refused" "deny" \
+    "$(decision 0 auto "git push origin main" "$hdist")"
 # The issue-close grant covers the worker's ticket after its work is pushed
 # (#186): while the Distribution repo holds commits its upstream lacks, the
 # close is refused and waits for Push on approval.

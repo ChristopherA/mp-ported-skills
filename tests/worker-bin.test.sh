@@ -268,6 +268,22 @@ check "distribution-push grant: from inside the Distribution repo too" "exit=0" 
 git -C proj -c commit.gpgsign=false commit -q --allow-empty -m capture2
 check "distribution-push grant alone: the Project's own push is refused" "exit=1" \
     "$(last "$(worker 0 proj 'git push -q origin main')")"
+# checked-push is read only by the supervisor's Push on approval (#188): a
+# worker's push under it alone, in either repo, is refused as with no grant.
+printf '## Grants\n\n- checked-push: code-only pushes\n' >proj/docs/agents/supervision.md
+git -C proj -c commit.gpgsign=false commit -q -am 'grant checked-push only'
+git -C proj push -q origin main 2>/dev/null
+git -C proj -c commit.gpgsign=false commit -q --allow-empty -m capture3
+git -C dist -c commit.gpgsign=false commit -q --allow-empty -m checked-code
+check "checked-push grant alone: the Project's own push is refused" "exit=1" \
+    "$(last "$(worker 0 proj 'git push -q origin main')")"
+check "checked-push grant alone: a push in the Distribution repo is refused" "exit=1" \
+    "$(last "$(worker 0 proj 'git -C ../dist push -q origin main')")"
+check "checked-push grant alone: refused from inside the Distribution repo too" "exit=1" \
+    "$(last "$(worker 0 dist 'git push -q origin main')")"
+check "checked-push grant alone: neither remote moved" "$(git -C proj rev-parse main~1) $(git -C dist rev-parse main~1)" \
+    "$(git -C proj.git rev-parse main) $(git -C dist.git rev-parse main)"
+git -C dist reset -q --hard main~1
 
 # The issue-close grant covers the ticket only after its work is pushed
 # (#186): a close waits while the Distribution repo is ahead of its upstream.
