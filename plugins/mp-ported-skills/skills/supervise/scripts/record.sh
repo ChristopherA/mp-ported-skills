@@ -80,7 +80,9 @@
 #   parked                   only for a parked worker (#158): the question
 #                            from the last turn end whose text has a
 #                            `Parked:` line, and its local branch parked-N
-#                            in DIR with its commits after START
+#                            in DIR with its commits after START; a
+#                            parked-N branch alone, left by an earlier
+#                            run, adds none
 # then a `note` line for each source it could not read. A field whose source
 # was not read says unknown, never none or zero.
 #
@@ -570,6 +572,6 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
                       else "\(plural($count | tonumber; "commit")) after \($short)" end),
                      (select($children != "") | $children), $ticket] | join(", "))",
       ([$w.marks // [] | .[] | select(.end and (.parked // null) != null) | .parked] | last) as $pq
-      | select($pq != null or $pb != "")
-      | "- parked: \(if $pq == null then "question unknown" else "\"\($pq)\"" end), \(if $pb == "" then "no branch parked-\($n)" else "work on branch \($pb)" end)"'
+      | select($pq != null)
+      | "- parked: \"\($pq)\", \(if $pb == "" then "no branch parked-\($n)" else "work on branch \($pb)" end)"'
 printf '%s' "$notes"

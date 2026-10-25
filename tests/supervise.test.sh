@@ -1193,7 +1193,7 @@ launch_in() { # <dir> [args...] -- launch.sh --dir <dir> with the fake claude
 # to park its ticket instead of waiting, naming the commit it starts from
 # (#158).
 park_text() { # <start> -- the park line for ticket 56 started at <start>
-    printf '%s' "Park the ticket instead of waiting when you reach a decision only the maintainer can make: a spec question, or a shared action no grant covers other than a push, an issue comment or a new issue, which /supervise asks the maintainer for after your turn ends. To park: commit any uncommitted work, put your commits on a local branch \`parked-56\` (\`git branch parked-56\`), and run \`git reset --hard $1\`, the commit you started from, so the checkout is clean for the next ticket; push nothing. Post your question on #56 under the issue-comment grant, as a comment whose first line is \`## Parked\` and which names the branch. Move #56 to the end of its parent's open sub-issues under the sub-issue grant: \`gh api repos/{owner}/{repo}/issues/56/parent\` names the parent (with none, skip this), and a PATCH to the parent's sub_issues/priority with sub_issue_id set to #56's id and after_id to the id of the last open child other than #56 moves it. Then end your turn on one line, \`Parked: <your question>\`."
+    printf '%s' "Park the ticket instead of waiting when you reach a decision only the maintainer can make: a spec question, or a shared action no grant covers other than a push, an issue comment or a new issue, which /supervise asks the maintainer for after your turn ends. To park: commit any uncommitted work, then run /mp-ported-skills:capturing yourself, now and not after the park comment: /supervise sends no capture after a park, and the question must stay the ticket's newest comment, since a later comment re-arms the ticket. Then put your commits, the capture's included, on a local branch \`parked-56\` (\`git branch parked-56\`), and run \`git reset --hard $1\`, the commit you started from, so the checkout is clean for the next ticket. Push nothing while parking, under a push grant or not. Post your question on #56 under the issue-comment grant, as a comment whose first line is \`## Parked\` and which names the branch. Move #56 to the end of its parent's open sub-issues under the sub-issue grant: \`gh api repos/{owner}/{repo}/issues/56/parent\` names the parent (with none, skip this), and a PATCH to the parent's sub_issues/priority with sub_issue_id set to #56's id (the issue's \`id\` field, not its number) and after_id to the id of the last open child other than #56 moves it. Then end your turn on one line, \`Parked: <your question>\`."
 }
 park_line=$(park_text "$(git -C "$granted" rev-parse --short HEAD)")
 out=$(launch_in "$granted" --ticket 56 2>/dev/null); rc=$?
@@ -2212,8 +2212,9 @@ dist_park() { # <start> -- the Distribution park line for ticket 56
 launch_dir "$dproj" --ticket 56 >/dev/null 2>&1
 check "launch dist: a parked worker resets the repo to its HEAD at launch" "$(dist_park "$(git -C "$dist" rev-parse --short HEAD)")" \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 1)"
-check "launch dist: the Project's park line comes first" "1" \
-    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | grep -c '^Park the ticket')"
+prompt=$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args")
+check "launch dist: the Project's park line comes first, once" "1 1" \
+    "$(printf '%s\n' "$prompt" | grep -c '^Park the ticket') $([ "$(printf '%s\n' "$prompt" | grep -n '^Park the ticket' | cut -d: -f1)" -lt "$(printf '%s\n' "$prompt" | grep -n '^When you park' | cut -d: -f1)" ] && echo 1)"
 clear_markers
 launch_dir "$dproj" --ticket 56 --continue "$(git -C "$dproj" rev-parse --short HEAD)" >/dev/null 2>&1
 check "launch dist --continue: a parked worker resets the repo to its upstream" "$(dist_park origin/main)" \

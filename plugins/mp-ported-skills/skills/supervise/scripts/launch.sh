@@ -99,9 +99,11 @@
 # its ticket rather than wait when it reaches a decision only the maintainer
 # can make (#158): its work on a local branch parked-N, its checkout reset
 # to the commit it started from (START with --continue, else DIR's HEAD at
-# launch), a comment opening with park.sh's heading, the ticket moved to the
-# end of its parent's order, and a last line `Parked: <question>`, which
-# watch.sh reads as parked. A wait /supervise asks the maintainer about (a
+# launch), a capture (/mp-ported-skills:capturing) run first, so its commits
+# go on parked-N and the question stays the ticket's newest comment, a comment
+# opening with park.sh's heading, the ticket moved to the end of its
+# parent's order, and a last line `Parked: <question>`, which watch.sh reads
+# as parked; /supervise sends no capture after it. A wait /supervise asks the maintainer about (a
 # push, an issue comment, a new issue) is not parked. Without both grants
 # the worker ends as before. In a Distribution repo it parks the same way,
 # back to that repo's HEAD at launch, or with --continue its upstream, since
@@ -370,7 +372,7 @@ fi
 GRANTS="$GRANTS
 A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create, a gh api link or reorder of a sub-issue, a label edit) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin $default\`."
 [ -z "$comment_granted" ] || [ -z "$sub_issue_granted" ] || GRANTS="$GRANTS
-Park the ticket instead of waiting when you reach a decision only the maintainer can make: a spec question, or a shared action no grant covers other than a push, an issue comment or a new issue, which /supervise asks the maintainer for after your turn ends. To park: commit any uncommitted work, put your commits on a local branch \`parked-$TICKET\` (\`git branch parked-$TICKET\`), and run \`git reset --hard $start\`, the commit you started from, so the checkout is clean for the next ticket; push nothing. Post your question on #$TICKET under the issue-comment grant, as a comment whose first line is \`$park_heading\` and which names the branch. Move #$TICKET to the end of its parent's open sub-issues under the sub-issue grant: \`gh api repos/{owner}/{repo}/issues/$TICKET/parent\` names the parent (with none, skip this), and a PATCH to the parent's sub_issues/priority with sub_issue_id set to #$TICKET's id and after_id to the id of the last open child other than #$TICKET moves it. Then end your turn on one line, \`Parked: <your question>\`."
+Park the ticket instead of waiting when you reach a decision only the maintainer can make: a spec question, or a shared action no grant covers other than a push, an issue comment or a new issue, which /supervise asks the maintainer for after your turn ends. To park: commit any uncommitted work, then run /mp-ported-skills:capturing yourself, now and not after the park comment: /supervise sends no capture after a park, and the question must stay the ticket's newest comment, since a later comment re-arms the ticket. Then put your commits, the capture's included, on a local branch \`parked-$TICKET\` (\`git branch parked-$TICKET\`), and run \`git reset --hard $start\`, the commit you started from, so the checkout is clean for the next ticket. Push nothing while parking, under a push grant or not. Post your question on #$TICKET under the issue-comment grant, as a comment whose first line is \`$park_heading\` and which names the branch. Move #$TICKET to the end of its parent's open sub-issues under the sub-issue grant: \`gh api repos/{owner}/{repo}/issues/$TICKET/parent\` names the parent (with none, skip this), and a PATCH to the parent's sub_issues/priority with sub_issue_id set to #$TICKET's id (the issue's \`id\` field, not its number) and after_id to the id of the last open child other than #$TICKET moves it. Then end your turn on one line, \`Parked: <your question>\`."
 GRANTS="$GRANTS
 Read each file once: read a large file (over about 20KB, or a long one such as a SKILL.md or a test file) with Read in ranges, or grep -n it first and read the range you need, never whole with cat; read one file per call, since a result over the output limit is saved to a file and has to be read again; and do not print a file you have already read in this session unless it has changed since."
 [ -z "$DIST" ] || GRANTS="$GRANTS

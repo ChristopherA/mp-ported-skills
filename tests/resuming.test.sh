@@ -262,6 +262,11 @@ check "park comment: no line with none parked" "" "$(printf '%s\n' "$out" | grep
 printf '[{"user":{"login":"me"},"body":"## Parked\\nWhich name?"}]' >"$FAKE_GH/comments-88.page2.json"
 check "park comment: the newest on the second page" "#87 t87" "$(line_of "$(run)" "ready, blockers closed")"
 command rm -f "$FAKE_GH/comments-88.page2.json"
+# The run record finish.sh posts after a park is not a reply to it.
+printf '[{"user":{"login":"me"},"body":"## Parked\\nWhich name?"},{"user":{"login":"me"},"body":"## Supervised run of #88\\n\\n- worker: abc"}]' >"$FAKE_GH/comments-88.json"
+check "park comment: a run record after it is not a reply" "#87 t87" "$(line_of "$(run)" "ready, blockers closed")"
+printf '[{"user":{"login":"me"},"body":"## Parked\\nWhich name?"},{"user":{"login":"me"},"body":"## Hand run of #88\\n\\n- worker: abc"},{"user":{"login":"me"},"body":"Use foo."}]' >"$FAKE_GH/comments-88.json"
+check "park comment: a reply after a run record re-arms it" "#87 t87; #88 t88" "$(line_of "$(run)" "ready, blockers closed")"
 printf 'not json' >"$FAKE_GH/comments-88.json"
 check "park comment: comments unreadable, not parked" "#87 t87; #88 t88" "$(line_of "$(run)" "ready, blockers closed")"
 command rm -f "$FAKE_GH/comments-88.json"

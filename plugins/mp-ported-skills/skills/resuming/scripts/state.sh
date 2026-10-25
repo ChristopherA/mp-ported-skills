@@ -125,7 +125,9 @@ $(open_link_blockers "$k" | jq -r '.[]')"
 
 # awaiting_reply <n>: whether ticket #n's newest comment is a worker's park
 # question, a comment opening with park.sh's heading (#158): no step takes
-# the ticket until a later comment, from anyone, answers it. Reads every
+# the ticket until a later comment, from anyone, answers it. A run record
+# /supervise posts (park.sh's run_record) is not an answer, and is passed
+# over, since finish.sh posts one on the ticket after every park. Reads every
 # page, merged as in next_child; a ticket whose comments cannot be read is
 # not parked. Each read spends the time budget, so the answer is kept in
 # $tmp: next_child runs in a command substitution, and asks again.
@@ -133,7 +135,7 @@ awaiting_reply() {
     f="$tmp/park-$1"
     if [ ! -f "$f" ]; then
         gh api "repos/{owner}/{repo}/issues/$1/comments?per_page=100" --paginate 2>/dev/null |
-            jq -rs "$park_def"'add | last.body // "" | parked' >"$f" 2>/dev/null || echo false >"$f"
+            jq -rs "$park_def$park_record_def"'add | map(.body // "" | select(run_record | not)) | last // "" | parked' >"$f" 2>/dev/null || echo false >"$f"
     fi
     [ "$(cat "$f")" = true ]
 }

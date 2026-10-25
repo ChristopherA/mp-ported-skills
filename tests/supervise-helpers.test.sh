@@ -232,5 +232,25 @@ for f in supervise/scripts/step.sh resuming/scripts/state.sh; do
     check "accept: $f sources accept.sh" 0 "$rc"
 done
 
+# --- park.sh ---------------------------------------------------------------
+. "$scripts/park.sh"
+parked() { jq -rn --arg b "$1" "$park_def"'$b | parked'; }
+check "park: the heading alone" true "$(parked "$park_heading")"
+check "park: the heading after blank lines, with its question" true "$(parked "
+$park_heading: which name?")"
+check "park: a longer word is not the heading" false "$(parked "${park_heading}ness")"
+check "park: the heading inside a line is not" false "$(parked "Not $park_heading")"
+record() { jq -rn --arg b "$1" "$park_record_def"'$b | run_record'; }
+check "park: a supervised run record" true "$(record '## Supervised run of #158
+- worker: abc')"
+check "park: a hand run record" true "$(record '## Hand run of #7')"
+check "park: a comment naming a run record is not one" false "$(record 'See ## Supervised run of #158')"
+out=$(printf '%s\n' 'Done.' '**Parked: first?**' 'mid Parked: no' '`Parked: which name?`  ' | sed -n "$park_line_sed")
+check "park: park_line_sed prints each question, less its markdown" "first?
+which name?" "$out"
+check "park: park_question takes the last, less its markdown" "which name?" \
+    "$(jq -rn --arg t "$(printf '%s\n' '**Parked: first?**' '`Parked: which name?`')" "$park_question_def"'$t | park_question')"
+check "park: park_question with no Parked: line" null "$(jq -rn "$park_question_def"'"Done." | park_question')"
+
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

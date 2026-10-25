@@ -807,6 +807,13 @@ check "record: a parked worker lists its question and branch" \
     "$(field parked "$out")"
 check "record: the parked field follows the outcome" "parked" \
     "$(printf '%s\n' "$out" | grep '^- ' | grep -v '^- note: ' | tail -n 1 | sed 's/^- \([a-z]*\):.*/\1/')"
+# A parked-56 branch left by an earlier run is no park of this one.
+{
+    said 2026-09-29T06:01:25.000Z '<command-message>mattpocock-skills:implement</command-message>'
+    text 2026-09-29T06:05:00.000Z 'Done.'
+    ended 2026-09-29T06:05:30.000Z
+} >"$cfg/projects/-work-project/$sid.jsonl"
+check "record: a parked-N branch alone adds no parked field" "" "$(record | grep '^- parked')"
 repo_git "$repo" branch -D parked-56 >/dev/null
 
 # A worker that made no API calls has no zone reading, and says why.

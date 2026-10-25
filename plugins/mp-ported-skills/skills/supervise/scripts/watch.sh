@@ -325,7 +325,7 @@ waiting_on() {
 # from the last line starting `Parked:` in its last text (#158); empty when
 # none.
 parked_on() {
-    last_text "$1" | sed -n "$park_line_sed" | sed 's/[`* ]*$//' | tail -n 1
+    last_text "$1" | sed -n "$park_line_sed" | tail -n 1
 }
 
 # QUESTION_JQ: defines the jq filter `asks`, true for a text whose last
