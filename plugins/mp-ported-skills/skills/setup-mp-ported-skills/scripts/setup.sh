@@ -404,8 +404,9 @@ itself one by editing this file.
                       repos/<o>/<r>/issues/<n>/sub_issues/priority. Not
                       removing one, which no grant covers. The note says
                       which tickets, as
-                      `- sub-issue: a capture's tickets, under the work's own parent`
-                      does; the hook checks only the action.
+                      `- sub-issue: a capture's tickets, under the work's own parent; the worker's own ticket, to the end of its parent's order`
+                      does: the second covers a worker that parks its
+                      ticket (#158). The hook checks only the action.
        label          gh issue edit with only --add-label or
                       --remove-label, as
                       `- label: a capture's in-motion and live-check relabels`
