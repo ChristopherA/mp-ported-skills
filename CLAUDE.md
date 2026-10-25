@@ -104,6 +104,8 @@ A `claude` option that takes a list (`--allowedTools`, `--disallowedTools`, and 
 
 Code that more than one `supervise` script needs goes in a sourced helper beside them, one concern per file, as `marker.sh` and `settle.sh` are, loaded with `. "$(dirname -- "$0")/<file>"`. A helper passes everything a function reads as an argument, prefixes its globals with its file's name (`settle_*`), and leaves its error text to the caller, which adds what it did not do: a global read across two functions left `settle_row` usable only inside `stop_and_settle` until #137's review. Test a helper by sourcing it, as `tests/supervise-helpers.test.sh` does.
 
+A script that starts sourcing a helper breaks every test that copies the script alone into a scratch folder, as tests do to stub a script beside it: the copy finds no helper and exits before it runs. When a script gains a helper, `rg -n 'cp .*<script>' tests` and copy the helper too, as `tests/supervise-record.test.sh` copies `park.sh` with `record.sh`. In #158, three `actions.sh` stub checks failed only after `record.sh` began sourcing `park.sh`.
+
 When copies of a rule merge into one helper, compare what each caller applies it to as well as the rule itself. A copy can match the rule exactly and still check less: `state.sh`'s `supervise:` offer checked for live sessions only in the Project folder, while `launch.sh` also checked the Distribution repo, so the offer could name a launch `launch.sh` refused (#115's review).
 
 ## jq in scripts
