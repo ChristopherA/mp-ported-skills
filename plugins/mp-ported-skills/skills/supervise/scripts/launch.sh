@@ -301,6 +301,11 @@ if [ -n "$DIST" ]; then
     [ -d "$DIST" ] || fail "Distribution repo $DIST, named in docs/agents/distribution-repo.md, is missing; not launched"
     check_repo "$DIST" "Distribution repo "
     dist_default=$default
+    # Where a parked worker resets the Distribution repo (#158). A continued
+    # worker's first start there is not recorded, so it resets to the
+    # upstream, which holds none of the ticket's unpushed work.
+    dist_start=$(git -C "$DIST" rev-parse --short HEAD)
+    [ -z "$CONTINUE" ] || dist_start="origin/$dist_default"
     [ "$(git -C "$DIST" rev-parse --show-toplevel)" != "$(git -C "$DIR" rev-parse --show-toplevel)" ] ||
         fail "Distribution repo $DIST is the Project's own repo; name another repo in docs/agents/distribution-repo.md, or remove it; not launched"
 fi
@@ -372,6 +377,8 @@ Read each file once: read a large file (over about 20KB, or a long one such as a
 This Project's code lives in its Distribution repo, $DIST, named in docs/agents/distribution-repo.md. Make the ticket's code changes and commits there, by path (\`git -C $DIST\`), on its current branch, with no new branch or worktree; read the ticket and the Project's docs from this folder.
 A push in the Distribution repo is covered only by a distribution-push grant, never by push (#141). With none, do not push it: end your turn on \`Waiting on: git -C $DIST push origin $dist_default\`, or, when this Project's push waits too, on \`Waiting on: git push origin $default; git -C $DIST push origin $dist_default\`.
 Closing the ticket waits for the Distribution push, under an issue-close grant or not (#186): while the Distribution repo holds commits its upstream lacks, do not close it, and name the close with the push, as \`Waiting on: git -C $DIST push origin $dist_default; gh issue close $TICKET\`. /supervise closes the ticket after the push lands."
+[ -z "$DIST" ] || [ -z "$comment_granted" ] || [ -z "$sub_issue_granted" ] || GRANTS="$GRANTS
+When you park, park the Distribution repo the same way: put its commits on a local branch \`parked-$TICKET\` there (\`git -C $DIST branch parked-$TICKET\`), run \`git -C $DIST reset --hard $dist_start\`, and name both branches in the comment."
 
 # The worker's name (#103), in characters, not bytes, whatever the locale.
 NAME="worker ${top##*/} #$TICKET"

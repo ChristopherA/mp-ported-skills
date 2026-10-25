@@ -2199,6 +2199,26 @@ check "launch dist: the grants name distribution-push, and which push is which" 
 - distribution-push: the code" \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | head -n 3)"
 clear_markers
+# With issue-comment and sub-issue granted, the worker parks the
+# Distribution repo too, back to its HEAD at launch, or with --continue to
+# its upstream (#158).
+printf '## Grants\n\n- issue-comment: findings\n- sub-issue: its ticket\n' >"$dproj/docs/agents/supervision.md"
+dgit "$dproj" add docs
+dgit "$dproj" commit -m "Grant park actions"
+dgit "$dproj" push origin main
+dist_park() { # <start> -- the Distribution park line for ticket 56
+    printf '%s' "When you park, park the Distribution repo the same way: put its commits on a local branch \`parked-56\` there (\`git -C $dist branch parked-56\`), run \`git -C $dist reset --hard $1\`, and name both branches in the comment."
+}
+launch_dir "$dproj" --ticket 56 >/dev/null 2>&1
+check "launch dist: a parked worker resets the repo to its HEAD at launch" "$(dist_park "$(git -C "$dist" rev-parse --short HEAD)")" \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 1)"
+check "launch dist: the Project's park line comes first" "1" \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | grep -c '^Park the ticket')"
+clear_markers
+launch_dir "$dproj" --ticket 56 --continue "$(git -C "$dproj" rev-parse --short HEAD)" >/dev/null 2>&1
+check "launch dist --continue: a parked worker resets the repo to its upstream" "$(dist_park origin/main)" \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 1)"
+clear_markers
 dgit "$dproj" rm -q docs/agents/supervision.md
 dgit "$dproj" commit -m "Drop the grants"
 dgit "$dproj" push origin main
