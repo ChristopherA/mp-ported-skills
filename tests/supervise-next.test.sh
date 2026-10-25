@@ -64,6 +64,17 @@ exit 2" "$(next "$repo" --ran "59 61")"
 check "next: a ran list without the ticket" "next implement #61
 exit 0" "$(next "$repo" --ran "59 610")"
 
+# A parked worker leaves its work on a local branch parked-N and the
+# checkout back at its start, and state.sh passes over the ticket while its
+# park question waits (#158): the loop goes on to the next, no repeat.
+parked=$(new_repo parked)
+g "$parked" checkout -q -b parked-61
+g "$parked" commit -q --allow-empty -m "Parked work"
+g "$parked" checkout -q main
+printf 'branch: main\nparked, awaiting reply: #61 t61\nnext: 2 /implement #62 (%s): #62 t62\nrunner-up: 7 nothing else in motion\n' "$you" >"$work/state.txt"
+check "next: past a parked ticket, to the next" "next implement #62
+exit 0" "$(next "$parked" --ran "61")"
+
 state "7 nothing in motion"
 check "next: nothing left" "stop nothing-left: next: 7 nothing in motion
 exit 2" "$(next "$repo")"

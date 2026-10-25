@@ -77,6 +77,10 @@
 # * shared actions           actions.sh's lines, or none
 #   outcome                  commits in START..HEAD, the job's PRs and
 #                            issues (*), and the ticket's state from gh
+#   parked                   only for a parked worker (#158): the question
+#                            from the last turn end whose text has a
+#                            `Parked:` line, and its local branch parked-N
+#                            in DIR with its commits after START
 # then a `note` line for each source it could not read. A field whose source
 # was not read says unknown, never none or zero.
 #
@@ -143,6 +147,7 @@ cost_wait=${MP_RECORD_COST_WAIT:-10}
 case $cost_wait in '' | *[!0-9]*) cost_wait=10 ;; esac
 case $zone_k in '' | *[!0-9]* | 0) zone_k=150 ;; esac
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/park.sh"
 errors=$(mktemp)
 trap 'command rm -f "$errors"' EXIT
 
@@ -161,7 +166,8 @@ transcript() {
 # Shared jq definitions: time, size and money as the record prints them, a
 # transcript's API calls, one per request in the order first written, and
 # watch.sh's `asks` (its QUESTION_JQ, kept the same): true for a text whose
-# last non-blank line, less trailing markdown, ends on a question mark.
+# last non-blank line, less trailing markdown, ends on a question mark, and
+# park.sh's park_question.
 defs='
 def asks: [splits("\n") | sub("[\\s`*_\")]+$"; "") | select(. != "")] | last // "" | endswith("?");
 def epoch: sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601;
@@ -178,7 +184,7 @@ def calls: [.[] | select(.type == "assistant" and .message.usage != null)]
     | .list;
 def context: .message.usage | (.input_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0);
 def tokens: context + (.message.usage.output_tokens // 0);
-'
+'"$park_question_def"
 
 # --- the job ---------------------------------------------------------------
 job="$CLAUDE_CONFIG_DIR/jobs/$ID/state.json"
@@ -277,6 +283,7 @@ read_worker() {
                    (($r.pendingBackgroundAgentCount // 0) > 0) as $pending
                    | .list += [{at: $r.timestamp, end: true, pending: $pending,
                                 waiting: (if $pending then null else .text | waiting end),
+                                parked: (if $pending then null else .text | park_question end),
                                 unasked: ($pending | not) and .text != "" and (.text | asks | not)
                                          and (.text | waiting) == null}]
                else . end) | .list),
@@ -481,11 +488,21 @@ else
     ticket="ticket #$TICKET state unknown"
 fi
 
+# A parked worker's work, on its local branch parked-N (#158).
+parked_branch=""
+if git -C "$DIR" rev-parse -q --verify "refs/heads/parked-$TICKET" >/dev/null 2>&1; then
+    parked_branch="parked-$TICKET"
+    parked_count=$(git -C "$DIR" rev-list --count "$START..$parked_branch" 2>/dev/null) || parked_count=""
+    parked_branch="$parked_branch, $(if [ -z "$parked_count" ]; then echo "commits unknown"
+        elif [ "$parked_count" = 1 ]; then echo "1 commit after $short"
+        else echo "$parked_count commits after $short"; fi)"
+fi
+
 # --- print -----------------------------------------------------------------
 jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launched "$launched" --arg now "$NOW" \
     --argjson w "$worker" --arg sub "$subcalls" --arg sup "$supervisor" --arg supctx "$sup_context" --arg waits "$waits" \
     --arg actions "$actions" --arg short "$short" --arg count "$count" --arg children "$children" \
-    --arg ticket "$ticket" --arg n "$TICKET" --argjson ap "$approvals_json" "$defs"'
+    --arg ticket "$ticket" --arg n "$TICKET" --argjson ap "$approvals_json" --arg pb "$parked_branch" "$defs"'
     def plural($k; $word): "\($k) \($word)\(if $k == 1 then "" else "s" end)";
     ($session != "") as $hand
     | (if $hand then "session" else "worker" end) as $who
@@ -551,5 +568,8 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
       "- outcome: \([(if $count == "" then "commits unknown"
                       elif $count == "0" then "no commits after \($short)"
                       else "\(plural($count | tonumber; "commit")) after \($short)" end),
-                     (select($children != "") | $children), $ticket] | join(", "))"'
+                     (select($children != "") | $children), $ticket] | join(", "))",
+      ([$w.marks // [] | .[] | select(.end and (.parked // null) != null) | .parked] | last) as $pq
+      | select($pq != null or $pb != "")
+      | "- parked: \(if $pq == null then "question unknown" else "\"\($pq)\"" end), \(if $pb == "" then "no branch parked-\($n)" else "work on branch \($pb)" end)"'
 printf '%s' "$notes"

@@ -769,7 +769,7 @@ check "record: --id and --session are exclusive" "1" "$?"
 # actions.sh failing makes the field unknown, never a list of its errors.
 setup
 mkdir -p "$work/scripts"
-command cp "$scripts/record.sh" "$work/scripts/record.sh"
+command cp "$scripts/record.sh" "$scripts/park.sh" "$work/scripts/"
 printf '#!/bin/sh\necho "branch origin/x ungranted: partial"\necho "Error: the shared-action hook is missing" >&2\nexit 1\n' \
     >"$work/scripts/actions.sh"
 out=$(PATH="$work/bin:$PATH" sh "$work/scripts/record.sh" --id c2a368ee --dir "$repo" --start "$start" --ticket 56 \
@@ -782,6 +782,32 @@ printf '#!/bin/sh\necho "warning: noise" >&2\necho none\n' >"$work/scripts/actio
 out=$(PATH="$work/bin:$PATH" sh "$work/scripts/record.sh" --id c2a368ee --dir "$repo" --start "$start" --ticket 56 \
     --supervisor "$sup" --now 2026-09-29T06:15:24Z </dev/null 2>/dev/null)
 check "record: actions.sh stderr is not an action" "none" "$(field 'shared actions' "$out")"
+
+# A parked worker's record lists its question and its branch parked-N, from
+# the turn that ended on the Parked: line, not the capture after it (#158).
+setup
+check "record: no park, no parked field" "" "$(record | grep '^- parked')"
+{
+    said 2026-09-29T06:01:25.000Z '<command-message>mattpocock-skills:implement</command-message>'
+    text 2026-09-29T06:05:00.000Z 'Posted the question on #56; the work is on parked-56.
+
+`Parked: should the record name the branch?`'
+    ended 2026-09-29T06:05:30.000Z
+    said 2026-09-29T06:09:00.000Z '<command-message>mp-ported-skills:capturing</command-message>'
+    text 2026-09-29T06:10:00.000Z 'Captured.'
+    ended 2026-09-29T06:10:30.000Z
+} >"$cfg/projects/-work-project/$sid.jsonl"
+out=$(record)
+check "record: a parked worker with no branch says so" '"should the record name the branch?", no branch parked-56' \
+    "$(field parked "$out")"
+repo_git "$repo" branch parked-56
+out=$(record)
+check "record: a parked worker lists its question and branch" \
+    "\"should the record name the branch?\", work on branch parked-56, 2 commits after $(git -C "$repo" rev-parse --short "$start")" \
+    "$(field parked "$out")"
+check "record: the parked field follows the outcome" "parked" \
+    "$(printf '%s\n' "$out" | grep '^- ' | grep -v '^- note: ' | tail -n 1 | sed 's/^- \([a-z]*\):.*/\1/')"
+repo_git "$repo" branch -D parked-56 >/dev/null
 
 # A worker that made no API calls has no zone reading, and says why.
 setup

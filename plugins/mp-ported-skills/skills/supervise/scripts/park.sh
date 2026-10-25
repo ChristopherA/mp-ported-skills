@@ -1,6 +1,6 @@
 #!/bin/sh
-# park.sh -- sourced by resuming's state.sh, launch.sh and watch.sh: how a
-# parked ticket and a parked worker are told apart (#158).
+# park.sh -- sourced by resuming's state.sh, launch.sh, watch.sh and
+# record.sh: how a parked ticket and a parked worker are told apart (#158).
 #
 # An unattended worker that reaches a decision only the maintainer can make
 # parks its ticket: it posts the question on the ticket as a comment opening
@@ -21,3 +21,9 @@ park_def='def parked: ([splits("\r?\n") | select(test("\\S"))] | first // "")
 # text that starts `Parked:`, less markdown wrapping (backticks, bold), as
 # watch.sh reads `Waiting on:`. A caller keeps the last: sed -n "$park_line_sed" | tail -n 1.
 park_line_sed='s/^[`* ]*Parked: *//p'
+
+# park_question_def: a jq def, `park_question`, the question from a text's
+# last line starting `Parked:`, less markdown wrapping as watch.sh strips
+# it, or null.
+park_question_def='def park_question: [splits("\n") | select(test("^[`* ]*Parked:"))] | last
+    | if . == null then null else sub("^[`* ]*Parked: *"; "") | sub("[`* ]*$"; "") end;'
