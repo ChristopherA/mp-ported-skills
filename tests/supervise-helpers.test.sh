@@ -2,8 +2,9 @@
 # supervise-helpers.test.sh -- tests for the supervise skill's shared
 # helpers: marker.sh (the checkout's worker marker), settle.sh (stop a
 # worker and wait until it has settled) (#137), live.sh (which background
-# sessions are live in a checkout) and accept.sh (which next: step /supervise
-# takes) (#115).
+# sessions are live in a checkout), accept.sh (which next: step /supervise
+# takes) (#115) and park.sh (how a parked ticket and worker are told apart)
+# (#158).
 #
 # Sources each helper and runs its function against a scratch repo and a
 # fake `claude` first on PATH. The fake logs each call and answers
