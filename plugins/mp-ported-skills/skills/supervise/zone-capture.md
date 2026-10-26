@@ -28,4 +28,17 @@ A worker whose zone reading passes the threshold while it is still building gets
 
    Its prompt tells `/implement` that the commits since `<start>` and the capture's notes on the ticket are the work so far, and its name ends `#N (continued)`. Tell the maintainer the ticket continues, with the new id and the reading that set it off, then Watch and Report it as any worker, keeping the first worker's `<start>` for `actions.sh`, `push.sh` and `record.sh`, so its push and record cover both workers' commits.
 
-A ticket continues once. A continuation that returns `capture-due` itself gets steps 1 to 4, and then the report, with both workers' ids and readings and no third worker; with `--loop`, the loop ends there.
+A ticket continues once per supervisor session. A continuation that returns `capture-due` itself gets steps 1 to 4, then the wrap-up below, and then the report, with both workers' ids and readings and no third worker; with `--loop`, the loop ends there. A later supervisor session may continue the ticket again from the same `<start>`: while the newest run record on #N accounts for the unpushed commits exactly, `step.sh` reads them as `continue #N from <start>` (#214).
+
+## Wrap-up before a continuation
+
+A supervisor that ends while a zone-captured ticket still has work to build leaves the commits since `<start>` on the default branch, unpushed, and only this session knows `<start>` (#214). That holds on every path between a capture and the continuation's launch: a continuation's own `capture-due`, this session's own zone stop or the maintainer's stop before step 5 launched, or a failed launch at step 5. Before the report:
+
+1. Push on approval's steps 2 to 5 over `<start>` to HEAD, with the last worker's id (read `${CLAUDE_SKILL_DIR}/push-on-approval.md` and follow it). Its step 1 is already done, since step 4 stopped the worker; its step 6 is this report. It asks the maintainer first, unless the push is a checked one.
+2. Pushed or not, the report gives the command a later session runs to continue the ticket, in a fenced code block, with the first worker's `<start>` in full and the `--model` and `--effort` this run launched with:
+
+   ```sh
+   sh "${CLAUDE_SKILL_DIR}/scripts/launch.sh" --dir "<project folder>" --ticket N --continue <start> --model <model> --effort <effort> </dev/null
+   ```
+
+   On a no, a failed check or a failed push, the report also lists the unpushed commits, `git -C "<project folder>" log --oneline <start>..HEAD`, and says that a later `/supervise` continues the ticket from them on its own, as long as nothing is committed on top of them.

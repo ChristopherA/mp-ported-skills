@@ -29,7 +29,7 @@ With `--loop`, read `${CLAUDE_SKILL_DIR}/loop.md` before anything else: it says 
 sh "${CLAUDE_SKILL_DIR}/scripts/step.sh" "<project folder>" </dev/null
 ```
 
-It runs `resuming`'s `state.sh` in the folder and reads the `next:` line. `implement #N` means the step is `/implement` of a `ready-for-agent` ticket with nothing else in flight: go on. `stop: ...` means any other step, including work in flight in git, or a folder in a linked git worktree (Policy, above): report the line and end here.
+It runs `resuming`'s `state.sh` in the folder and reads the `next:` line. `implement #N` means the step is `/implement` of a `ready-for-agent` ticket with nothing else in flight: go on. `continue #N from <sha>` means the only thing in flight is unpushed commits on the default branch that the newest run record on #N accounts for exactly: a supervised run of #N that ended before its work was pushed, such as one whose supervisor wrapped up between a zone capture and its continuation (#214). Go on as for `implement #N`, with `<start>` the sha it names, not HEAD, and in Launch add `--continue <start>`, as Zone capture's step 5 does (`zone-capture.md`), so the worker builds on those commits, and its push and record cover them. `stop: ...` means any other step, including work in flight in git, or a folder in a linked git worktree (Policy, above): report the line and end here.
 
 Then read the ticket's body and every comment (`gh issue view N --json title,body,comments`, run in the folder), and record where the branch starts, for the report, and the repo's worktrees and branches, for `watch.sh`:
 
@@ -38,7 +38,7 @@ git -C "<project folder>" rev-parse HEAD
 sh "${CLAUDE_SKILL_DIR}/scripts/watch.sh" --dir "<project folder>" --snapshot > "<scratchpad>/snapshot.txt" </dev/null
 ```
 
-The first is `<start>`. With a Distribution repo, the snapshot's `dist head <sha>` line is `<dist start>`, which Push on approval passes as `--dist-start`.
+The first is `<start>`, except after `continue #N from <sha>`, where `<start>` is that sha. With a Distribution repo, the snapshot's `dist head <sha>` line is `<dist start>`, which Push on approval passes as `--dist-start`.
 
 ## 2. Launch
 
