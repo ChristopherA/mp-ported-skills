@@ -15,6 +15,8 @@ set -u
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 hooks="$root/plugins/mp-ported-skills/hooks/hooks.json"
 export CLAUDE_PLUGIN_ROOT="$root/plugins/mp-ported-skills"
+# The session running the suite sets its own job folder; the hook reads it.
+unset CLAUDE_JOB_DIR
 
 pass=0 fail=0
 check() { # <name> <expected> <actual>
@@ -111,11 +113,161 @@ check "attended, default mode: edit allowed" "" \
 check "unattended, default mode: edit allowed" "" \
     "$(decision 0 default Edit "$repo/docs/agents/supervision.md" "$repo" "$cfg")"
 
-# A non-Edit/Write/NotebookEdit tool is never inspected.
-check "Bash is not inspected (known gap)" "" \
-    "$(decision 0 auto Bash "sed -i '' -e s/x/y/ $repo/docs/agents/supervision.md" "$repo" "$cfg")"
+# Bash (#173): a command that writes a protected path in a form the hook
+# can read is refused. bash_run <attended> <mode> <command> <cwd> [<config
+# dir>] sends a Bash payload; the session id s1 makes the session's own job
+# folder <config dir>/jobs/s1, as Claude Code names it from the session id.
+bash_run() {
+    payload=$(jq -cn --arg mode "$2" --arg cmd "$3" --arg cwd "$4" \
+        '{hook_event_name:"PreToolUse",session_id:"s1",permission_mode:$mode,tool_name:"Bash",
+          tool_input:{command:$cmd},cwd:$cwd}')
+    printf '%s' "$payload" | CLAUDE_CODE_SESSION_ATTENDED="$1" CLAUDE_CONFIG_DIR="${5:-}" sh -c "$hook_cmd"
+}
+bdecision() { bash_run "$1" "$2" "$3" "$4" "${5:-}" | jq -r '.hookSpecificOutput.permissionDecision // empty'; }
+breason() { bash_run "$1" "$2" "$3" "$4" "${5:-}" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty'; }
 
-check "matcher: Edit, Write, NotebookEdit only" "Edit|Write|NotebookEdit" "$(jq -r "$entry | .matcher" "$hooks")"
+job="$cfg/jobs/s1"
+mkdir -p "$cfg/rules" "$job/tmp"
+touch "$cfg/rules/supervise-runs-rule.md"
+
+# The #151 shape: a heredoc writes a script into the job folder, then the
+# script runs with its working directory in the profile's rules folder.
+check "#151: heredoc writing a script into the job folder: allowed" "" \
+    "$(bdecision 0 auto "cat > \$CLAUDE_JOB_DIR/tmp/r.py <<'EOF'
+import pathlib
+p = pathlib.Path('supervise-runs-rule.md')
+p.write_text(p.read_text().replace('a', 'b'))
+EOF" "$repo" "$cfg")"
+check "#151: the same heredoc, the job folder written out: allowed" "" \
+    "$(bdecision 0 auto "cat > $job/tmp/r.py <<'EOF'
+open('$cfg/rules/supervise-runs-rule.md', 'w').write('x')
+EOF" "$repo" "$cfg")"
+check "a heredoc body that names a write is data, not a command: allowed" "" \
+    "$(bdecision 0 auto "cat <<-EOF > $job/tmp/r.sh
+	echo x > $cfg/rules/supervise-runs-rule.md
+	EOF
+echo done" "$repo" "$cfg")"
+check "the command after a heredoc is still read: deny" "deny" \
+    "$(bdecision 0 auto "cat > $job/tmp/r.sh <<'EOF'
+echo x
+EOF
+echo x > $cfg/rules/supervise-runs-rule.md" "$repo" "$cfg")"
+check "#151: cd into the profile's rules and run the script: deny" "deny" \
+    "$(bdecision 0 auto "cd $cfg/rules && python3 $job/tmp/r.py" "$repo" "$cfg")"
+check "#151: the refusal names the program, the folder and the maintainer" \
+    "A background session in auto mode cannot run 'python3' with its working directory in its own profile directory ($cfg) on its own (#173): a script run there can write the rules, settings and hooks beside it, and a worker that could change them could change what gates it. Run it from the job folder or the checkout, or leave this to the maintainer's own interactive session." \
+    "$(breason 0 auto "cd $cfg/rules && python3 $job/tmp/r.py" "$repo" "$cfg")"
+check "#151: the cd written with \$CLAUDE_CONFIG_DIR: deny" "deny" \
+    "$(bdecision 0 auto "cd \"\$CLAUDE_CONFIG_DIR/rules\"; python3 \"\$CLAUDE_JOB_DIR/tmp/r.py\"" "$repo" "$cfg")"
+check "a script run from the job folder: allowed" "" \
+    "$(bdecision 0 auto "cd $job/tmp && python3 r.py" "$repo" "$cfg")"
+check "a script run from the checkout: allowed" "" \
+    "$(bdecision 0 auto "python3 $job/tmp/r.py" "$repo" "$cfg")"
+
+# Each write form the hook reads, with @ standing for the target.
+forms='echo x > @
+echo x >> @
+echo x 2>@
+echo x &> @
+echo x>@
+printf x | tee @
+printf x | tee -a @
+sed -i '"''"' -e s/a/b/ @
+sed -i.bak s/a/b/ @
+perl -pi -e s/a/b/ @
+perl -i -pe s/a/b/ @
+ruby -pi -e 1 @
+cp /dev/null @
+cp -f /dev/null "@"
+mv @ /dev/null
+ln -sf /dev/null @
+rm -f @
+touch @
+install -m 644 /dev/null @
+dd if=/dev/null of=@
+sh -c "echo x > @"
+bash -lc '"'"'printf x | tee @'"'"'
+eval "rm @"
+true && echo x > @
+(echo x) > @
+echo $(cat /dev/null) > @'
+form_checks() { # <label> <expected> <target>
+    IFS='
+'
+    set -f
+    for f in $forms; do
+        IFS=$oldIFS
+        c=$(printf '%s' "$f" | sed "s|@|$3|g")
+        check "$1: $f" "$2" "$(bdecision 0 auto "$c" "$repo" "$cfg")"
+        IFS='
+'
+    done
+    set +f
+    IFS=$oldIFS
+}
+oldIFS=$IFS
+form_checks "grant file" deny "$repo/docs/agents/supervision.md"
+form_checks "distribution-repo.md" deny "$repo/docs/agents/distribution-repo.md"
+form_checks "profile rule" deny "$cfg/rules/supervise-runs-rule.md"
+form_checks "another job's folder" deny "$cfg/jobs/other/tmp/x.py"
+form_checks "sibling of the grant file" "" "$repo/docs/agents/domain.md"
+form_checks "own job folder" "" "$job/tmp/x.py"
+
+check "a relative target after a cd: deny" "deny" \
+    "$(bdecision 0 auto "cd docs/agents && echo x > supervision.md" "$repo" "$cfg")"
+check "a relative target from a session in the folder: deny" "deny" \
+    "$(bdecision 0 auto "echo x > supervision.md" "$repo/docs/agents" "$cfg")"
+check "a redirect into the profile written with \${CLAUDE_CONFIG_DIR}: deny" "deny" \
+    "$(bdecision 0 auto 'echo x > "${CLAUDE_CONFIG_DIR}/settings.json"' "$repo" "$cfg")"
+check "a write to the job folder written with \$CLAUDE_JOB_DIR: allowed" "" \
+    "$(bdecision 0 auto 'echo x > "$CLAUDE_JOB_DIR/tmp/msg.txt"' "$repo" "$cfg")"
+check "\$HOME and ~ are expanded: deny" "deny deny" \
+    "$( (export HOME="$cfg"; printf '%s %s' "$(bdecision 0 auto 'echo x > $HOME/rules/a.md' "$repo" "$cfg")" \
+        "$(bdecision 0 auto 'echo x > ~/rules/a.md' "$repo" "$cfg")") )"
+check "a .. out of the job folder: deny" "deny" \
+    "$(bdecision 0 auto "echo x > $job/tmp/../../../rules/a.md" "$repo" "$cfg")"
+ln -s "$cfg/rules" "$job/tmp/rules-link"
+check "a symlink out of the job folder: deny" "deny" \
+    "$(bdecision 0 auto "echo x > $job/tmp/rules-link/a.md" "$repo" "$cfg")"
+check "the refusal names the form, the target and the maintainer" \
+    "A background session in auto mode cannot write docs/agents/supervision.md from Bash on its own (#58, #173; 'sed -i' writes $repo/docs/agents/supervision.md): a worker that could grant itself a standing grant would make the grant meaningless. Leave this to the maintainer's own interactive session." \
+    "$(breason 0 auto "sed -i '' s/a/b/ docs/agents/supervision.md" "$repo" "$cfg")"
+
+# The Edit tools follow the same job-folder exception (#112).
+check "Write to the session's own job folder: allowed" "" \
+    "$(decision 0 auto Write "$job/tmp/edit.py" "$repo" "$cfg")"
+check "Write to another job's folder: deny" "deny" \
+    "$(decision 0 auto Write "$cfg/jobs/other/tmp/edit.py" "$repo" "$cfg")"
+check "Write through .. out of the job folder: deny" "deny" \
+    "$(decision 0 auto Write "$job/tmp/../../../settings.json" "$repo" "$cfg")"
+check "Write through a symlink out of the job folder: deny" "deny" \
+    "$(decision 0 auto Write "$job/tmp/rules-link/a.md" "$repo" "$cfg")"
+
+# Reads of a protected path, and a plugin update, are never refused.
+for c in "cat $repo/docs/agents/supervision.md" \
+    "rg -n grant $repo/docs/agents/supervision.md $cfg/rules" \
+    "git -C $repo show HEAD:docs/agents/supervision.md" \
+    "jq . $cfg/settings.json" \
+    "jq . $cfg/settings.json > $job/tmp/s.json" \
+    "cp $cfg/rules/supervise-runs-rule.md $job/tmp/" \
+    "cd $cfg/rules && cat supervise-runs-rule.md 2>&1" \
+    "cd $cfg/rules && rg -n zone . >/dev/null" \
+    "grep -c x < $cfg/rules/supervise-runs-rule.md" \
+    "command claude plugin marketplace update mp-ported-skills && command claude plugin update mp-ported-skills@mp-ported-skills" \
+    "git commit -m 'a > $cfg/rules/x'"; do
+    check "read: $c" "" "$(bdecision 0 auto "$c" "$repo" "$cfg")"
+done
+
+# The maintainer's attended session, and an unattended one outside auto
+# mode: Bash writes are not inspected.
+check "attended, auto mode: Bash write allowed" "" \
+    "$(bdecision 1 auto "echo x > $repo/docs/agents/supervision.md" "$repo" "$cfg")"
+check "attended, default mode: Bash write allowed" "" \
+    "$(bdecision 1 default "cd $cfg/rules && python3 r.py" "$repo" "$cfg")"
+check "unattended, default mode: Bash write allowed" "" \
+    "$(bdecision 0 default "echo x > $cfg/rules/a.md" "$repo" "$cfg")"
+
+check "matcher: Edit, Write, NotebookEdit and Bash" "Edit|Write|NotebookEdit|Bash" "$(jq -r "$entry | .matcher" "$hooks")"
 check "timeout set" "5" "$(jq -r "$entry | .hooks[0].timeout" "$hooks")"
 
 command rm -rf "$repo" "$cfg"
