@@ -44,7 +44,7 @@ itself one by editing this file.
                       repos/<o>/<r>/issues/<n>/sub_issues/priority. Not
                       removing one, which no grant covers. The note says
                       which tickets, as
-                      `- sub-issue: a capture's tickets, under the work's own parent`
+                      `- sub-issue: a capture's tickets, under the work's own parent; the worker's own ticket, to the end of its parent's order`
                       does; the hook checks only the action.
      No grant covers any other gh api write or a GraphQL mutation,
      addComment, createIssue and addSubIssue included.
@@ -58,4 +58,4 @@ itself one by editing this file.
 - issue-comment: a capture's findings, on this repo's tickets
 - issue-close: the worker's own ticket, after its work is pushed
 - issue-create: a capture's findings, under the work's own parent, labelled needs-triage
-- sub-issue: a capture's tickets, under the work's own parent
+- sub-issue: a capture's tickets, under the work's own parent; the worker's own ticket, to the end of its parent's order
