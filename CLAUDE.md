@@ -32,6 +32,8 @@ Tests are `tests/*.test.sh`, run with `sh`. Every `git commit` a test makes in a
 
 Do not edit a test file while a run of it is still going, such as a run in the background. `sh` reads the script as it runs, so the run reads the edit partway through and fails on a syntax error that is not in the file: in #158, a backgrounded `tests/supervise.test.sh` died at `line 1331` after an edit higher up. Wait for the run to end, or run it again after the edit.
 
+After any edit to a skill's text (`SKILL.md` or a file beside it), run the whole suite again, not only the tests the change touched. Several test files check a skill's wording phrase by phrase, and they are not the ones named after the script you changed: in #158, a review fix to `loop.md` broke `tests/supervise-relabel-route.test.sh` after the full suite had passed, the touched tests passed again, and the failure was pushed.
+
 A session that continues a ticket from an earlier worker's red test commit checks each failing expectation against the brief before making it green; a failing check is not yet a spec. In #129, one red check expected a queue the brief's own rule could not produce, and only the build showed it; the fixture was rewritten to test what its name said.
 
 A check that two files match tests `cmp -s`'s exit status, as `same` in `tests/status-line-copy.test.sh` does. `cmp` reports a file that is a prefix of the other on stderr, so a check on its captured stdout reads empty, and passes, for files that differ.
