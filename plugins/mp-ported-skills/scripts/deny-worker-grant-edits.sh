@@ -28,16 +28,18 @@
 # included, and refuses a write it can see to a protected path: `>`, `>>`
 # and `&>` redirection, tee, sed/perl/ruby -i, cp, ln and install onto one,
 # mv, rm, rmdir, unlink, touch, truncate, mkdir and chmod on one, dd of=,
-# and the same inside `sh -c`, eval and a process substitution. It also
-# refuses an interpreter, a sourced script, an awk program that can write
-# (-f, or >, | or system in it), or a script run while the command's
-# working directory, after any cd or pushd, is in the profile directory
-# outside the job folder: the shape a worker used to rewrite a profile
-# rule, `cd <profile>/rules && python3 <job>/tmp/r.py`. A path is resolved
-# against the session cwd and any cd before it, with $CLAUDE_CONFIG_DIR,
-# $CLAUDE_JOB_DIR, $HOME and ~ written in the command expanded,
-# ${VAR:-default} included. Reads are never refused, nor is `claude plugin
-# update`, which writes the plugin cache through Claude Code itself.
+# gawk -i inplace, and the same inside `sh -c`, eval, a subshell and a
+# process substitution. It also refuses an interpreter, a sourced script,
+# an awk program that can write (-f, or >, | or system in it), or a script
+# run while the command's working directory, after any cd, cd -, pushd or
+# popd, is in the profile directory outside the job folder: the shape a
+# worker used to rewrite a profile rule, `cd <profile>/rules && python3
+# <job>/tmp/r.py`. A path is resolved against the session cwd and any cd
+# before it, with $CLAUDE_CONFIG_DIR, $CLAUDE_JOB_DIR, $HOME and ~ written
+# in the command expanded, ${VAR:-default} and ${VAR%suffix} forms
+# included, and matched in any case. Reads are never refused, nor is
+# `claude plugin update`, which writes the plugin cache through Claude
+# Code itself.
 #
 # Detection is CLAUDE_CODE_SESSION_ATTENDED and permission_mode, the same
 # two signals deny-shared-actions.sh uses (docs/adr/0004): both must hold.
@@ -45,7 +47,8 @@
 # Known gap: a write this text scan cannot see gets through -- a path built
 # at run time (`d=$CLAUDE_CONFIG_DIR; ... > "$d/x"`), a program that writes
 # on its own (`python3 -c` with an absolute path, a script run from
-# elsewhere), find -exec, xargs, rsync, patch, git checkout. The
+# elsewhere), sed's w command, find -exec, xargs, rsync, patch, git
+# checkout. The
 # supervisor's after-run comparison reports those (#190).
 #
 # Reads the PreToolUse payload on stdin. Prints a deny decision and exits 0
@@ -70,7 +73,8 @@ esac
 cwd=$(field .cwd)
 [ -n "$cwd" ] || cwd=$(pwd)
 set -f
-oldIFS=$IFS
+oldIFS=$IFS nl='
+'
 
 # resolve <path> <base>: the path made absolute against the base folder.
 resolve() {
@@ -151,21 +155,28 @@ if [ -n "$cfg" ]; then
     fi
 fi
 
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+cfg_l=$(lower "$cfg")
+
 # protected <absolute path>: sets kind to grant, dist or profile when the
-# path is one this hook guards, or to empty.
+# path is one this hook guards, or to empty. A macOS folder ignores case, so
+# a protected path is matched in lower case; the job folder is matched
+# exactly, so a differently cased one is not taken for it.
 protected() {
     kind=""
     _a=$(physical "$1")
+    _l=$(lower "$_a")
     # The grant file, found from the checkout the path lands in (its own
     # folder, walked up to one that exists, since a write may create it).
     # Only a path with one of the two names asks git, which is most of a
     # call's cost.
-    case "$_a" in
+    case "$_l" in
         */docs/agents/supervision.md | */docs/agents/distribution-repo.md)
             existing "${_a%/*}"
             if _top=$(git -C "$existing_dir" rev-parse --show-toplevel 2>/dev/null); then
-                [ "$_a" = "$_top/docs/agents/supervision.md" ] && { kind=grant; return; }
-                [ "$_a" = "$_top/docs/agents/distribution-repo.md" ] && { kind=dist; return; }
+                _top=$(lower "$_top")
+                [ "$_l" = "$_top/docs/agents/supervision.md" ] && { kind=grant; return; }
+                [ "$_l" = "$_top/docs/agents/distribution-repo.md" ] && { kind=dist; return; }
             fi
             ;;
     esac
@@ -173,7 +184,7 @@ protected() {
     if [ -n "$job" ]; then
         case "$_a" in "$job" | "$job"/*) return ;; esac
     fi
-    case "$_a" in "$cfg" | "$cfg"/*) kind=profile ;; esac
+    case "$_l" in "$cfg_l" | "$cfg_l"/*) kind=profile ;; esac
 }
 
 # What each kind is, and why a worker may not change it.
@@ -229,11 +240,16 @@ tokens() {
             w = ""; inw = 0
         }
         # balanced: the text from i, an opening paren, to its closing one,
-        # with i left on the closing one.
-        function balanced(   b, depth) {
-            b = ""; depth = 0
+        # with i left on the closing one. A paren inside quotes or after a
+        # backslash does not count.
+        function balanced(   b, depth, bq) {
+            b = ""; depth = 0; bq = ""
             for (; i <= n; i++) {
                 c = substr(s, i, 1); b = b (c == "\n" ? nl : c)
+                if (bq == sq) { if (c == sq) bq = ""; continue }
+                if (c == "\\" && i < n && bq != sq) { i++; c = substr(s, i, 1); b = b (c == "\n" ? nl : c); continue }
+                if (bq == "\"") { if (c == "\"") bq = ""; continue }
+                if (c == sq || c == "\"") { bq = c; continue }
                 if (c == "(") depth++
                 else if (c == ")" && --depth == 0) break
             }
@@ -253,10 +269,15 @@ tokens() {
                 if (c == "\\" && i < n) { d = substr(s, i + 1, 1); i++; if (d != "\n") { w = w d; inw = 1 }; continue }
                 if (c == sq || c == "\"") { q = c; inw = 1; continue }
                 # Arithmetic, $((...)) or ((...)), is one word: its << and >
-                # are operators, not a heredoc or a redirection.
+                # are operators, not a heredoc or a redirection. Only when it
+                # closes on )): `((cd x; y) )` is a subshell in a subshell,
+                # and the shell runs it as one.
                 if ((c == "$" && substr(s, i + 1, 2) == "((") || (c == "(" && !inw && substr(s, i + 1, 1) == "(")) {
+                    i0 = i; w0 = w
                     if (c == "$") { w = w c; i++ }
-                    w = w balanced(); inw = 1; continue
+                    b = balanced()
+                    if (substr(b, length(b) - 1) == "))") { w = w b; inw = 1; continue }
+                    i = i0; w = w0; c = substr(s, i, 1)
                 }
                 if (c == "#" && !inw) { while (i < n && substr(s, i + 1, 1) != "\n") i++; continue }
                 if (c == " " || c == "\t") { flush(); continue }
@@ -314,8 +335,8 @@ tokens() {
 }
 
 # expand <word>: $CLAUDE_CONFIG_DIR, $CLAUDE_JOB_DIR and $HOME (bare,
-# braced, or braced with a default) and ~ at the start of a word, as the
-# shell would.
+# braced, braced with a default, or with a prefix or suffix cut by # or %)
+# and ~ at the start of a word, as the shell would.
 expand() {
     _w=$1
     for _v in CLAUDE_CONFIG_DIR CLAUDE_JOB_DIR HOME; do
@@ -328,6 +349,18 @@ expand() {
         case "$_w" in
             "\${$_v}"*) _w="$_val${_w#"\${$_v}"}" ;;
             "\${$_v:+"* | "\${$_v+"*) ;;
+            # A cut: the pattern is matched, never run, as the shell does.
+            "\${$_v%%"*'}'* | "\${$_v%"*'}'* | "\${$_v##"*'}'* | "\${$_v#"*'}'*)
+                _r=${_w#"\${$_v"}
+                case "$_r" in %%* | '##'*) _op=${_r%"${_r#??}"} ;; *) _op=${_r%"${_r#?}"} ;; esac
+                _r=${_r#"$_op"} _pat=${_r%%\}*} _r=${_r#*\}}
+                case "$_op" in
+                    %%) _w="${_val%%$_pat}$_r" ;;
+                    %) _w="${_val%$_pat}$_r" ;;
+                    \#\#) _w="${_val##$_pat}$_r" ;;
+                    \#) _w="${_val#$_pat}$_r" ;;
+                esac
+                ;;
             # A default (:-, -, :=, =) or a check (:?, ?) gives the
             # value itself, since the variable is set.
             "\${$_v"[-=?:]*'}'*) _w="$_val${_w#*\}}" ;;
@@ -346,6 +379,13 @@ check() {
     refuse "A background session in auto mode cannot write $(what) from Bash on its own ($(issue), #173; '$1' writes $(norm "$_abs")): $(why) Leave this to the maintainer's own interactive session."
 }
 
+# check_args <form> <args...>: check each argument that is not a flag.
+check_args() {
+    _form=$1
+    shift
+    for _a in "$@"; do case "$_a" in -*) ;; *) check "$_form" "$_a" ;; esac; done
+}
+
 # run_check <program>: refuse an interpreter or a script run while the
 # working directory is in the profile directory outside the job folder.
 run_check() {
@@ -356,7 +396,8 @@ run_check() {
 
 # inplace <program> <args...>: true when a flag edits files in place. A
 # perl or ruby flag such as -M, -I or -r takes the rest of its cluster as a
-# value, so an i after one is not a flag (-MFile::Find).
+# value, so an i after one is not a flag (-MFile::Find). A flag that takes
+# no value, or only digits, does not (-0pi, -lpi).
 inplace() {
     _p=$1
     shift
@@ -366,7 +407,10 @@ inplace() {
             --* | -) ;;
             -*)
                 _f=${_a#-}
-                [ "$_p" = sed ] || _f=${_f%%[MmIxdDlC0rEKTWF]*}
+                case "$_p" in
+                    perl) _f=${_f%%[MmIxDCF]*} _f=${_f%%d:*} ;;
+                    ruby) _f=${_f%%[IrCEKFx]*} ;;
+                esac
                 case "$_f" in *i*) return 0 ;; esac
                 ;;
         esac
@@ -410,28 +454,40 @@ command_done() {
     name=${1##*/}
     shift
     case "$name" in
-        cd | pushd)
-            while [ "${1:-}" = -P ] || [ "${1:-}" = -L ] || [ "${1:-}" = -e ] || [ "${1:-}" = -n ]; do shift; done
+        cd | pushd | popd)
+            # The folder stack is followed too: cd - goes back, pushd saves
+            # the folder it leaves and popd returns to it. -n keeps the
+            # folder where it is.
+            _n=""
+            while :; do
+                case "${1:-}" in -P | -L | -e) shift ;; -n) _n=yes; shift ;; *) break ;; esac
+            done
             [ "${1:-}" != -- ] || shift
-            case "${1:-}" in
-                '') [ "$name" = pushd ] || base=$HOME ;;
-                -* | +*) ;;
-                *) base=$(norm "$(resolve "$(expand "$1")" "$base")") ;;
+            _to=""
+            case "$name:${1:-}" in
+                popd:) [ -n "$_n" ] || [ -z "$dirs" ] || { _to=${dirs%%"$nl"*}; dirs=${dirs#*"$nl"}; } ;;
+                cd:) _to=$HOME ;;
+                cd:-) _to=$oldbase ;;
+                *:-* | *:+* | popd:* | pushd:) ;;
+                *)
+                    _to=$(norm "$(resolve "$(expand "$1")" "$base")")
+                    if [ "$name" = pushd ]; then
+                        [ -z "$_n" ] || _to=""
+                        [ -n "$_to" ] && dirs="$base$nl$dirs"
+                    fi
+                    ;;
             esac
+            [ -z "$_to" ] || { oldbase=$base; base=$_to; }
             return 0
             ;;
         tee | rm | rmdir | unlink | touch | truncate | mkdir | chmod | mv)
-            for _a in "$@"; do case "$_a" in -*) ;; *) check "$name" "$_a" ;; esac; done
+            check_args "$name" "$@"
             ;;
         sed)
-            if inplace sed "$@"; then
-                for _a in "$@"; do case "$_a" in -*) ;; *) check "sed -i" "$_a" ;; esac; done
-            fi
+            ! inplace sed "$@" || check_args "sed -i" "$@"
             ;;
         perl | ruby)
-            if inplace "$name" "$@"; then
-                for _a in "$@"; do case "$_a" in -*) ;; *) check "$name -i" "$_a" ;; esac; done
-            fi
+            ! inplace "$name" "$@" || check_args "$name -i" "$@"
             run_check "$name"
             ;;
         cp | ln | install)
@@ -471,7 +527,12 @@ command_done() {
             ;;
         awk | gawk | nawk)
             # A read, unless its program can write: -f, or >, | or system
-            # in the program text.
+            # in the program text. gawk's inplace library edits its files.
+            for _a in "$@"; do
+                case "$_a" in
+                    inplace | -iinplace | --include=inplace) check_args "$name -i inplace" "$@"; break ;;
+                esac
+            done
             _w=""
             while [ $# -gt 0 ]; do
                 case "$1" in
@@ -517,7 +578,7 @@ scan() {
     IFS=$oldIFS
 }
 
-base=$cwd bodies=""
+base=$cwd oldbase="" dirs="" bodies=""
 scan "$cmd"
 # A shell's -c text, eval's arguments and a process substitution are
 # commands too, run where the command that ran them was; scanned after,

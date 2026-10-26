@@ -216,7 +216,16 @@ true && echo x > @
 (echo x) > @
 echo $(cat /dev/null) > @
 printf x | tee >(cat) @
-cat <(echo x > @)'
+cat <(echo x > @)
+perl -0pi -e 1 @
+perl -lpi -e 1 @
+perl -Tpi -e 1 @
+ruby -lpi -e 1 @
+gawk -i inplace 1 @
+cat <(printf ")"; echo x > @)
+tee >(echo ")") > @
+((echo x > @) )
+echo $((echo x > @) )'
 form_checks() { # <label> <expected> <target>
     IFS='
 '
@@ -247,6 +256,22 @@ check "a redirect into the profile written with \${CLAUDE_CONFIG_DIR}: deny" "de
     "$(bdecision 0 auto 'echo x > "${CLAUDE_CONFIG_DIR}/settings.json"' "$repo" "$cfg")"
 check "a redirect written with \${CLAUDE_CONFIG_DIR:-default}: deny" "deny" \
     "$(bdecision 0 auto 'echo x > "${CLAUDE_CONFIG_DIR:-/x}/settings.json"' "$repo" "$cfg")"
+check "a redirect written with \${CLAUDE_CONFIG_DIR%/}: deny" "deny" \
+    "$(bdecision 0 auto 'echo x > "${CLAUDE_CONFIG_DIR%/}/settings.json"' "$repo" "$cfg")"
+check "a redirect written with \${CLAUDE_CONFIG_DIR#/}, resolved from /: deny" "deny" \
+    "$(bdecision 0 auto 'cd / && echo x > "${CLAUDE_CONFIG_DIR#/}/settings.json"' "$repo" "$cfg")"
+check "\${CLAUDE_CONFIG_DIR%/*} is the folder above the profile: allowed" "" \
+    "$(bdecision 0 auto 'echo x > "${CLAUDE_CONFIG_DIR%/*}/x.txt"' "$repo" "$cfg")"
+check "the grant file named in another case: deny" "deny" \
+    "$(bdecision 0 auto "echo x > $repo/docs/agents/Supervision.md" "$repo" "$cfg")"
+check "cd - back into the rules folder: deny" "deny" \
+    "$(bdecision 0 auto "cd $cfg/rules; cd /tmp; cd -; python3 $job/tmp/r.py" "$repo" "$cfg")"
+check "popd back into the rules folder: deny" "deny" \
+    "$(bdecision 0 auto "pushd $cfg/rules; pushd /tmp; popd; python3 $job/tmp/r.py" "$repo" "$cfg")"
+check "popd out of the rules folder: allowed" "" \
+    "$(bdecision 0 auto "pushd $cfg/rules; popd; python3 $job/tmp/r.py" "$repo" "$cfg")"
+check "pushd -n does not change folder: allowed" "" \
+    "$(bdecision 0 auto "pushd -n $cfg/rules; python3 $job/tmp/r.py" "$repo" "$cfg")"
 check "a redirect written with \${CLAUDE_CONFIG_DIR:+alt} is not the profile: allowed" "" \
     "$(bdecision 0 auto 'echo x > "${CLAUDE_CONFIG_DIR:+/dev/null}"' "$repo" "$cfg")"
 check "a write to the job folder written with \$CLAUDE_JOB_DIR: allowed" "" \
