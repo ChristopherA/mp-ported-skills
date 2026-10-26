@@ -113,7 +113,7 @@ settle=$(line "$loop" "A ticket's run goes on to the next only when")
 check "loop settles on the relabel block" yes \
     "$(has_in "$settle" "the post-push \`ready-for-human\` relabel of its own ticket")"
 check "loop settles on a capture ending on the live check" yes \
-    "$(has_in "$settle" "its capture ran (Capture, in \`SKILL.md\`), one ending on \`live-check.sh --apply N\` included")"
+    "$(has_in "$settle" "its capture ran (Capture, in \`SKILL.md\`; a parked worker's own, before its park comment), one ending on \`live-check.sh --apply N\` included")"
 
 check "loop goes on past the relabel and the live check" yes \
     "$(has_in "$settle" "other than that push, that relabel, or a capture's issue comment, new issue or live check")"
