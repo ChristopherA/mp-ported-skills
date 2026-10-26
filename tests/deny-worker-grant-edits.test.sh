@@ -164,6 +164,30 @@ check "a script run from the job folder: allowed" "" \
 check "a script run from the checkout: allowed" "" \
     "$(bdecision 0 auto "python3 $job/tmp/r.py" "$repo" "$cfg")"
 
+# The tokenizer's edges (#173 review): arithmetic << is not a heredoc, a
+# newline inside a quoted sh -c body still ends a command, and a heredoc
+# inside one is still data.
+check "\$((1<<2)) does not hide the next line: deny" "deny" \
+    "$(bdecision 0 auto "echo \$((1<<2))
+echo x > $cfg/rules/a.md" "$repo" "$cfg")"
+check "((x<<=2)) does not hide the next command: deny" "deny" \
+    "$(bdecision 0 auto "((x<<=2)); echo x > $cfg/rules/a.md" "$repo" "$cfg")"
+check "a cd on its own line inside sh -c: deny" "deny" \
+    "$(bdecision 0 auto "sh -c 'cd agents
+echo x > supervision.md'" "$repo/docs" "$cfg")"
+check "a heredoc inside sh -c is data: allowed" "" \
+    "$(bdecision 0 auto "sh -c 'cat > $job/tmp/r.sh <<EOF
+echo x > $cfg/rules/a.md
+EOF'" "$repo" "$cfg")"
+
+# Other ways into the rules folder: pushd, and sourcing a script there.
+for c in "pushd $cfg/rules && python3 $job/tmp/r.py" \
+    "cd $cfg/rules && . $job/tmp/r.sh" \
+    "cd $cfg/rules && source $job/tmp/r.sh" \
+    "cd $cfg/rules && awk '{print > \"b\"}' a.md"; do
+    check "run from the rules folder: $c" "deny" "$(bdecision 0 auto "$c" "$repo" "$cfg")"
+done
+
 # Each write form the hook reads, with @ standing for the target.
 forms='echo x > @
 echo x >> @
@@ -190,7 +214,9 @@ bash -lc '"'"'printf x | tee @'"'"'
 eval "rm @"
 true && echo x > @
 (echo x) > @
-echo $(cat /dev/null) > @'
+echo $(cat /dev/null) > @
+printf x | tee >(cat) @
+cat <(echo x > @)'
 form_checks() { # <label> <expected> <target>
     IFS='
 '
@@ -219,6 +245,10 @@ check "a relative target from a session in the folder: deny" "deny" \
     "$(bdecision 0 auto "echo x > supervision.md" "$repo/docs/agents" "$cfg")"
 check "a redirect into the profile written with \${CLAUDE_CONFIG_DIR}: deny" "deny" \
     "$(bdecision 0 auto 'echo x > "${CLAUDE_CONFIG_DIR}/settings.json"' "$repo" "$cfg")"
+check "a redirect written with \${CLAUDE_CONFIG_DIR:-default}: deny" "deny" \
+    "$(bdecision 0 auto 'echo x > "${CLAUDE_CONFIG_DIR:-/x}/settings.json"' "$repo" "$cfg")"
+check "a redirect written with \${CLAUDE_CONFIG_DIR:+alt} is not the profile: allowed" "" \
+    "$(bdecision 0 auto 'echo x > "${CLAUDE_CONFIG_DIR:+/dev/null}"' "$repo" "$cfg")"
 check "a write to the job folder written with \$CLAUDE_JOB_DIR: allowed" "" \
     "$(bdecision 0 auto 'echo x > "$CLAUDE_JOB_DIR/tmp/msg.txt"' "$repo" "$cfg")"
 check "\$HOME and ~ are expanded: deny" "deny deny" \
@@ -254,7 +284,11 @@ for c in "cat $repo/docs/agents/supervision.md" \
     "cd $cfg/rules && rg -n zone . >/dev/null" \
     "grep -c x < $cfg/rules/supervise-runs-rule.md" \
     "command claude plugin marketplace update mp-ported-skills && command claude plugin update mp-ported-skills@mp-ported-skills" \
-    "git commit -m 'a > $cfg/rules/x'"; do
+    "git commit -m 'a > $cfg/rules/x'" \
+    "perl -MFile::Find -ne print $cfg/rules/supervise-runs-rule.md" \
+    "cd $cfg/rules && awk '{print}' supervise-runs-rule.md" \
+    "cd $cfg/rules && awk -F'|' '{print \$1}' supervise-runs-rule.md" \
+    "sed -n p $repo/docs/agents/supervision.md"; do
     check "read: $c" "" "$(bdecision 0 auto "$c" "$repo" "$cfg")"
 done
 
@@ -268,7 +302,7 @@ check "unattended, default mode: Bash write allowed" "" \
     "$(bdecision 0 default "echo x > $cfg/rules/a.md" "$repo" "$cfg")"
 
 check "matcher: Edit, Write, NotebookEdit and Bash" "Edit|Write|NotebookEdit|Bash" "$(jq -r "$entry | .matcher" "$hooks")"
-check "timeout set" "5" "$(jq -r "$entry | .hooks[0].timeout" "$hooks")"
+check "timeout set" "15" "$(jq -r "$entry | .hooks[0].timeout" "$hooks")"
 
 command rm -rf "$repo" "$cfg"
 
