@@ -41,6 +41,8 @@ distribution="$supervise_scripts/distribution.sh"
 . "$supervise_scripts/live.sh"
 # The park comment's heading, shared with launch.sh's prompt text (#158).
 . "$supervise_scripts/park.sh"
+# Whether unpushed commits are a supervised run of a ticket (#214).
+. "$supervise_scripts/run-start.sh"
 
 cd "$dir" 2>/dev/null || exit 0
 
@@ -207,6 +209,14 @@ git_inflight() {
     return 0
 }
 
+# implement_of <case line>: the ticket a case 2 line or a case 1 line's
+# ready-for-agent next child names for /implement, or nothing.
+implement_of() {
+    printf '%s\n' "$1" | sed -n \
+        -e 's/^2 \/implement #\([0-9][0-9]*\) .*/\1/p' \
+        -e 's/^1 work in flight: .*; next child #\([0-9][0-9]*\) ([^,)]*, \/implement #\1, .*/\1/p'
+}
+
 gather() {
     command -v git >/dev/null && git rev-parse --git-dir >/dev/null 2>&1 || {
         echo "git: not a repository"
@@ -223,6 +233,9 @@ gather() {
     echo "branch: $branch (default $default), $r_sync, as of last fetch"
     echo "uncommitted paths: $dirty; unpushed commits: $unpushed"
     inflight=$(git_inflight)
+    # The same less the unpushed commits, for the /supervise offer (#214).
+    r_unpushed=0
+    inflight_rest=$(git_inflight)
 
     # The Distribution repo, from the working tree's copy of
     # docs/agents/distribution-repo.md, as the other docs/agents files are
@@ -249,7 +262,7 @@ gather() {
         echo "distribution repo branch: $r_branch (default $r_default), $r_sync, as of last fetch"
         echo "distribution repo uncommitted paths: $r_dirty; unpushed commits: $r_unpushed"
         dist_inflight=$(git_inflight " in distribution repo $dist")
-        inflight="$inflight$dist_inflight"
+        inflight="$inflight$dist_inflight" inflight_rest="$inflight_rest$dist_inflight"
     fi
     [ -z "$dist_unread" ] || echo "distribution repo: $dist_unread"
 
@@ -294,7 +307,10 @@ gather() {
 
         own=$(printf '%s' "$prs" | jq -r '[.[] | select(.isCrossRepository | not)]
             | map("#\(.number) \(.title) [\(.headRefName)]") | join("; ")')
-        [ -n "$own" ] && echo "open PRs from this repo: $own" && inflight="$inflight, open PR $own"
+        if [ -n "$own" ]; then
+            echo "open PRs from this repo: $own"
+            inflight="$inflight, open PR $own" inflight_rest="$inflight_rest, open PR $own"
+        fi
 
         # A body's priority line, its first non-blank line (**Priority: High.**),
         # as high, medium or low; null when there is none.
@@ -442,7 +458,9 @@ gather() {
             in_motion="$in_motion; $(printf '%s' "$moving_rows" |
                 jq -r --argjson n "$n" '.[] | select(.n == $n) | "#\(.n) \(.t)"')$child"
         done
-        [ -n "$in_motion" ] && inflight="$inflight, in motion ${in_motion#; }"
+            if [ -n "$in_motion" ]; then
+            inflight="$inflight, in motion ${in_motion#; }" inflight_rest="$inflight_rest, in motion ${in_motion#; }"
+        fi
         # Case 2's ticket: the first ready one case 1 has not already named as
         # a next child, so next: and runner-up: never name the same ticket.
         children_nums=$(jq -nc --arg c "$children" '$c | split(" ") | map(select(. != "") | tonumber)')
@@ -531,12 +549,24 @@ gather() {
     # (live.sh's rule, shared with it), and the Distribution repo, when there
     # is one, read and clean. A loop is worth running only for two or more
     # tickets, counting a reorder's.
+    #
+    # Unpushed commits on the default branch may be a supervised run of the
+    # next ticket that a supervisor ended before pushing (#214). So the offer
+    # reads the step as it would be without them (offer), and when a run
+    # record on that ticket accounts for them exactly (run-start.sh), offers
+    # the loop and prints `continue: #N from <start>`, which step.sh takes.
+    # When they are the only refusal and no run accounts for them, a
+    # `push-first:` line names the push and then the loop. Otherwise the
+    # lines are as they were: no queue: line, and the unpushed refusal.
     first=$(printf '%s' "$cases" | sed -n 1p)
-    impl=$(printf '%s\n' "$first" | sed -n \
-        -e 's/^2 \/implement #\([0-9][0-9]*\) .*/\1/p' \
-        -e 's/^1 work in flight: .*; next child #\([0-9][0-9]*\) ([^,)]*, \/implement #\1, .*/\1/p')
-    [ -n "$impl" ] || return 0
-    step_n=$(accept_step "$first")
+    offer=$first
+    if [ "$unpushed" -gt 0 ]; then
+        if [ -n "$inflight_rest" ]; then offer="1 work in flight: ${inflight_rest#, }"
+        else offer=$(printf '%s' "$cases" | sed -n 2p); fi
+    fi
+    impl=$(implement_of "$first")
+    [ -n "$impl" ] || [ -n "$(implement_of "$offer")" ] || return 0
+    step_n=$(accept_step "$offer")
     # The queue (#129): the tickets a /supervise --loop would run in turn.
     # The loop runs no list: after each ticket step.sh re-reads next:, so the
     # queue replays that pick with each queued ticket counted as closed. Under
@@ -546,9 +576,9 @@ gather() {
     # links cannot be read counts as blocked. Under a parent, the first
     # ready-for-agent child behind the one ending the queue, unblocked once
     # the queue is closed, is offered as a reorder ahead of it (reorder:).
-    qlen=0
+    qlen=0 qout=
     if [ -n "$step_n" ]; then
-        parent=$(printf '%s\n' "$first" | sed -n 's/^1 work in flight: in motion #\([0-9][0-9]*\) .*/\1/p')
+        parent=$(printf '%s\n' "$offer" | sed -n 's/^1 work in flight: in motion #\([0-9][0-9]*\) .*/\1/p')
         if [ -n "$parent" ]; then cands=$(cat "$tmp/kids-$parent.json")
         else cands=$(printf '%s' "$rows" | jq -c --argjson open "$open_nums" --argjson fx "$fixed_nums" '
             [.[] | select(.role == "agent" and (.l | index("parked") | not) and (.n as $n | $fx | index($n) | not))
@@ -585,22 +615,27 @@ gather() {
             | {q: $r.q, m: $m, len: (($m.after // $r.q) | length)}')
         # Empty when the children or the replay could not be read: refused below.
         qlen=$(printf '%s' "$qr" | jq '.len' 2>/dev/null)
-        echo "queue: $(printf '%s' "$qr" | jq -r '.q | map("#\(.)") | join(" ")')"
+        qout=$(echo "queue: $(printf '%s' "$qr" | jq -r '.q | map("#\(.)") | join(" ")')"
         printf '%s' "$qr" | jq -r --arg p "$parent" \
             --arg path "'repos/{owner}/{repo}/issues/$parent/sub_issues/priority'" '.m // empty
             | "reorder: #\(.y) (open child \(.yi) of #\($p)) ahead of #\(.x) (open child \(.xi)): "
               + "gh api --method PATCH \($path)"
-              + " -F sub_issue_id=\(.yid) -F before_id=\(.xid); queue after: \(.after | map("#\(.)") | join(" "))"'
+              + " -F sub_issue_id=\(.yid) -F before_id=\(.xid); queue after: \(.after | map("#\(.)") | join(" "))"')
     fi
-    refusal=
-    if ! linked=$(sh "$main_checkout" . </dev/null 2>&1); then refusal=$linked
-    elif [ "$dirty" -gt 0 ]; then refusal="$dirty uncommitted paths; commit or clear them first"
-    elif [ "$branch" != "$default" ]; then refusal="on $branch, not the default branch $default"
-    elif [ "$unpushed" -gt 0 ]; then refusal="$unpushed unpushed commits; push them first"
+    # The checks in launch.sh's order, the unpushed commits left to the end:
+    # those before them (early), the rest of what step.sh and launch.sh
+    # refuse (hard), then what only the offer weighs.
+    refusal= early= hard=
+    if ! linked=$(sh "$main_checkout" . </dev/null 2>&1); then refusal=$linked early=1
+    elif [ "$dirty" -gt 0 ]; then refusal="$dirty uncommitted paths; commit or clear them first" early=1
+    elif [ "$branch" != "$default" ]; then refusal="on $branch, not the default branch $default" early=1
     elif [ -n "${own:-}" ]; then refusal="open PR $own; settle it first"
     elif [ -n "$dist_inflight" ]; then refusal="work in flight in distribution repo $dist: ${dist_inflight#, }"
     elif [ -n "$dist_unread" ]; then refusal="distribution repo $dist_unread"
-    elif [ -z "$step_n" ]; then refusal="other work in flight: ${inflight#, }"
+    elif [ -z "$step_n" ]; then refusal="other work in flight: ${inflight_rest#, }"
+    fi
+    hard=$refusal
+    if [ -n "$refusal" ]; then :
     elif ! [ "$qlen" -ge 0 ] 2>/dev/null; then refusal="the queue could not be read"
     elif [ "$qlen" -lt 2 ]; then refusal="a queue of one (#$step_n); /supervise is worth running only for two or more tickets"
     else
@@ -617,8 +652,29 @@ gather() {
             refusal="another live background session in distribution repo $dist: $others"
         fi
     fi
+    loop="/mp-ported-skills:supervise $shown --loop --model claude-opus-5-5 --effort medium"
+    start= push_first=
+    if [ "$unpushed" -gt 0 ] && [ -z "$early" ]; then
+        if [ -z "$hard" ] &&
+            comments=$(gh api "repos/{owner}/{repo}/issues/$step_n/comments?per_page=100" --paginate 2>/dev/null) &&
+            comments=$(printf '%s' "$comments" | jq -cs 'add // []' 2>/dev/null) &&
+            start=$(run_start . "$step_n" "$comments"); then
+            :
+        else
+            start=
+            [ -n "$refusal" ] || push_first=1
+            refusal="$unpushed unpushed commits; push them first"
+        fi
+    fi
+    if [ "$unpushed" -gt 0 ] && [ -z "$start" ] && [ -z "$push_first" ]; then
+        [ -n "$impl" ] || return 0
+    else
+        [ -z "${qout:-}" ] || printf '%s\n' "$qout"
+    fi
     if [ -n "$refusal" ]; then echo "supervise: not offered: $refusal"
-    else echo "supervise: /mp-ported-skills:supervise $shown --loop --model claude-opus-5-5 --effort medium $you_type"; fi
+    else echo "supervise: $loop $you_type"; fi
+    [ -z "$start" ] || echo "continue: #$step_n from $start"
+    [ -z "$push_first" ] || echo "push-first: git push origin $default; then $loop $you_type"
 }
 
 # gather runs in the background so the watchdog can stop a hung `gh`. The EXIT
