@@ -5,8 +5,12 @@
 # Runs state.sh in the Project's folder and reads its `next:` line. Prints
 # `implement #N` when that step is /implement of a ready-for-agent ticket and
 # nothing else is in flight: case 2, or case 1 when its only work in flight is
-# an in-motion parent whose next child is ready-for-agent. Otherwise prints
-# `stop: ` and the `next:` line, for the supervisor to report. A folder in a
+# an in-motion parent whose next child is ready-for-agent. When the step is
+# refused only because it carries unpushed commits that a supervised run of
+# the ticket accounts for, state.sh prints `continue: #N from <sha>`, and
+# step.sh prints `continue #N from <sha>`: the supervisor launches a
+# continuation from that start (#214). Otherwise prints `stop: ` and the
+# `next:` line, for the supervisor to report. A folder in a
 # linked git worktree stops first, with main-checkout.sh's reason in place of
 # the `next:` line. Writes nothing.
 #
@@ -26,7 +30,7 @@ case "${1:-}" in
         report=$(command cat "$2") ;;
     --help)
         printf 'Usage: step.sh DIR | step.sh --from FILE\n'
-        printf 'Prints "implement #N", or "stop: " and state.sh'\''s next: line.\n'
+        printf 'Prints "implement #N", "continue #N from SHA", or "stop: " and state.sh'\''s next: line.\n'
         exit 0 ;;
     '')
         printf 'Usage: step.sh DIR | step.sh --from FILE\n' >&2
@@ -48,8 +52,11 @@ fi
 # Which steps it takes is accept.sh's, shared with state.sh's supervise:
 # offer (#115).
 n=$(accept_step "$line")
+cont=$(printf '%s\n' "$report" | sed -n 's/^continue: \(#[0-9][0-9]* from [0-9a-f]\{40\}\)$/\1/p' | head -n 1)
 if [ -n "$n" ]; then
     echo "implement #$n"
+elif [ -n "$cont" ]; then
+    echo "continue $cont"
 else
     echo "stop: next: $line"
 fi

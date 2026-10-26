@@ -10,7 +10,11 @@
 #   not-landed    the tree has uncommitted paths, HEAD is detached, the
 #                 branch has no upstream, or it has commits its upstream lacks after a
 #                 fetch: the next ticket starts from the default branch as
-#                 pushed, so the loop waits rather than stacking work
+#                 pushed, so the loop waits rather than stacking work. Commits
+#                 step.sh reads as a supervised run of its next ticket
+#                 (`continue #N from <sha>`, #214) do not stop it, unless
+#                 this loop already ran #N (--ran): a ticket continues once
+#                 per supervisor session
 #   behind        the upstream has commits the branch lacks, so the next
 #                 worker would start from an old commit
 #   count-reached --max N was given and N tickets of --ran ran: the count
@@ -25,7 +29,8 @@
 #   repeat        the step is /implement of a ticket this loop already ran
 #                 (--ran), which state.sh still recommends when its work
 #                 carries no `Closes #N` on the default branch
-# Otherwise prints `next implement #N`. The one-session-per-checkout check
+# Otherwise prints `next implement #N`, or `next continue #N from <sha>`
+# for a continuation the supervisor launches with launch.sh --continue. The one-session-per-checkout check
 # is launch.sh's, which the loop runs next. Writes nothing but the fetch.
 #
 # Run from the plugin cache (<plugin>/<version>/skills/supervise/scripts),
@@ -88,7 +93,7 @@ while [ $# -gt 0 ]; do
             printf 'Usage: next.sh --dir DIR [--ran "N M ..."] [--max N]\n'
             printf '               [--session ID [--session-dir DIR]] [--from FILE]\n'
             printf '       next.sh --max N   (only checks the count)\n'
-            printf 'Prints "next implement #N", or "stop <kind>: <detail>".\n'
+            printf 'Prints "next implement #N", "next continue #N from SHA", or "stop <kind>: <detail>".\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
@@ -116,6 +121,43 @@ if [ -f "$marker" ]; then
     halt "held: the checkout's marker still names worker $(head -n 1 "$marker"), so it is read-only; finish its stop first"
 fi
 
+SCRIPT_DIR=$HERE
+# The newest installed version beside this one, by number, when this script
+# runs from a version folder of the plugin cache. A folder the cache marked
+# .orphaned_at is no longer installed, so it counts only when it is this one.
+is_version() { printf '%s\n' "$1" | grep -qE '^[0-9]+[.][0-9]+[.][0-9]+$'; }
+scripts_line=""
+plugin_root=$(cd "$SCRIPT_DIR/../../.." && pwd)
+loaded=$(basename "$plugin_root")
+if is_version "$loaded"; then
+    newest=$({
+        printf '%s\n' "$loaded"
+        for d in "$plugin_root"/../*/skills/supervise/scripts/step.sh; do
+            [ -f "$d" ] || continue
+            version_dir=$(cd "$(dirname "$d")/../../.." && pwd)
+            [ ! -e "$version_dir/.orphaned_at" ] || continue
+            version=$(basename "$version_dir")
+            is_version "$version" && printf '%s\n' "$version"
+        done
+    } | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
+    SCRIPT_DIR=$(cd "$plugin_root/../$newest/skills/supervise/scripts" && pwd) ||
+        fail "could not read the scripts of version $newest beside $plugin_root"
+    scripts_line="scripts $newest $SCRIPT_DIR"
+    [ "$newest" = "$loaded" ] ||
+        scripts_line="$scripts_line (newer than the loaded $loaded; use it for the rest of the loop)"
+fi
+# The next step as step.sh reads it, read once.
+step=""
+read_step() {
+    [ -z "$step" ] || return 0
+    if [ -n "$FROM" ]; then
+        step=$(sh "$SCRIPT_DIR/step.sh" --from "$FROM" </dev/null) || fail "step.sh failed on $FROM"
+    else
+        step=$(sh "$SCRIPT_DIR/step.sh" "$DIR" </dev/null) || fail "step.sh failed in $DIR"
+    fi
+}
+ran_has() { for r in $(ran_list); do [ "$r" = "$1" ] && return 0; done; return 1; }
+
 status=$(git -C "$DIR" status --porcelain) || fail "git status failed in $DIR"
 dirty=$(printf '%s' "$status" | grep -c '^')
 [ "$dirty" -eq 0 ] || halt "not-landed: $(plural "$dirty" "uncommitted path") in $DIR"
@@ -133,7 +175,15 @@ up=$(git -C "$DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/nul
 counts=$(git -C "$DIR" rev-list --left-right --count "$up...HEAD") || fail "could not compare $branch with $up"
 behind=${counts%%[!0-9]*}
 ahead=${counts##*[!0-9]}
-[ "$ahead" -eq 0 ] || halt "not-landed: $(plural "$ahead" commit) on $branch not on $up"
+# Unpushed commits a supervised run of the next ticket accounts for are
+# that ticket's continuation, which the loop launches (#214).
+if [ "$ahead" -gt 0 ]; then
+    read_step
+    case $step in
+        "continue #"*) n=${step#continue #}; n=${n%% *}; ! ran_has "$n" ;;
+        *) false ;;
+    esac || halt "not-landed: $(plural "$ahead" commit) on $branch not on $up"
+fi
 [ "$behind" -eq 0 ] ||
     halt "behind: $branch is $(plural "$behind" commit) behind $up; the next ticket would start from an old commit"
 
@@ -170,43 +220,18 @@ if [ -n "$HAS_SESSION" ]; then
     fi
 fi
 
-SCRIPT_DIR=$HERE
-# The newest installed version beside this one, by number, when this script
-# runs from a version folder of the plugin cache. A folder the cache marked
-# .orphaned_at is no longer installed, so it counts only when it is this one.
-is_version() { printf '%s\n' "$1" | grep -qE '^[0-9]+[.][0-9]+[.][0-9]+$'; }
-scripts_line=""
-plugin_root=$(cd "$SCRIPT_DIR/../../.." && pwd)
-loaded=$(basename "$plugin_root")
-if is_version "$loaded"; then
-    newest=$({
-        printf '%s\n' "$loaded"
-        for d in "$plugin_root"/../*/skills/supervise/scripts/step.sh; do
-            [ -f "$d" ] || continue
-            version_dir=$(cd "$(dirname "$d")/../../.." && pwd)
-            [ ! -e "$version_dir/.orphaned_at" ] || continue
-            version=$(basename "$version_dir")
-            is_version "$version" && printf '%s\n' "$version"
-        done
-    } | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
-    SCRIPT_DIR=$(cd "$plugin_root/../$newest/skills/supervise/scripts" && pwd) ||
-        fail "could not read the scripts of version $newest beside $plugin_root"
-    scripts_line="scripts $newest $SCRIPT_DIR"
-    [ "$newest" = "$loaded" ] ||
-        scripts_line="$scripts_line (newer than the loaded $loaded; use it for the rest of the loop)"
-fi
-if [ -n "$FROM" ]; then
-    step=$(sh "$SCRIPT_DIR/step.sh" --from "$FROM" </dev/null) || fail "step.sh failed on $FROM"
-else
-    step=$(sh "$SCRIPT_DIR/step.sh" "$DIR" </dev/null) || fail "step.sh failed in $DIR"
-fi
+read_step
 case $step in
     "implement #"*)
         n=${step#implement #}
-        for r in $(ran_list); do
-            [ "$r" = "$n" ] &&
-                halt "repeat: #$n ran earlier in this loop and state.sh still recommends it; was its work committed with Closes #$n?"
-        done
+        ! ran_has "$n" ||
+            halt "repeat: #$n ran earlier in this loop and state.sh still recommends it; was its work committed with Closes #$n?"
+        [ -z "$scripts_line" ] || printf '%s\n' "$scripts_line"
+        echo "next $step" ;;
+    "continue #"*)
+        n=${step#continue #}; n=${n%% *}
+        ! ran_has "$n" ||
+            halt "repeat: #$n ran earlier in this loop and state.sh still offers to continue it"
         [ -z "$scripts_line" ] || printf '%s\n' "$scripts_line"
         echo "next $step" ;;
     "stop: next: 7 "*) halt "nothing-left: ${step#stop: }" ;;

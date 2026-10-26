@@ -74,6 +74,22 @@ line="next: 6 by hand: #30 t30"
 check "step: hand work" "stop: $line" "$(step "$line")"
 line="next: none known: the tracker was not read"
 check "step: tracker unread" "stop: $line" "$(step "$line")"
+# Unpushed commits a supervised run accounts for (#214): state.sh's
+# continue: line, read only when next: is refused.
+sha=0123456789abcdef0123456789abcdef01234567
+line="next: 1 work in flight: 1 unpushed commits, in motion #24 t24; next child #28 (ready-for-agent, /implement #28, $you): t28"
+printf 'branch: main\n%s\nsupervise: x\ncontinue: #28 from %s\n' "$line" "$sha" >"$work/state.txt"
+check "step: a run's unpushed commits continue it" "continue #28 from $sha" \
+    "$(sh "$scripts/step.sh" --from "$work/state.txt" </dev/null)"
+printf 'branch: main\n%s\n' "$line" >"$work/state.txt"
+check "step: unpushed commits no run accounts for stop" "stop: $line" \
+    "$(sh "$scripts/step.sh" --from "$work/state.txt" </dev/null)"
+printf 'branch: main\nnext: 2 /implement #52 (%s): #52 t52\ncontinue: #28 from %s\n' "$you" "$sha" >"$work/state.txt"
+check "step: an accepted next: comes first" "implement #52" \
+    "$(sh "$scripts/step.sh" --from "$work/state.txt" </dev/null)"
+printf 'branch: main\n%s\ncontinue: #28 from abc1234\n' "$line" >"$work/state.txt"
+check "step: a continue line without a full sha stops" "stop: $line" \
+    "$(sh "$scripts/step.sh" --from "$work/state.txt" </dev/null)"
 printf 'git: not a repository\n' >"$work/state.txt"
 check "step: no next: line" "stop: state.sh printed no next: line" \
     "$(sh "$scripts/step.sh" --from "$work/state.txt" </dev/null)"

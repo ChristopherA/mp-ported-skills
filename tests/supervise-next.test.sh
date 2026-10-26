@@ -88,6 +88,22 @@ g "$repo" commit -q --allow-empty -m "Unpushed"
 check "next: a commit not on the upstream" "stop not-landed: 1 commit on main not on origin/main
 exit 2" "$(next "$repo")"
 
+# Unpushed commits a supervised run of the next ticket accounts for (#214):
+# step.sh reads them as a continuation, and the loop launches it, once.
+sha=0123456789abcdef0123456789abcdef01234567
+contline="1 work in flight: 1 unpushed commits, in motion #24 t24; next child #28 (ready-for-agent, /implement #28, $you): t28"
+printf 'branch: main\nnext: %s\ncontinue: #28 from %s\n' "$contline" "$sha" >"$work/state.txt"
+check "next: unpushed commits a run accounts for continue it" "next continue #28 from $sha
+exit 0" "$(next "$repo")"
+check "next: a ticket continues once per loop" "stop not-landed: 1 commit on main not on origin/main
+exit 2" "$(next "$repo" --ran "28")"
+check "next: a continuation still stops at the count" "stop count-reached: 1 ticket ran, the most --loop 1 allows
+exit 2" "$(next "$repo" --ran "27" --max 1)"
+printf 'branch: main\nnext: %s\n' "$contline" >"$work/state.txt"
+check "next: unpushed commits no run accounts for" "stop not-landed: 1 commit on main not on origin/main
+exit 2" "$(next "$repo")"
+state "2 /implement #61 ($you): #61 t61"
+
 repo=$(new_repo dirty)
 echo x >"$repo/x.txt"
 check "next: an uncommitted path" "stop not-landed: 1 uncommitted path in $repo

@@ -458,7 +458,7 @@ gather() {
             in_motion="$in_motion; $(printf '%s' "$moving_rows" |
                 jq -r --argjson n "$n" '.[] | select(.n == $n) | "#\(.n) \(.t)"')$child"
         done
-            if [ -n "$in_motion" ]; then
+        if [ -n "$in_motion" ]; then
             inflight="$inflight, in motion ${in_motion#; }" inflight_rest="$inflight_rest, in motion ${in_motion#; }"
         fi
         # Case 2's ticket: the first ready one case 1 has not already named as
