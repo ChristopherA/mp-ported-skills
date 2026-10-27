@@ -104,6 +104,18 @@ for phrase in "run its steps 2 to 5 over \`origin/<default>..HEAD\`, its checked
     check "skill: push then implement: $phrase" yes \
         "$(if grep -qF -- "$phrase" "$scripts/../SKILL.md"; then echo yes; else echo no; fi)"
 done
+# Step 1's ticket read keeps only what the launch summary uses: the title and
+# the latest Agent Brief comment, or the body when there is none (#228).
+brief_jq=$(sed -n "s/.*gh issue view N --json title,body,comments --jq '\([^']*\)'.*/\1/p" "$scripts/../SKILL.md" | head -n 1)
+check "skill: ticket read has a --jq filter" yes "$(if [ -n "$brief_jq" ]; then echo yes; else echo no; fi)"
+check "skill: ticket read no longer reads every comment" no \
+    "$(if grep -qF 'read the ticket'\''s body and every comment' "$scripts/../SKILL.md"; then echo yes; else echo no; fi)"
+check "skill: ticket read takes the latest Agent Brief" '{"title":"t","brief":"## Agent Brief\nnew"}' \
+    "$(printf '%s' '{"title":"t","body":"b","comments":[{"body":"## Agent Brief\nold"},{"body":"## Agent Brief\nnew"},{"body":"a note"}]}' |
+        jq -c "$brief_jq")"
+check "skill: ticket read falls back to the body" '{"title":"t","brief":"b"}' \
+    "$(printf '%s' '{"title":"t","body":"b","comments":[{"body":"a note with ## Agent Brief inline"}]}' |
+        jq -c "$brief_jq")"
 printf 'branch: main\nnext: 2 /implement #52 (%s): #52 t52\ncontinue: #28 from %s\n' "$you" "$sha" >"$work/state.txt"
 check "step: an accepted next: comes first" "implement #52" \
     "$(sh "$scripts/step.sh" --from "$work/state.txt" </dev/null)"
