@@ -90,6 +90,8 @@ A check that output holds no blank line captures it with a sentinel, `out=$(cmd;
 
 A fix to a hook that refuses commands by reading their text, such as `deny-worker-grant-edits.sh`, is replayed against the version before it: run both on the same payloads, the review's and the test file's forms with quoted parens, nested subshells and clustered flags added, and treat any payload the old one refused and the new one allows as a regression. A fix that teaches the scan to skip text (arithmetic, a process substitution's body, a flag's value) opens a hole the tests written for the fix do not reach: in #173, the first review's fixes passed 240 checks while letting through `perl -0pi`, `tee >(echo ")") > <target>` and `((cd <rules>; python3 r.py) )`, all of which the version before refused.
 
+A fake that serves a fixture file fails a read through its own switch, as `comments-N.fail` does in `tests/resuming.test.sh`, not through a missing file. A statement after the `cat`, such as the `if` that serves a second page, sets the fake's exit status, so a missing file reads as an empty list that was read without error: in #222, checks meant for a failed comments read passed through the no-record path instead.
+
 A stub that stands in for a real command refuses what the real one refuses, with the same exit status, as the sweep stub in `tests/supervise-push.test.sh` exits 2 on an empty range. A stub that accepts every input passes a case the real command fails: `push.sh` swept a repo with nothing to push, the real sweep exited 2, and a live push was refused while its test, on a stub that took the empty range, passed (#179).
 
 ## Grant actions
