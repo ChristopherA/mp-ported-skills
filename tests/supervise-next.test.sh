@@ -102,6 +102,11 @@ exit 2" "$(next "$repo" --ran "27" --max 1)"
 printf 'branch: main\nnext: %s\n' "$contline" >"$work/state.txt"
 check "next: unpushed commits no run accounts for" "stop not-landed: 1 commit on main not on origin/main
 exit 2" "$(next "$repo")"
+# The push asked for before a loop's first launch (#223) is not asked between
+# tickets: such commits still stop the loop.
+printf 'branch: main\nnext: %s\npush: #28 after 1 unpushed commits; /supervise asks to push them with git push origin main before its first launch\n' "$contline" >"$work/state.txt"
+check "next: unpushed commits offered as a push still stop the loop" "stop not-landed: 1 commit on main not on origin/main
+exit 2" "$(next "$repo")"
 state "2 /implement #61 ($you): #61 t61"
 
 repo=$(new_repo dirty)

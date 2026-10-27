@@ -652,14 +652,17 @@ check "supervise: not offered in a linked worktree on the default branch" \
 g worktree remove --force "$real-wt"
 g checkout -q main
 g commit -q --allow-empty -m wip2
-check "supervise: not offered with unpushed commits" "not offered: 1 unpushed commits; push them first" "$(sup "$(run)")"
+check "supervise: offered with unpushed commits only, after a push" "$offer" "$(sup "$(run)")"
 # Unpushed commits a supervised run of the next ticket accounts for (#214):
 # its run record's outcome line names the run's start, and when the commits
 # after it are exactly the unpushed ones, the loop is offered and step.sh
 # reads a continue: line. Commits it does not account for still refuse, and
-# when they are the only refusal, a push-first: line names the push.
+# when they are the only refusal, the loop is offered and a push: line names
+# the push /supervise asks for before its first launch (#223).
 cont() { line_of "$1" continue; }
 pushfirst() { line_of "$1" push-first; }
+pushl() { line_of "$1" push; }
+push52="#52 after 1 unpushed commits; /supervise asks to push them with git push origin main before its first launch"
 unpushed1="not offered: 1 unpushed commits; push them first"
 pushed=$(g rev-parse origin/main)
 record() { # <ticket> <heading> <outcome>
@@ -670,30 +673,33 @@ record() { # <ticket> <heading> <outcome>
         >"$FAKE_GH/comments-$1.json"
 }
 out=$(run)
-check "unpushed only: push-first names the push, then the loop" "git push origin main; then $offer" "$(pushfirst "$out")"
+check "unpushed only: the loop offered" "$offer" "$(sup "$out")"
+check "unpushed only: a push line names the push" "$push52" "$(pushl "$out")"
+check "unpushed only: no push-first line" "" "$(pushfirst "$out")"
+check "unpushed only: the queue under the parent" "#52 #53" "$(queue "$out")"
 check "unpushed only: no continue line" "" "$(cont "$out")"
 check "unpushed only: next line unchanged" "1 work in flight: 1 unpushed commits, in motion #24 t24; next child #52 (ready-for-agent, /implement #52, you type it; user-invoked): t52" "$(next "$out")"
 # A read of the run records that fails is not a ticket no run accounts for
-# (#222): no push-first advice, since a read that worked might continue it.
+# (#222): no push offered, since a read that worked might continue it.
 unread52="not offered: the run records on #52 could not be read"
 : >"$FAKE_GH/comments-52.fail"
 out=$(run)
 check "unpushed, run records read fails: refused" "$unread52" "$(sup "$out")"
-check "unpushed, run records read fails: no push-first" "" "$(pushfirst "$out")"
+check "unpushed, run records read fails: no push line" "" "$(pushl "$out")"
 check "unpushed, run records read fails: no continue line" "" "$(cont "$out")"
 check "unpushed, run records read fails: the queue under the parent" "#52 #53" "$(queue "$out")"
 command rm -f "$FAKE_GH/comments-52.fail"
 printf 'not json' >"$FAKE_GH/comments-52.json"
 out=$(run)
 check "unpushed, run records merge fails: refused" "$unread52" "$(sup "$out")"
-check "unpushed, run records merge fails: no push-first" "" "$(pushfirst "$out")"
+check "unpushed, run records merge fails: no push line" "" "$(pushl "$out")"
 check "unpushed, run records merge fails: no continue line" "" "$(cont "$out")"
 command rm -f "$FAKE_GH/comments-52.json"
 record 52 'Supervised run of #52' "1 commit after $(g rev-parse --short "$pushed")"
 out=$(run)
 check "run accounts for the commits: the loop offered" "$offer" "$(sup "$out")"
 check "run accounts for the commits: continue from its full start" "#52 from $pushed" "$(cont "$out")"
-check "run accounts for the commits: no push-first" "" "$(pushfirst "$out")"
+check "run accounts for the commits: no push line" "" "$(pushl "$out")"
 check "run accounts for the commits: the queue under the parent" "#52 #53" "$(queue "$out")"
 check "run accounts for the commits: next line unchanged" "1 work in flight: 1 unpushed commits, in motion #24 t24; next child #52 (ready-for-agent, /implement #52, you type it; user-invoked): t52" "$(next "$out")"
 # A record on a later page counts; the newest record wins.
@@ -719,13 +725,13 @@ check "run accounts, queue of one, live session: continue line" "#52 from $pushe
 agents '[]'
 command rm -f "$FAKE_GH/comments-52.json"
 check "unpushed and a queue of one: unchanged" "$unpushed1" "$(sup "$(run)")"
-check "unpushed and a queue of one: no push-first" "" "$(pushfirst "$(run)")"
+check "unpushed and a queue of one: no push line" "" "$(pushl "$(run)")"
 # A read that worked might have found a run to continue, so the queue of one
 # does not stand when the read fails.
 : >"$FAKE_GH/comments-52.fail"
 out=$(run)
 check "queue of one, run records read fails: refused" "$unread52" "$(sup "$out")"
-check "queue of one, run records read fails: no push-first" "" "$(pushfirst "$out")"
+check "queue of one, run records read fails: no push line" "" "$(pushl "$out")"
 check "queue of one, run records read fails: no continue line" "" "$(cont "$out")"
 command rm -f "$FAKE_GH/comments-52.fail"
 kids "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)"
@@ -737,20 +743,25 @@ for bad in "Supervised run of #53|1 commit after $(g rev-parse --short "$pushed"
     what=${bad##*|} rest=${bad%|*}
     record 52 "${rest%%|*}" "${rest#*|}"
     out=$(run)
-    check "unpushed, $what: refused as before" "$unpushed1" "$(sup "$out")"
+    check "unpushed, $what: the loop offered after a push" "$offer" "$(sup "$out")"
     check "unpushed, $what: no continue line" "" "$(cont "$out")"
+    check "unpushed, $what: a push line" "$push52" "$(pushl "$out")"
 done
 # A newer hand run after the supervised one: refused.
 record 52 'Supervised run of #52' "1 commit after $(g rev-parse --short "$pushed")"
 jq -c '. + [{user: {login: "me"}, body: "## Hand run of #52\n\n- outcome: 1 commit after abc1234"}]' \
     "$FAKE_GH/comments-52.json" >"$work/c.json"
 command mv "$work/c.json" "$FAKE_GH/comments-52.json"
-check "unpushed, a newer hand run: refused" "$unpushed1" "$(sup "$(run)")"
+out=$(run)
+check "unpushed, a newer hand run: the loop offered after a push" "$offer" "$(sup "$out")"
+check "unpushed, a newer hand run: no continue line" "" "$(cont "$out")"
+check "unpushed, a newer hand run: a push line" "$push52" "$(pushl "$out")"
 record 52 'Supervised run of #52' "1 commit after $(g rev-parse --short "$pushed")"
 # A commit made after the record, outside its range.
 g commit -q --allow-empty -m stray
 out=$(run)
-check "unpushed, a stray commit: refused as before" "not offered: 2 unpushed commits; push them first" "$(sup "$out")"
+check "unpushed, a stray commit: the loop offered after a push" "$offer" "$(sup "$out")"
+check "unpushed, a stray commit: a push line counts both" "#52 after 2 unpushed commits; /supervise asks to push them with git push origin main before its first launch" "$(pushl "$out")"
 check "unpushed, a stray commit: no continue line" "" "$(cont "$out")"
 g reset -q --soft HEAD~1
 # With an open PR as well, nothing changes, record or not.
@@ -758,8 +769,15 @@ prs '[{"number":61,"title":"own pr","headRefName":"y","isCrossRepository":false}
 out=$(run)
 check "unpushed and an open PR: unchanged" "$unpushed1" "$(sup "$out")"
 check "unpushed and an open PR: no continue line" "" "$(cont "$out")"
-check "unpushed and an open PR: no push-first" "" "$(pushfirst "$out")"
+check "unpushed and an open PR: no push line" "" "$(pushl "$out")"
 prs '[]'
+# A live session in the folder as well: unchanged, with no push to ask for.
+command rm -f "$FAKE_GH/comments-52.json"
+agents "$(list "$(row ee55 working 14)")"
+out=$(run)
+check "unpushed and a live session: unchanged" "$unpushed1" "$(sup "$out")"
+check "unpushed and a live session: no push line" "" "$(pushl "$out")"
+agents '[]'
 # Case 2, no parent: the offer reads the case 2 ticket.
 command rm -f "$FAKE_GH/sub-24.json" "$FAKE_GH/comments-52.json"
 issues "$(list "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)")"
@@ -770,12 +788,13 @@ check "case 2, run accounts: the loop offered" "$offer" "$(sup "$out")"
 check "case 2, run accounts: continue line" "#52 from $pushed" "$(cont "$out")"
 command rm -f "$FAKE_GH/comments-52.json"
 out=$(run)
-check "case 2, unpushed only: refused" "$unpushed1" "$(sup "$out")"
-check "case 2, unpushed only: push-first" "git push origin main; then $offer" "$(pushfirst "$out")"
+check "case 2, unpushed only: the loop offered" "$offer" "$(sup "$out")"
+check "case 2, unpushed only: a push line" "$push52" "$(pushl "$out")"
+check "case 2, unpushed only: no push-first line" "" "$(pushfirst "$out")"
 : >"$FAKE_GH/comments-52.fail"
 out=$(run)
 check "case 2, run records read fails: refused" "$unread52" "$(sup "$out")"
-check "case 2, run records read fails: no push-first" "" "$(pushfirst "$out")"
+check "case 2, run records read fails: no push line" "" "$(pushl "$out")"
 check "case 2, run records read fails: next line unchanged" "1 work in flight: 1 unpushed commits" "$(next "$out")"
 command rm -f "$FAKE_GH/comments-52.fail"
 kids "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)"

@@ -84,6 +84,19 @@ check "step: a run's unpushed commits continue it" "continue #28 from $sha" \
 printf 'branch: main\n%s\n' "$line" >"$work/state.txt"
 check "step: unpushed commits no run accounts for stop" "stop: $line" \
     "$(sh "$scripts/step.sh" --from "$work/state.txt" </dev/null)"
+# Unpushed commits no run accounts for, when they are all that stops the
+# loop (#223): state.sh's push: line, which step.sh hands on as a push to
+# approve before the step.
+pushl="push: #28 after 1 unpushed commits; /supervise asks to push them with git push origin main before its first launch"
+printf 'branch: main\n%s\nsupervise: x\n%s\n' "$line" "$pushl" >"$work/state.txt"
+check "step: unpushed commits that are the only refusal: push, then the step" "push then implement #28" \
+    "$(sh "$scripts/step.sh" --from "$work/state.txt" </dev/null)"
+printf 'branch: main\n%s\nsupervise: x\ncontinue: #28 from %s\n%s\n' "$line" "$sha" "$pushl" >"$work/state.txt"
+check "step: a continue line comes before a push line" "continue #28 from $sha" \
+    "$(sh "$scripts/step.sh" --from "$work/state.txt" </dev/null)"
+printf 'branch: main\n%s\npush: #28 after some commits\n' "$line" >"$work/state.txt"
+check "step: a push line of another shape stops" "stop: $line" \
+    "$(sh "$scripts/step.sh" --from "$work/state.txt" </dev/null)"
 printf 'branch: main\nnext: 2 /implement #52 (%s): #52 t52\ncontinue: #28 from %s\n' "$you" "$sha" >"$work/state.txt"
 check "step: an accepted next: comes first" "implement #52" \
     "$(sh "$scripts/step.sh" --from "$work/state.txt" </dev/null)"

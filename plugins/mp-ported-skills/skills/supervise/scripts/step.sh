@@ -9,8 +9,11 @@
 # refused only because it carries unpushed commits that a supervised run of
 # the ticket accounts for, state.sh prints `continue: #N from <sha>`, and
 # step.sh prints `continue #N from <sha>`: the supervisor launches a
-# continuation from that start (#214). Otherwise prints `stop: ` and the
-# `next:` line, for the supervisor to report. A folder in a
+# continuation from that start (#214). When unpushed commits no run accounts
+# for are all that refuses it, state.sh prints `push: #N after ...`, and
+# step.sh prints `push then implement #N`: the supervisor asks the
+# maintainer to push them before it launches #N (#223). Otherwise prints
+# `stop: ` and the `next:` line, for the supervisor to report. A folder in a
 # linked git worktree stops first, with main-checkout.sh's reason in place of
 # the `next:` line. Writes nothing.
 #
@@ -30,7 +33,8 @@ case "${1:-}" in
         report=$(command cat "$2") ;;
     --help)
         printf 'Usage: step.sh DIR | step.sh --from FILE\n'
-        printf 'Prints "implement #N", "continue #N from SHA", or "stop: " and state.sh'\''s next: line.\n'
+        printf 'Prints "implement #N", "continue #N from SHA", "push then implement #N",\n'
+        printf 'or "stop: " and state.sh'\''s next: line.\n'
         exit 0 ;;
     '')
         printf 'Usage: step.sh DIR | step.sh --from FILE\n' >&2
@@ -53,10 +57,13 @@ fi
 # offer (#115).
 n=$(accept_step "$line")
 cont=$(printf '%s\n' "$report" | sed -n 's/^continue: \(#[0-9][0-9]* from [0-9a-f]\{40\}\)$/\1/p' | head -n 1)
+push=$(printf '%s\n' "$report" | sed -n 's/^push: #\([0-9][0-9]*\) after [0-9][0-9]* unpushed commits; .*/\1/p' | head -n 1)
 if [ -n "$n" ]; then
     echo "implement #$n"
 elif [ -n "$cont" ]; then
     echo "continue $cont"
+elif [ -n "$push" ]; then
+    echo "push then implement #$push"
 else
     echo "stop: next: $line"
 fi

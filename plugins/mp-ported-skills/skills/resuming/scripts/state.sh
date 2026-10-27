@@ -555,9 +555,11 @@ gather() {
     # reads the step as it would be without them (offer), and when a run
     # record on that ticket accounts for them exactly (run-start.sh), offers
     # the loop and prints `continue: #N from <start>`, which step.sh takes.
-    # When they are the only refusal and no run accounts for them, a
-    # `push-first:` line names the push and then the loop. Otherwise the
-    # lines are as they were: no queue: line, and the unpushed refusal.
+    # When they are the only refusal and no run accounts for them, the loop
+    # is offered all the same, and a `push:` line names the push /supervise
+    # asks the maintainer for before its first launch (#223), which step.sh
+    # hands on. Otherwise the lines are as they were: no queue: line, and the
+    # unpushed refusal.
     first=$(printf '%s' "$cases" | sed -n 1p)
     offer=$first
     if [ "$unpushed" -gt 0 ]; then
@@ -638,7 +640,7 @@ gather() {
     # continued ticket is worth a loop on its own, which goes on to whatever
     # is ready after it. With unpushed commits it waits on the run records
     # (lone): one that accounts for them lifts it, and none leaves the
-    # unpushed refusal, with no push-first advice.
+    # unpushed refusal, with no push: line: a lone ticket is /implement's.
     hard=$refusal lone=
     if [ -n "$refusal" ]; then :
     elif ! [ "$qlen" -ge 0 ] 2>/dev/null; then refusal="the queue could not be read"
@@ -662,10 +664,10 @@ gather() {
     loop="/mp-ported-skills:supervise $shown --loop --model claude-opus-5-5 --effort medium"
     # A read of the run records that fails is told apart from one that finds
     # no run (#222): a read that worked might have continued the ticket, so
-    # it gives no push-first advice. Its lines print as a continued run's
+    # it offers no push. Its lines print as a continued run's
     # would, and a refusal set before the read, which holds whatever it
     # finds, stands.
-    start= push_first= records_unread=
+    start= push= records_unread=
     if [ "$unpushed" -gt 0 ] && [ -z "$early" ]; then
         if [ -n "$hard" ]; then :
         elif ! comments=$(gh api "repos/{owner}/{repo}/issues/$step_n/comments?per_page=100" --paginate 2>/dev/null) ||
@@ -677,11 +679,11 @@ gather() {
         if [ -n "$records_unread" ]; then
             [ -n "$refusal" ] || refusal="the run records on #$step_n could not be read"
         elif [ -z "$start" ]; then
-            [ -n "$refusal$lone" ] || push_first=1
-            refusal="$unpushed unpushed commits; push them first"
+            if [ -n "$refusal$lone" ]; then refusal="$unpushed unpushed commits; push them first"
+            else push=1; fi
         fi
     fi
-    if [ "$unpushed" -gt 0 ] && [ -z "$start" ] && [ -z "$push_first" ] && [ -z "$records_unread" ]; then
+    if [ "$unpushed" -gt 0 ] && [ -z "$start" ] && [ -z "$push" ] && [ -z "$records_unread" ]; then
         [ -n "$impl" ] || return 0
     else
         [ -z "${qout:-}" ] || printf '%s\n' "$qout"
@@ -689,7 +691,8 @@ gather() {
     if [ -n "$refusal" ]; then echo "supervise: not offered: $refusal"
     else echo "supervise: $loop $you_type"; fi
     [ -z "$start" ] || echo "continue: #$step_n from $start"
-    [ -z "$push_first" ] || echo "push-first: git push origin $default; then $loop $you_type"
+    [ -z "$push" ] ||
+        echo "push: #$step_n after $unpushed unpushed commits; /supervise asks to push them with git push origin $default before its first launch"
 }
 
 # gather runs in the background so the watchdog can stop a hung `gh`. The EXIT
