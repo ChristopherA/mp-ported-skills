@@ -126,6 +126,8 @@ When copies of a rule merge into one helper, compare what each caller applies it
 
 Build a JSON value from a shell string with `jq -n --arg`, as `fixed_nums` in `resuming`'s `state.sh` does. `jq -R` on empty stdin prints nothing, so a later `--argjson` of that value fails, and a script that goes on after the failure reports empty results as if they were real.
 
+A jq regex that must match at the start of any line of a multi-line string, such as a heading inside an issue comment, puts `(?m)` inline: `test("(?m)^## Agent Brief")`. A `"m"` flag does not make `^` match after a newline, in jq or in the gojq that `gh --jq` runs, so a heading below a comment's first line is missed with exit 0. Give the fixture a line before the heading: #228's first filter passed checks whose fixtures all put it first.
+
 ## Checking a path is a repo
 
 To check that a path a file names is a repo of its own, compare `git -C <path> rev-parse --show-toplevel` with the path, resolved. `rev-parse --git-dir` succeeds in any folder inside a repo, so a plain folder there passes and the checks after it read the repo around it: `launch.sh` accepts such a folder as a Distribution repo (#167), and `state.sh` read the Project's own git as its Distribution repo's until #142's review.
