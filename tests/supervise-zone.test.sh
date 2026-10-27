@@ -141,12 +141,14 @@ compact point 106% of zone (80% of a 200k window)" "$out"
 check "compact: the default override with a 200k window exits 0" "0" "$rc"
 check "compact: no model is read as 200k, and says so" "note: the worker's model is not known, so the smallest context window, 200k, is used
 compact point 106% of zone (80% of a 200k window)" "$(compact '')"
-out=$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; compact claude-sonnet-5 2>&1 | grep -v '^note: ') ); rc=$?
+out=$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; compact claude-sonnet-5 2>&1 | grep -v '^note: ') )
 check "compact: a low override refuses, naming both points" "Error: the zone capture's force point, $force% of zone, plus the largest growth measured between two polls, ${margin}k tokens, reaches the worker's auto-compact point, 80% of zone (60% of a 200k window), so it could compact before the capture" "$out"
 (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; compact claude-sonnet-5 >/dev/null 2>&1); rc=$?
 check "compact: a refusal exits 1" "1" "$rc"
 check "compact: the same low override passes on a 1M window" "compact point 400% of zone (60% of a 1000k window)" \
     "$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; compact claude-opus-5-5) )"
+check "compact: an override with a leading zero is read as decimal" "compact point 400% of zone (60% of a 1000k window)" \
+    "$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=060; compact claude-opus-5-5) )"
 check "compact: a larger zone moves the force point" "1" \
     "$( (export MP_SMART_ZONE_K=220; compact claude-sonnet-5 >/dev/null 2>&1; echo $?) )"
 compact >/dev/null; check "compact: needs a value" "1" "$?"

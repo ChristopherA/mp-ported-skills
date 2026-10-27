@@ -65,7 +65,7 @@ set -u
 # (tests/supervise-zone.test.sh); --compact checks the running case.
 ZONE_CAPTURE=64
 # The reading from which a background task still running no longer holds
-# the capture, 8 points past ZONE_CAPTURE as before the measurement.
+# the capture, 8 points past ZONE_CAPTURE.
 ZONE_FORCE=72
 ZONE_MARGIN_K=50
 

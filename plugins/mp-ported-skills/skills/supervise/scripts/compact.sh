@@ -3,10 +3,17 @@
 #
 # compact_pct: prints CLAUDE_AUTOCOMPACT_PCT_OVERRIDE, the share of the
 # window at which Claude Code compacts, or its default, 80, when it is unset
-# or not a positive whole number.
+# or not a positive whole number. It reads the caller's environment. The
+# profile sets the override in its settings.json `env` block, which reaches
+# the supervisor's commands and the worker alike, since launch.sh starts the
+# worker under the same profile; an override set only in the supervisor's
+# shell does not reach a worker (launch.sh's header). Leading zeros are
+# dropped, since $(( )) reads 080 as octal.
 compact_pct() {
     compact_p=${CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:-80}
-    case $compact_p in '' | *[!0-9]* | 0) compact_p=80 ;; esac
+    case $compact_p in *[!0-9]*) compact_p=80 ;; esac
+    while [ "${compact_p#0}" != "$compact_p" ]; do compact_p=${compact_p#0}; done
+    [ -n "$compact_p" ] || compact_p=80
     printf '%s\n' "$compact_p"
 }
 
