@@ -706,6 +706,13 @@ check "run accounts, queue of one: continue line" "#52 from $pushed" "$(cont "$o
 command rm -f "$FAKE_GH/comments-52.json"
 check "unpushed and a queue of one: unchanged" "$unpushed1" "$(sup "$(run)")"
 check "unpushed and a queue of one: no push-first" "" "$(pushfirst "$(run)")"
+# A refusal that holds whatever the read finds stands when the read fails.
+: >"$FAKE_GH/comments-52.fail"
+out=$(run)
+check "queue of one, run records read fails: the queue refuses" "$(one 52)" "$(sup "$out")"
+check "queue of one, run records read fails: no push-first" "" "$(pushfirst "$out")"
+check "queue of one, run records read fails: no continue line" "" "$(cont "$out")"
+command rm -f "$FAKE_GH/comments-52.fail"
 kids "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)"
 for bad in "Supervised run of #53|1 commit after $(g rev-parse --short "$pushed")|another ticket's record" \
     "Hand run of #52|1 commit after $(g rev-parse --short "$pushed")|a hand run's record" \
