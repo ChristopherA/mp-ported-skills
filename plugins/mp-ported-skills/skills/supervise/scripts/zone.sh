@@ -31,8 +31,19 @@
 # The transcript is parsed line by line, so a last line still being written
 # is skipped rather than failing the read.
 #
+# With --compact MODEL, as watch.sh --zone runs it before its first poll,
+# it reads no transcript: it works out the auto-compact point of a session
+# on MODEL, in % of zone, from the model's context window and the override
+# in force (compact.sh), and prints
+#   compact point <N>% of zone (<P>% of a <W>k window)
+# or refuses, exit 1, when ZONE_FORCE plus ZONE_MARGIN_K reaches it: the
+# session could compact before a poll saw it due. A model whose window is
+# not known, or an empty MODEL, is read as the smallest window, 200k, with a
+# `note:` line on stderr saying so.
+#
 # Usage:
 #   zone.sh (--id ID | --session SESSION | --transcript FILE) [--due]
+#   zone.sh --compact MODEL
 #
 # --id reads the session from the job's state.json under $CLAUDE_CONFIG_DIR;
 # --session finds its transcript in any project folder, since a session that
@@ -45,18 +56,25 @@ set -u
 
 # The worker's zone reading, in % of zone, at which the supervisor captures
 # it and continues the ticket in a fresh session. It must be reached before
-# the session compacts: with CLAUDE_AUTOCOMPACT_PCT_OVERRIDE at 80, a 200k
-# window compacts at about 106% of zone, and one tool result between polls
-# can add up to Read's cap of 25k tokens, 17 points (tests/supervise-zone.test.sh).
-ZONE_CAPTURE=80
+# the session compacts, by more than a worker's context grows between two
+# polls: ZONE_MARGIN_K, the largest growth in 30 seconds measured in 107
+# worker transcripts, 49,990 tokens (docs/research/zone-poll-margin.md).
+# On a 200k window at CLAUDE_AUTOCOMPACT_PCT_OVERRIDE 80, the smallest a
+# worker runs on, the session compacts at 160k tokens, about 106% of zone,
+# so the force point plus the margin, 72% of 150k plus 50k, stays below it
+# (tests/supervise-zone.test.sh); --compact checks the running case.
+ZONE_CAPTURE=64
 # The reading from which a background task still running no longer holds
-# the capture. The same bound applies (tests/supervise-zone.test.sh).
-ZONE_FORCE=88
+# the capture, 8 points past ZONE_CAPTURE as before the measurement.
+ZONE_FORCE=72
+ZONE_MARGIN_K=50
 
 ID=""
 SESSION=""
 FILE=""
 DUE=""
+COMPACT=""
+HAS_COMPACT=""
 sources=0
 need_value() { [ $# -ge 2 ] || { printf 'Error: %s needs a value\n' "$1" >&2; exit 1; }; }
 while [ $# -gt 0 ]; do
@@ -65,17 +83,39 @@ while [ $# -gt 0 ]; do
         --session)    need_value "$@"; SESSION="$2"; sources=$((sources + 1)); shift 2 ;;
         --transcript) need_value "$@"; FILE="$2"; sources=$((sources + 1)); shift 2 ;;
         --due)        DUE=1; shift ;;
+        --compact)    need_value "$@"; COMPACT="$2"; HAS_COMPACT=1; shift 2 ;;
         --help)
             printf 'Usage: zone.sh (--id ID | --session SESSION | --transcript FILE) [--due]\n'
-            printf 'Prints "N%% of zone", then with --due "due" or "not due: <why>".\n'
+            printf '       zone.sh --compact MODEL\n'
+            printf 'Prints "N%% of zone", then with --due "due" or "not due: <why>";\n'
+            printf 'with --compact, "compact point N%% of zone (P%% of a Wk window)", or refuses.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
 done
 fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
-[ "$sources" -eq 1 ] || fail "give one of --id, --session or --transcript"
 zone_k=${MP_SMART_ZONE_K:-150}
 case $zone_k in '' | *[!0-9]* | 0) zone_k=150 ;; esac
+
+if [ -n "$HAS_COMPACT" ]; then
+    [ "$sources" -eq 0 ] && [ -z "$DUE" ] || fail "--compact reads no transcript; give it alone"
+    . "$(dirname -- "$0")/compact.sh"
+    pct=$(compact_pct)
+    if window_k=$(compact_window_k "$COMPACT"); then :
+    elif [ -z "$COMPACT" ]; then
+        printf "note: the worker's model is not known, so the smallest context window, %sk, is used\n" "$window_k" >&2
+    else
+        printf 'note: the context window of model %s is not known, so the smallest, %sk, is used\n' "$COMPACT" "$window_k" >&2
+    fi
+    point="$((window_k * pct / zone_k))% of zone ($pct% of a ${window_k}k window)"
+    # The force point's tokens plus the margin, against the window's share,
+    # each in tens of tokens.
+    [ $((ZONE_FORCE * zone_k + ZONE_MARGIN_K * 100)) -lt $((window_k * pct)) ] ||
+        fail "the zone capture's force point, $ZONE_FORCE% of zone, plus the largest growth measured between two polls, ${ZONE_MARGIN_K}k tokens, reaches the worker's auto-compact point, $point, so it could compact before the capture"
+    echo "compact point $point"
+    exit 0
+fi
+[ "$sources" -eq 1 ] || fail "give one of --id, --session or --transcript"
 
 if [ -n "$ID" ]; then
     [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the job is unknown"

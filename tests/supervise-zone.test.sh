@@ -107,20 +107,49 @@ zone --bogus >/dev/null; check "reading: an unknown option exits 1" "1" "$?"
 # The capture must fire before the session compacts. With the profile's
 # CLAUDE_AUTOCOMPACT_PCT_OVERRIDE of 80, a 200k-token window compacts at
 # 160k tokens, about 106% of a 150k zone; a 1M window at about 533%. Between
-# two polls a worker can add at least one tool result, and Read's cap of 25k
-# tokens is the largest a single one takes, so the threshold plus that one
-# result must stay under the smaller window's point.
+# two polls 30 seconds apart a worker's context grew by up to the margin
+# measured in docs/research/zone-poll-margin.md, so the force point plus
+# that margin must stay under the smaller window's point.
 threshold=$(sed -n 's/^ZONE_CAPTURE=\([0-9][0-9]*\).*/\1/p' "$scripts/zone.sh")
-check "threshold: set in zone.sh" "yes" "$([ -n "$threshold" ] && echo yes || echo no)"
-check "threshold: plus one Read result stays below a 200k window's auto-compact point" "yes" \
-    "$([ $((threshold * 150000 / 100 + 25000)) -lt $((200000 * 80 / 100)) ] && echo yes || echo no)"
 force=$(sed -n 's/^ZONE_FORCE=\([0-9][0-9]*\).*/\1/p' "$scripts/zone.sh")
+margin=$(sed -n 's/^ZONE_MARGIN_K=\([0-9][0-9]*\).*/\1/p' "$scripts/zone.sh")
+note="$root/docs/research/zone-poll-margin.md"
+measured=$(sed -n 's/^- Largest growth in 30 seconds: \([0-9][0-9]*\) tokens.*/\1/p' "$note" 2>/dev/null)
+check "threshold: set in zone.sh" "yes" "$([ -n "$threshold" ] && echo yes || echo no)"
 check "threshold: the force point, set in zone.sh, is past the threshold" "yes" \
     "$([ -n "$force" ] && [ "$force" -gt "$threshold" ] && echo yes || echo no)"
-check "threshold: the force point plus one Read result stays below that point" "yes" \
-    "$([ $((force * 150000 / 100 + 25000)) -lt $((200000 * 80 / 100)) ] && echo yes || echo no)"
+check "threshold: the margin is the research note's measurement, rounded up to 1k" "yes" \
+    "$([ -n "$margin" ] && [ -n "$measured" ] && [ $((margin * 1000)) -ge "$measured" ] &&
+        [ $((margin * 1000 - 1000)) -lt "$measured" ] && echo yes || echo "no (margin $margin, measured $measured)")"
+check "threshold: plus the margin stays below a 200k window's auto-compact point" "yes" \
+    "$([ $((threshold * 150000 / 100 + margin * 1000)) -lt $((200000 * 80 / 100)) ] && echo yes || echo no)"
+check "threshold: the force point plus the margin stays below that point" "yes" \
+    "$([ $((force * 150000 / 100 + margin * 1000)) -lt $((200000 * 80 / 100)) ] && echo yes || echo no)"
 check "threshold: zone.sh names it in its not-due line" "not due: below $threshold% of zone" \
     "$(zone --transcript "$hand" --due | sed -n 2p)"
+
+# --- the auto-compact point, against the force point ---------------------------
+compact() { zone --compact "$@"; }
+out=$(compact claude-opus-5-5); rc=$?
+check "compact: a 1M model passes" "compact point 533% of zone (80% of a 1000k window)" "$out"
+check "compact: a 1M model exits 0" "0" "$rc"
+check "compact: a [1m] model id is a 1M window" "compact point 533% of zone (80% of a 1000k window)" \
+    "$(compact 'claude-sonnet-5[1m]')"
+out=$(compact claude-sonnet-5); rc=$?
+check "compact: an unknown window is read as 200k, and says so" "note: the context window of model claude-sonnet-5 is not known, so the smallest, 200k, is used
+compact point 106% of zone (80% of a 200k window)" "$out"
+check "compact: the default override with a 200k window exits 0" "0" "$rc"
+check "compact: no model is read as 200k, and says so" "note: the worker's model is not known, so the smallest context window, 200k, is used
+compact point 106% of zone (80% of a 200k window)" "$(compact '')"
+out=$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; compact claude-sonnet-5 2>&1 | grep -v '^note: ') ); rc=$?
+check "compact: a low override refuses, naming both points" "Error: the zone capture's force point, $force% of zone, plus the largest growth measured between two polls, ${margin}k tokens, reaches the worker's auto-compact point, 80% of zone (60% of a 200k window), so it could compact before the capture" "$out"
+(export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; compact claude-sonnet-5 >/dev/null 2>&1); rc=$?
+check "compact: a refusal exits 1" "1" "$rc"
+check "compact: the same low override passes on a 1M window" "compact point 400% of zone (60% of a 1000k window)" \
+    "$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; compact claude-opus-5-5) )"
+check "compact: a larger zone moves the force point" "1" \
+    "$( (export MP_SMART_ZONE_K=220; compact claude-sonnet-5 >/dev/null 2>&1; echo $?) )"
+compact >/dev/null; check "compact: needs a value" "1" "$?"
 
 # --- due, at a safe point ----------------------------------------------------
 # call <tokens> <tool_use id or empty> -- a main-chain call row
@@ -141,51 +170,51 @@ notified() { # <task id> -- a task-notification prompt row
 }
 due() { zone --transcript "$work/t.jsonl" --due; }
 
-{ call 60000 a; result a; call 120000 b; result b; } >"$work/t.jsonl"
+{ call 60000 a; result a; call 96000 b; result b; } >"$work/t.jsonl"
 out=$(due); rc=$?
-check "due: at 80% with every call answered" "80% of zone
+check "due: at 64% with every call answered" "64% of zone
 due" "$out"
 check "due: exit 0" "0" "$rc"
 
-{ call 60000 a; result a; call 118500 b; result b; } >"$work/t.jsonl"
+{ call 60000 a; result a; call 94500 b; result b; } >"$work/t.jsonl"
 out=$(due); rc=$?
-check "due: below the threshold is not due" "79% of zone
-not due: below 80% of zone" "$out"
+check "due: below the threshold is not due" "63% of zone
+not due: below 64% of zone" "$out"
 check "due: not due exits 2" "2" "$rc"
 
-{ call 60000 a; result a; call 130000 b; } >"$work/t.jsonl"
-check "due: a tool call still running is not a safe point" "86% of zone
+{ call 60000 a; result a; call 102000 b; } >"$work/t.jsonl"
+check "due: a tool call still running is not a safe point" "68% of zone
 not due: a tool call is running" "$(due)"
 
-{ call 60000 a; call 130000 b; result b; } >"$work/t.jsonl"
-check "due: an earlier call with no result is still running" "86% of zone
+{ call 60000 a; call 102000 b; result b; } >"$work/t.jsonl"
+check "due: an earlier call with no result is still running" "68% of zone
 not due: a tool call is running" "$(due)"
 
 # The recorded mid-turn fixture keeps no ids; its last row is a tool_use.
-jq -c 'if .type == "assistant" then .message.usage = {input_tokens: 2, cache_read_input_tokens: 129998,
+jq -c 'if .type == "assistant" then .message.usage = {input_tokens: 2, cache_read_input_tokens: 101998,
         cache_creation_input_tokens: 0, output_tokens: 1} else . end' \
     "$transcripts/mid-turn.jsonl" >"$work/t.jsonl"
-check "due: a last row that calls a tool, with no ids" "86% of zone
+check "due: a last row that calls a tool, with no ids" "68% of zone
 not due: a tool call is running" "$(due)"
 
-{ call 60000 a; result a '{"backgroundTaskId":"bbij1","stdout":""}'; call 130000 b; result b; } >"$work/t.jsonl"
-check "due: a background command still running" "86% of zone
+{ call 60000 a; result a '{"backgroundTaskId":"bbij1","stdout":""}'; call 102000 b; result b; } >"$work/t.jsonl"
+check "due: a background command still running" "68% of zone
 not due: background task bbij1 is running" "$(due)"
 # A tool's output that quotes a notification's tag does not end the task.
 jq -cn '{type: "user", isSidechain: false, message: {role: "user",
     content: [{type: "tool_result", tool_use_id: "q", content: "<task-id>bbij1</task-id>"}]}}' >>"$work/t.jsonl"
-check "due: a quoted task tag does not end the task" "86% of zone
+check "due: a quoted task tag does not end the task" "68% of zone
 not due: background task bbij1 is running" "$(due)"
 notified bbij1 >>"$work/t.jsonl"
-check "due: a background command that ended" "86% of zone
+check "due: a background command that ended" "68% of zone
 due" "$(due)"
 
-{ call 60000 a; result a '{"isAsync":true,"status":"async_launched","agentId":"aa30"}'; call 130000 b; result b; } >"$work/t.jsonl"
-check "due: an async agent still running" "86% of zone
+{ call 60000 a; result a '{"isAsync":true,"status":"async_launched","agentId":"aa30"}'; call 102000 b; result b; } >"$work/t.jsonl"
+check "due: an async agent still running" "68% of zone
 not due: background task aa30 is running" "$(due)"
 jq -cn '{type: "queue-operation", operation: "enqueue",
     content: "<task-notification>\n<task-id>aa30</task-id>\n<status>completed</status>\n</task-notification>"}' >>"$work/t.jsonl"
-check "due: an async agent whose report is queued" "86% of zone
+check "due: an async agent whose report is queued" "68% of zone
 due" "$(due)"
 
 # From the force point, a background task no longer holds the capture; a
@@ -203,16 +232,16 @@ check "due: a running tool call holds at any reading" "106% of zone
 not due: a tool call is running" "$(due)"
 
 # A last line still being written is skipped.
-{ call 60000 a; result a; call 130000 b; result b; printf '{"type":"assistant","mess'; } >"$work/t.jsonl"
-check "due: a half-written last line is skipped" "86% of zone
+{ call 60000 a; result a; call 102000 b; result b; printf '{"type":"assistant","mess'; } >"$work/t.jsonl"
+check "due: a half-written last line is skipped" "68% of zone
 due" "$(due)"
 
 # A subagent's own pending call, on a sidechain row, is the Agent call's,
 # which is already counted on the main chain.
-{ call 60000 a; result a; call 130000 b; result b
+{ call 60000 a; result a; call 102000 b; result b
   jq -cn '{type: "assistant", isSidechain: true, message: {role: "assistant",
       content: [{type: "tool_use", id: "sub1", name: "Read"}]}}'; } >"$work/t.jsonl"
-check "due: a sidechain call does not hold it" "86% of zone
+check "due: a sidechain call does not hold it" "68% of zone
 due" "$(due)"
 
 : >"$work/t.jsonl"
@@ -226,16 +255,41 @@ check "due: no reading exits 2" "2" "$rc"
 wsid=c2a368ee-c513-484c-83d3-581830e209a5
 put() { command rm -rf "$cfg/projects"; mkdir -p "$cfg/projects/-work-project"; command cp "$work/t.jsonl" "$cfg/projects/-work-project/$wsid.jsonl"; }
 watch() { sh "$scripts/watch.sh" --id c2a368ee --file "$fixtures/working-busy.json" "$@" </dev/null 2>&1; }
+# The job's flags name the worker's model, as launch.sh launches it.
+job() { # <model or empty>
+    jq -cn --arg s "$wsid" --arg m "$1" '{sessionId: $s,
+        respawnFlags: (["--permission-mode", "auto"] + (if $m == "" then [] else ["--model", $m] end))}' \
+        >"$cfg/jobs/c2a368ee/state.json"
+}
 
-{ call 60000 a; result a; call 130000 b; result b; } >"$work/t.jsonl"; put
+{ call 60000 a; result a; call 90000 b; result b; } >"$work/t.jsonl"; put
+job claude-sonnet-5
+out=$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; watch --zone) ); rc=$?
+check "watch --zone: a low override refuses before the watch, naming both points" "Error: the zone capture's force point, $force% of zone, plus the largest growth measured between two polls, ${margin}k tokens, reaches the worker's auto-compact point, 80% of zone (60% of a 200k window), so it could compact before the capture" \
+    "$(printf '%s\n' "$out" | grep -v '^note: ')"
+check "watch --zone: a refusal exits 1" "1" "$rc"
+check "watch: without --zone, the override is not checked" "working
+cwd /work/project" "$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; watch) )"
+check "watch --zone: an unknown window says so, and watches on" "note: the context window of model claude-sonnet-5 is not known, so the smallest, 200k, is used
+working
+cwd /work/project" "$(watch --zone)"
+job ""
+check "watch --zone: a job naming no model says so, and watches on" "note: the worker's model is not known, so the smallest context window, 200k, is used
+working
+cwd /work/project" "$(watch --zone)"
+job claude-opus-5-5
+check "watch --zone: the low override passes on a 1M model" "working
+cwd /work/project" "$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; watch --zone) )"
+
+{ call 60000 a; result a; call 102000 b; result b; } >"$work/t.jsonl"; put
 check "watch --zone: due returns capture-due, with the reading" "capture-due
 cwd /work/project
-reading 86% of zone
+reading 68% of zone
 due" "$(watch --zone)"
 check "watch: without --zone, still working" "working
 cwd /work/project" "$(watch)"
 
-{ call 60000 a; result a; call 130000 b; } >"$work/t.jsonl"; put
+{ call 60000 a; result a; call 102000 b; } >"$work/t.jsonl"; put
 check "watch --zone: not at a safe point, still working" "working
 cwd /work/project" "$(watch --zone)"
 
@@ -248,9 +302,11 @@ check "watch --zone: no transcript, still working" "working
 cwd /work/project" "$(watch --zone)"
 
 # A done worker is not capture-due: its settled capture follows the report.
-{ call 60000 a; result a; call 130000 b; result b; } >"$work/t.jsonl"
+{ call 60000 a; result a; call 102000 b; result b; } >"$work/t.jsonl"
 command rm -rf "$cfg/projects"; mkdir -p "$cfg/projects/-work-project"
 command cp "$work/t.jsonl" "$cfg/projects/-work-project/9121ff49-5e25-43f0-bf48-307db0776c36.jsonl"
+mkdir -p "$cfg/jobs/9121ff49"
+printf '{"respawnFlags":["--model","claude-opus-5-5"]}\n' >"$cfg/jobs/9121ff49/state.json"
 check "watch --zone: a done worker stays done" "done
 cwd /work/project" \
     "$(sh "$scripts/watch.sh" --id 9121ff49 --zone --file "$fixtures/done.json" </dev/null 2>&1)"

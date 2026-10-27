@@ -65,12 +65,14 @@ set -u
 # The supervisor's zone reading, in % of zone, at which the loop starts no
 # more tickets (#193). The wrap-up (loop summary, capture) runs past the
 # zone: in the #141 to #143 loop each ticket added 6 to 10 points. It must
-# stay below the auto-compact point of the smallest window, 106% of zone
-# for 200k tokens at 80% (tests/supervise-next.test.sh).
+# stay below the auto-compact point of the smallest window: for 200k tokens
+# at 80%, 106% of zone (tests/supervise-next.test.sh). A larger window
+# compacts later, at 533% of zone for 1M tokens.
 ZONE_STOP=100
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/marker.sh"
+. "$HERE/compact.sh"
 DIR=""
 SESSION=""
 HAS_SESSION=""
@@ -206,8 +208,7 @@ if [ -n "$HAS_SESSION" ]; then
     elif [ -z "$pct" ] || [ -z "$left" ]; then
         printf 'note: no zone reading for session %s in %s, so the loop goes on without its zone stop\n' "$sid" "$sdir" >&2
     else
-        compact=${CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:-80}
-        case $compact in '' | *[!0-9]* | 0) compact=80 ;; esac
+        compact=$(compact_pct)
         # Both shares are whole numbers rounded down, so the window is known
         # only to a range; refuse only when the stop is at or above the
         # highest auto-compact point the reading allows. Early in a session

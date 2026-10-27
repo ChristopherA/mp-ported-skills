@@ -208,6 +208,16 @@ case $AFTER in *[!0-9]*) fail "--after needs epoch seconds, not '$AFTER'" ;; esa
 # claude agents and the job's state.json both follow the config dir, so an
 # unset one would read another profile's sessions.
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the profile being watched is unknown"
+# With --zone, the capture must come before the worker compacts: zone.sh
+# --compact refuses a force point at or past the auto-compact point of the
+# model the job's flags name (#181), before the first poll.
+if [ -n "$ZONE" ]; then
+    job="$CLAUDE_CONFIG_DIR/jobs/$ID/state.json"
+    model=""
+    [ ! -f "$job" ] || model=$(jq -r '(.respawnFlags // []) as $f | ($f | index("--model")) as $i
+        | if $i == null then empty else $f[$i + 1] // empty end' "$job" 2>/dev/null)
+    sh "$(dirname -- "$0")/zone.sh" --compact "$model" </dev/null >/dev/null || exit 1
+fi
 if [ -n "$SINCE" ]; then
     [ -n "$DIR" ] || fail "--since needs --dir"
     [ -f "$SINCE" ] || fail "no such snapshot: $SINCE"
