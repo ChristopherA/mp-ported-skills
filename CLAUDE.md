@@ -110,6 +110,8 @@ Code that more than one `supervise` script needs goes in a sourced helper beside
 
 A script that starts sourcing a helper breaks every test that copies the script alone into a scratch folder, as tests do to stub a script beside it: the copy finds no helper and exits before it runs. When a script gains a helper, `rg -n 'cp .*<script>' tests` and copy the helper too, as `tests/supervise-record.test.sh` copies `park.sh` with `record.sh`. In #158, three `actions.sh` stub checks failed only after `record.sh` began sourcing `park.sh`.
 
+A script that starts parsing a line another script writes, as `run-start.sh` reads the `- outcome:` line `record.sh` writes, searches the open tickets for a change to that line (`gh issue list --state open --search '<writer script>'`) and comments on each match with the pattern it now must keep matching. A reshaped line silently turns the reader's match into no match: #216 was open to change the outcome line while #214 built its reader, and only the capture's ticket sweep found it.
+
 When copies of a rule merge into one helper, compare what each caller applies it to as well as the rule itself. A copy can match the rule exactly and still check less: `state.sh`'s `supervise:` offer checked for live sessions only in the Project folder, while `launch.sh` also checked the Distribution repo, so the offer could name a launch `launch.sh` refused (#115's review).
 
 ## jq in scripts
