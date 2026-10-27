@@ -30,7 +30,7 @@ Sessions measured, all Opus 5.5 at medium, 150k zone:
 
 ## Fixed load by source (#228)
 
-What a supervisor holds at its first call, by source, measured as `docs/research/worker-fixed-load.md` measured a worker. The 2026-10-26 loop's supervisor (68550ae8, Claude Code 2.1.311, plugin 0.8.10x) read **94,106** at its first call, the `/mp-ported-skills:supervise` prompt itself. Its request, read from the transcript's recorded request rows, held the system prompt (13.2 KB), 17 tools (78.5 KB, `Artifact` 37.0 KB of it), the instructions block (103.8 KB), the skill text (51.2 KB) and an environment and listing block (22.7 KB).
+What a supervisor holds at its first call, by source, measured as `docs/research/worker-fixed-load.md` measured a worker. The 2026-10-26 loop's supervisor (68550ae8, Claude Code 2.1.311, plugin 0.8.106) read **94,106** at its first call, the `/mp-ported-skills:supervise` prompt itself. Its request, read from the transcript's recorded request rows, held the system prompt (13.2 KB), 17 tools (78.5 KB, `Artifact` 37.0 KB of it), the instructions block (103.8 KB), the skill text (51.2 KB) and an environment and listing block (22.7 KB).
 
 Each probe was a `claude --bg` session in this checkout under this profile (`--model claude-opus-5-5 --effort medium`, `--permission-mode auto`, `--settings '{"worktree":{"bgIsolation":"none"}}'`, `--disallowedTools EnterWorktree`), on the prompt "Reply with the single word OK.", stopped and removed after its first call. Claude Code 2.1.311, 2026-10-27. `EnterWorktree` is denied in every probe because an interactive supervisor in the main checkout does not load it; without the deny the probe read 77,398, so it costs 2,238. A background session also carries a background-session section (1.1 KB) the supervisor does not.
 
@@ -43,7 +43,7 @@ The base read **75,161** and 75,158.
 | - this repo's `CLAUDE.md` (26.4 KB) | `claudeMdExcludes` | 9,168 (matched; 8,199 first) |
 | - the profile's `CLAUDE.md` (3.1 KB) | `claudeMdExcludes` | 1,244 |
 | - the Hub's `CLAUDE.md` (1.0 KB) | `claudeMdExcludes` | 419 |
-| - the rest, by difference | | 1,778 read, about 0 matched (below) |
+| - the rest, by difference | | 1,778 read, none once matched (below) |
 | The `Artifact` tool | `--disallowedTools` | 12,188 |
 | `Workflow` | `--disallowedTools` | 1,979 |
 | Claude in Chrome | `--no-chrome` | 1,639 |
@@ -52,7 +52,7 @@ The base read **75,161** and 75,158.
 | `ScheduleWakeup` | `--disallowedTools` | 1,696 (twice, matched) |
 | All six unused tools at once | all of the above | 20,636 |
 
-The environment and listing block, the system-role message after the prompt, varied between probes with the same flags: 20,218 bytes in some and 21,943 to 22,416 in others, likely the `cloudflare` MCP server's connection state at the first call. Two bases with the same flags read 75,307 at 20,218 bytes and 76,151 at 22,208, so its swing is worth up to 844 tokens (2.36 bytes a token). A reading is good only against a base whose block has the same size, so the `SendFeedback`, `ScheduleWakeup`, rules and repo `CLAUDE.md` probes were run again in matched pairs (by then this repo's `CLAUDE.md` had grown 495 bytes, so the instructions block was 105,617 bytes):
+The environment and listing block, the system-role message after the prompt, varied between probes with the same flags: 20,218 bytes in some and 21,943 to 22,416 in others, with the `cloudflare` MCP server's connection state at the first call the suspected cause, not confirmed. Two bases with the same flags read 75,307 at 20,218 bytes and 76,151 at 22,208, so its swing is worth up to 844 tokens (2.36 bytes a token). A reading is good only against a base whose block has the same size, so the `SendFeedback`, `ScheduleWakeup`, rules and repo `CLAUDE.md` probes were run again in matched pairs (by then this repo's `CLAUDE.md` had grown 495 bytes, so the instructions block was 105,617 bytes):
 
 | Probe | Block | Base | Removed |
 |---|---|---|---|
@@ -63,19 +63,18 @@ The environment and listing block, the system-role message after the prompt, var
 
 The first readings of these four (1,113, 872, 24,663 and 8,199) each ran with a larger block than their base, which hid 600 to 950 tokens of the removal. Matched, the four instruction sources add to 25,618 + 9,168 + 1,244 + 419 = 36,449, against 36,303 for all of them at once plus about 170 for the 495 bytes since: the 1,778 was the block's swing, not a source no exclude reaches. The removed bytes agree: 73,257 + 26,224 + 3,282 + 1,113 = 103,876, exactly what the all-instructions exclude removed. Matched, the six tools add to 12,188 + 1,979 + 1,956 + 1,696 + 1,639 + 1,074 = 20,532, against 20,636 together.
 
-
-`supervise`'s text, counted from its text: a probe in plan mode (so it could not act on the text) whose prompt carried the file as data, against the same prompt without it (77,631).
+`supervise`'s text was counted, not loaded as a skill: a probe in plan mode (so it could not act on the text) carried the file as data in its prompt, and was read against the same prompt without it (77,631).
 
 | Text | Bytes | Tokens |
 |---|---|---|
 | `SKILL.md` at 0.8.109 | 48,747 | 16,310 |
 | `loop.md` at 0.8.109 | 11,606 | 4,085 |
 
-The `SKILL.md` probe's environment block was 1,750 bytes smaller than its base's, so its 16,310 is about 740 short: `SKILL.md` is near 17.0k, 2.9 bytes a token of its text (2.88 of the request's escaped text), not the 13k #228 assumed. `loop.md`'s probe had the same block as the `SKILL.md` one.
+The `SKILL.md` probe's environment block was 1,750 bytes smaller than its base's, so its 16,310 is about 740 short: `SKILL.md` is near 17.0k, 2.9 bytes a token of its text (2.88 of the request's escaped text), not the 13k #228 assumed. `loop.md`'s 4,085 is the probe with both files (98,026) less the one with `SKILL.md` alone (93,941), whose blocks were the same size (25,526 bytes), so it needs no such correction.
 
 ### The supervisor's first call, accounted for
 
-Supervisor 68550ae8's first call against base-a (75,161), part by part, in bytes from the request rows, converted at the ratio measured for that kind of text:
+Supervisor 68550ae8's first call against the base (75,161), part by part, in bytes from the request rows, converted at the ratio measured for that kind of text:
 
 | Part | Bytes, supervisor vs base | Tokens |
 |---|---|---|
@@ -89,7 +88,7 @@ Supervisor 68550ae8's first call against base-a (75,161), part by part, in bytes
 | Read | | 94,106 |
 | Unexplained | | 246 |
 
-By source, then, the supervisor's 94.1k is: instructions 35.8k (profile rules 25.6k, this repo's `CLAUDE.md` 9.2k, the profile's `CLAUDE.md` 1.2k, the Hub's 0.4k, less the 0.5k they have grown since); the six unused tools 20.6k (`Artifact` 12.2k); `supervise`'s `SKILL.md` 17.8k; the system prompt, the core tools and the environment and listing block 19.3k; the session's command messages 0.7k; and 0.2k unexplained. A loop adds `loop.md`'s 4.1k when it reads it.
+By source, then, the supervisor's 94.1k is: instructions 35.8k (36.3k removed at once, less the 0.5k they have grown since; alone, the profile rules read 25.6k, this repo's `CLAUDE.md` 9.2k, the profile's `CLAUDE.md` 1.2k and the Hub's 0.4k); the six unused tools 20.6k (`Artifact` 12.2k); `supervise`'s `SKILL.md` 17.8k; the system prompt, the core tools and the environment and listing block 18.9k (less the background-session section); the session's command messages 0.7k; and 0.2k unexplained. A loop adds `loop.md`'s 4.1k when it reads it.
 
 ### Step 1's ticket read
 
