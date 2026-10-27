@@ -28,6 +28,45 @@ Sessions measured, all Opus 5.5 at medium, 150k zone:
 
 `SKILL.md` costs about 2.6 to 2.7 bytes a token. At 0.8.79 it is 38,053 bytes (about 14k tokens) after #135's split, and a loop also reads `loop.md`, 8,639 bytes (about 3k), so a loop starts near 69k + 17k = 86k, 57% of zone, before its first step. `zone-capture.md`, `push-on-approval.md`, `post-on-approval.md` and the other split-out files add 1k to 2k each when reached.
 
+## Fixed load by source (#228)
+
+What a supervisor holds at its first call, by source, measured as `docs/research/worker-fixed-load.md` measured a worker. The 2026-10-26 loop's supervisor (68550ae8, Claude Code 2.1.311, plugin 0.8.10x) read **94,106** at its first call, the `/mp-ported-skills:supervise` prompt itself. Its request, read from the transcript's recorded request rows, held the system prompt (13.2 KB), 17 tools (78.5 KB, `Artifact` 37.0 KB of it), the instructions block (103.8 KB), the skill text (51.2 KB) and an environment and listing block (22.7 KB).
+
+Each probe was a `claude --bg` session in this checkout under this profile (`--model claude-opus-5-5 --effort medium`, `--permission-mode auto`, `--settings '{"worktree":{"bgIsolation":"none"}}'`, `--disallowedTools EnterWorktree`), on the prompt "Reply with the single word OK.", stopped and removed after its first call. Claude Code 2.1.311, 2026-10-27. `EnterWorktree` is denied in every probe because an interactive supervisor in the main checkout does not load it; without the deny the probe read 77,398, so it costs 2,238. A background session also carries a background-session section (1.1 KB) the supervisor does not.
+
+The base read **75,161** and 75,158.
+
+| Source | How it was removed | Tokens |
+|---|---|---|
+| Profile and Project instructions, all of them (103.9 KB) | `claudeMdExcludes` on every `CLAUDE.md` and rule | 36,303 |
+| - the profile's rules (23 files, 76.3 KB) | `claudeMdExcludes` on `rules/**` | 24,663 |
+| - this repo's `CLAUDE.md` (25.9 KB) | `claudeMdExcludes` | 8,199 |
+| - the profile's `CLAUDE.md` (3.1 KB) | `claudeMdExcludes` | 1,244 |
+| - the Hub's `CLAUDE.md` (1.0 KB) | `claudeMdExcludes` | 419 |
+| - not removed by any one exclude (rest of the 36,303) | by difference | 1,778 |
+| The `Artifact` tool | `--disallowedTools` | 12,188 |
+| `Workflow` | `--disallowedTools` | 1,979 |
+| Claude in Chrome | `--no-chrome` | 1,639 |
+| The `cloudflare` plugin | `enabledPlugins` off in `--settings` | 1,074 |
+| `SendFeedback` | `--disallowedTools` | 1,113, unconfirmed |
+| `ScheduleWakeup` | `--disallowedTools` | 872, unconfirmed |
+| All six unused tools at once | all of the above | 20,636 |
+
+The six one-at-a-time readings add to 18,865, 1,771 short of the 20,636 they read together. The environment and listing block varied by up to 2.2 KB between probes with the same flags (20,218 to 22,416 bytes), likely the `cloudflare` MCP server's connection state at the first call, so a single reading under about 600 tokens of change is noise. `SendFeedback` (5.6 KB of tool text) and `ScheduleWakeup` (4.8 KB) read lower than their bytes suggest beside `Workflow` (5.5 KB, 1,979), and need a second probe each.
+
+`supervise`'s text, counted from its text: a probe in plan mode (so it could not act on the text) whose prompt carried the file as data, against the same prompt without it (77,631).
+
+| Text | Bytes | Tokens |
+|---|---|---|
+| `SKILL.md` at 0.8.109 | 48,747 | 16,310 |
+| `loop.md` at 0.8.109 | 11,606 | 4,085 |
+
+Both read about 2.9 to 3.0 bytes a token, not the 2.6 to 2.7 above, so `SKILL.md` is 16.3k, not the 13k #228 assumed.
+
+A narrower ticket read, the title and the latest comment with an `## Agent Brief` heading or the body when there is none (`--jq '{title, brief: (([.comments[] | select(.body | test("^## Agent Brief"; "m"))] | last | .body) // .body)}'`), read 1,083 for #166, 1,284 for #185 and 1,277 for #184, against the full reads in By step. The launch summary (`SKILL.md`, Launch) is the only use of step 1's read.
+
+Not yet done: the narrower read adopted or rejected, and the 94,106 accounted for to under 3k (the base plus `SKILL.md` as it was at that run, the background-session section, the `/clear` and `/reload-plugins` messages and the instructions' growth since), and what the 1,778 is.
+
 ## By step
 
 Growth per step, from the three sessions:
@@ -35,6 +74,7 @@ Growth per step, from the three sessions:
 | Step | Tokens |
 |---|---|
 | `step.sh` | 360 to 2,500 |
+| Ticket read (`gh issue view N --json title,body,comments`, step 1) | 3,215 for #166 (2 comments, 4.0 KB); 11,579 for #185 (14 comments, 18.6 KB); a ticket past the Bash output limit, such as #184 (35.8 KB), is saved to a file and reads 2,291 with only its preview, before the file is read |
 | `launch.sh` | about 300 |
 | `view.sh` and `watch.sh` started | about 800 |
 | Each worker turn end: the watch's task notification, reading its output, `last-message.sh` | 2,000 to 3,500 |
