@@ -174,6 +174,12 @@ capture due at 100% of zone, forced at 108%" \
 check "capture point: one at 149% keeps 64% and 72%" "compact point 149% of zone (82% of a 1000k window)
 capture due at 64% of zone, forced at 72%" \
     "$( (export MP_SMART_ZONE_K=550 CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=82; compact claude-opus-5-5) )"
+# The wide pair also needs its force point plus the margin below the compact
+# point. On a 100k zone at 15%, 1000k compacts at exactly 150%, but 108% of
+# 100k plus 50k reaches it, so the worker keeps the pair that clears.
+check "capture point: a wide pair the margin refuses falls back to 64% and 72%" "compact point 150% of zone (15% of a 1000k window)
+capture due at 64% of zone, forced at 72%" \
+    "$( (export MP_SMART_ZONE_K=100 CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=15; compact claude-opus-5-5) )"
 
 # --- due, at a safe point ----------------------------------------------------
 # call <tokens> <tool_use id or empty> -- a main-chain call row
@@ -290,7 +296,8 @@ due: background task rev1 is cut" "$(due_on claude-made-up-1)"
 check "due: a compact point of 149% is due at 64%" "64% of zone
 due" "$( (export MP_SMART_ZONE_K=550 CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=82; due_on claude-opus-5-5) )"
 zone --transcript "$work/t.jsonl" --model >/dev/null; check "due: --model needs a value" "1" "$?"
-zone --compact claude-opus-5-5 --model claude-opus-5-5 >/dev/null; check "due: --model is not for --compact" "1" "$?"
+check "due: --model is not for --compact" "Error: --compact takes the model as its value; give it alone" \
+    "$(zone --compact claude-opus-5-5 --model claude-opus-5-5)"
 
 # A last line still being written is skipped.
 { call 60000 a; result a; call 102000 b; result b; printf '{"type":"assistant","mess'; } >"$work/t.jsonl"

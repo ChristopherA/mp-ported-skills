@@ -80,7 +80,9 @@ ZONE_MARGIN_K=50
 # 10 to 13 points in the runs on #215, and 50 leaves room for a larger one.
 # A 1M window at the default override compacts at about 533% of zone and
 # takes the wide point; a 200k window, at about 106%, or one not known,
-# keeps ZONE_CAPTURE.
+# keeps ZONE_CAPTURE. The wide pair also needs its force point plus
+# ZONE_MARGIN_K below the compact point, which only a zone set smaller than
+# the default can fail; there the worker keeps ZONE_CAPTURE.
 ZONE_CAPTURE_WIDE=100
 ZONE_CAPTURE_ROOM=50
 
@@ -118,25 +120,30 @@ case $zone_k in '' | *[!0-9]* | 0) zone_k=150 ;; esac
 
 # capture_points <model>: sets override and window_k as compact.sh gives them for
 # the model, and capture and force, the points in % of zone that apply to
-# it. Returns 1 when the window is not known.
+# it. Returns 1 when the window is not known. Reads zone_k and the ZONE_
+# settings above.
 capture_points() {
     . "$(dirname -- "$0")/compact.sh"
     override=$(compact_pct)
-    known=0
-    window_k=$(compact_window_k "$1") || known=1
-    # The compact point against the wide point plus its room, both as tokens
-    # in tens, so a point of exactly 150% takes the wide point.
-    if [ $((window_k * override)) -ge $(((ZONE_CAPTURE_WIDE + ZONE_CAPTURE_ROOM) * zone_k)) ]; then
+    unknown=0
+    window_k=$(compact_window_k "$1") || unknown=1
+    # The compact point against the wide point plus its room, and against the
+    # wide force point plus the margin, all as tokens in tens, so a point of
+    # exactly 150% takes the wide point.
+    gap=$((ZONE_FORCE - ZONE_CAPTURE))
+    if [ $((window_k * override)) -ge $(((ZONE_CAPTURE_WIDE + ZONE_CAPTURE_ROOM) * zone_k)) ] &&
+        [ $(((ZONE_CAPTURE_WIDE + gap) * zone_k + ZONE_MARGIN_K * 100)) -lt $((window_k * override)) ]; then
         capture=$ZONE_CAPTURE_WIDE
     else
         capture=$ZONE_CAPTURE
     fi
-    force=$((capture + ZONE_FORCE - ZONE_CAPTURE))
-    return $known
+    force=$((capture + gap))
+    return $unknown
 }
 
 if [ -n "$HAS_COMPACT" ]; then
-    [ "$sources" -eq 0 ] && [ -z "$DUE" ] && [ -z "$HAS_MODEL" ] || fail "--compact reads no transcript; give it alone"
+    [ -z "$HAS_MODEL" ] || fail "--compact takes the model as its value; give it alone"
+    [ "$sources" -eq 0 ] && [ -z "$DUE" ] || fail "--compact reads no transcript; give it alone"
     if capture_points "$COMPACT"; then :
     elif [ -z "$COMPACT" ]; then
         printf "note: the worker's model is not known, so the smallest context window, %sk, is used\n" "$window_k" >&2
