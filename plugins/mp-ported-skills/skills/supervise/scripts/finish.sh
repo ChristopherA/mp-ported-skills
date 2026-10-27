@@ -41,13 +41,17 @@
 #
 # Usage:
 #   finish.sh --dir DIR --id ID --start SHA --ticket N --record RECORD
-#             [--cwd CWD] [--session SESSION_ID] [--session-dir SDIR]
+#             [--cwd CWD] [--dist-start DIST_SHA]
+#             [--session SESSION_ID] [--session-dir SDIR]
 #             [--tmux | --pane 'SESSION WINDOW TAB'] [--detail PATH]
 #             [--settle S] [--interval S] [--timeout S]
 #
 # DIR is the Project folder the worker was launched into, which holds its
 # marker. CWD is the checkout the worker committed in (watch.sh's cwd line),
-# read by actions.sh and record.sh; it defaults to DIR. SESSION_ID and SDIR
+# read by actions.sh and record.sh; it defaults to DIR. DIST_SHA is the
+# Distribution repo's head when the run started (the snapshot's `dist head`
+# line), which record.sh counts the Distribution repo's commits after; it
+# names that repo from DIR (#216). SESSION_ID and SDIR
 # name the supervisor's session and its own folder, as for glance.sh; they
 # default to $CLAUDE_CODE_SESSION_ID and the working directory. PATH defaults
 # to finish-ID.txt beside RECORD. --settle, --interval and --timeout go to
@@ -63,6 +67,7 @@ CWD=""
 ID=""
 START=""
 TICKET=""
+DIST_START=""
 RECORD=""
 SESSION="${CLAUDE_CODE_SESSION_ID:-}"
 SDIR="$PWD"
@@ -79,6 +84,7 @@ while [ $# -gt 0 ]; do
         --id)          need_value "$@"; ID="$2"; shift 2 ;;
         --start)       need_value "$@"; START="$2"; shift 2 ;;
         --ticket)      need_value "$@"; TICKET="${2#\#}"; shift 2 ;;
+        --dist-start)  need_value "$@"; DIST_START="$2"; shift 2 ;;
         --record)      need_value "$@"; RECORD="$2"; shift 2 ;;
         --session)     need_value "$@"; SESSION="$2"; shift 2 ;;
         --session-dir) need_value "$@"; SDIR="$2"; shift 2 ;;
@@ -88,7 +94,7 @@ while [ $# -gt 0 ]; do
         --settle | --interval | --timeout)
             need_value "$@"; STOP_OPTS="$STOP_OPTS $1 $2"; shift 2 ;;
         --help)
-            printf 'Usage: finish.sh --dir DIR --id ID --start SHA --ticket N --record RECORD [--cwd CWD] [--session ID] [--session-dir DIR] [--tmux | --pane S] [--detail PATH]\n'
+            printf 'Usage: finish.sh --dir DIR --id ID --start SHA --ticket N --record RECORD [--cwd CWD] [--dist-start SHA] [--session ID] [--session-dir DIR] [--tmux | --pane S] [--detail PATH]\n'
             printf 'Stops the worker, closes its viewer, reads its shared actions, takes the glance, writes and posts the run record. Outputs: clean <url>; ... or one line per item that needs the maintainer, then detail <path>\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
@@ -176,7 +182,9 @@ glance=$(head -n 1 "$tmp/out")
 
 # 5 and 6. The record, and its post.
 url=""
-if run record.sh sh "$here/record.sh" --id "$ID" --dir "$CWD" --start "$START" --ticket "$TICKET" --supervisor "$SESSION"; then
+set -- --id "$ID" --dir "$CWD" --project "$DIR" --start "$START" --ticket "$TICKET" --supervisor "$SESSION"
+[ -z "$DIST_START" ] || set -- "$@" --dist-start "$DIST_START"
+if run record.sh sh "$here/record.sh" "$@"; then
     if command cp "$tmp/out" "$RECORD" 2>"$tmp/err"; then
         if (cd "$DIR" && run post gh issue comment "$TICKET" --body-file "$RECORD"); then
             url=$(sed -n '/^https:/p' "$tmp/out" | tail -n 1)

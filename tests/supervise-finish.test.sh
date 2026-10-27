@@ -179,6 +179,24 @@ check "finish: a relative record keeps the detail file beside it" "detail $work/
     "$(printf '%s\n' "$out" | tail -n 1)"
 check "finish: no detail file in the Project folder" "no" "$([ -e "$work/granted/out" ] && echo yes || echo no)"
 
+# --- a Distribution repo ---------------------------------------------------
+# --dist-start reaches record.sh, which counts the Distribution repo's
+# commits from the Project folder, though the worker's checkout is DIR (#216).
+project distp '- push: to main'
+pstart=$(start_of distp)
+git init -q -b main "$work/distp-dist"
+repo_git "$work/distp-dist" commit -q --allow-empty -m start
+dstart=$(git -C "$work/distp-dist" rev-parse HEAD)
+repo_git "$work/distp-dist" commit -q --allow-empty -m "worker's dist commit"
+echo ../distp-dist >"$work/distp/docs/agents/distribution-repo.md"
+repo_git "$work/distp" add docs
+repo_git "$work/distp" commit -q -m "name the Distribution repo"
+repo_git "$work/distp" push -q origin main 2>/dev/null
+worker distp
+finish distp --start "$pstart" --dist-start "$dstart" >/dev/null 2>&1
+check "finish: --dist-start reaches the record" "1" \
+    "$(grep -c "^- outcome: 2 commits after $(git -C "$work/distp" rev-parse --short "$pstart") in the Project repo, 1 commit after $(git -C "$work/distp-dist" rev-parse --short "$dstart") in the Distribution repo, " "$work/out/run-record-56.md")"
+
 # --- a stop that fails -----------------------------------------------------
 # The worker never shows stopped: the record waits on the stop, since the
 # worker's cost is written then, so nothing after it runs.

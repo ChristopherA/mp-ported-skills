@@ -38,7 +38,7 @@ git -C "<project folder>" rev-parse HEAD
 sh "${CLAUDE_SKILL_DIR}/scripts/watch.sh" --dir "<project folder>" --snapshot > "<scratchpad>/snapshot.txt" </dev/null
 ```
 
-The first is `<start>`, except after `continue #N from <sha>`, where `<start>` is that sha. With a Distribution repo, the snapshot's `dist head <sha>` line is `<dist start>`, which Push on approval passes as `--dist-start`.
+The first is `<start>`, except after `continue #N from <sha>`, where `<start>` is that sha. With a Distribution repo, the snapshot's `dist head <sha>` line is `<dist start>`, which Push on approval passes as `--dist-start`, and so does every run record (Finishing), so it counts that repo's commits (#216).
 
 ## 2. Launch
 
@@ -82,7 +82,7 @@ It prints one line for each PR or issue in the worker's job, each remote branch 
 
 ### Finishing
 
-A settled run (`done` after its capture and any push, the end of Push on approval or Post on approval, and Zone capture's step 4) ends with one call, run in the Project folder, with `<cwd>` from `watch.sh` and `<start>` from step 1. Add `--tmux` with `--watch tmux`, or `--pane '<session> <window> <tab>'` with `--watch iterm`, unless the viewer is already closed:
+A settled run (`done` after its capture and any push, the end of Push on approval or Post on approval, and Zone capture's step 4) ends with one call, run in the Project folder, with `<cwd>` from `watch.sh` and `<start>` from step 1. With a Distribution repo, add `--dist-start <dist start>` from step 1; without it, the record says that repo's commits were not counted. Add `--tmux` with `--watch tmux`, or `--pane '<session> <window> <tab>'` with `--watch iterm`, unless the viewer is already closed:
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/finish.sh" --dir "<project folder>" --cwd "<cwd>" --id ID --start <start> --ticket N --record "<scratchpad>/run-record.md" --session "${CLAUDE_SESSION_ID}" --session-dir "$PWD" </dev/null
@@ -132,7 +132,7 @@ sh "${CLAUDE_SKILL_DIR}/../glance/scripts/glance.sh" "$PWD" "${CLAUDE_SESSION_ID
 
 Pass this session's own folder, `$PWD`, not the Project folder: the reading is kept under the folder the session started in, matched exactly, so from the Hub the Project folder finds none. It prints this session's reading (`63% of zone`), or one line naming why there is none (`No reading: ...`, `No reading yet: ...`). For a session with no reading, report that line as it reads, never a number in its place.
 
-Then record the run, whatever the outcome, with the same `<cwd>` and `<start>` and the ticket's number. For a settled run, `finish.sh` records and posts it after the capture and any push, once the worker is stopped, so its `captures and clears` field counts the capture and its shared actions show the push:
+Then record the run, whatever the outcome, with the same `<cwd>` and `<start>` and the ticket's number, and with a Distribution repo `--project "<project folder>" --dist-start <dist start>` as well. For a settled run, `finish.sh` records and posts it after the capture and any push, once the worker is stopped, so its `captures and clears` field counts the capture and its shared actions show the push:
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/record.sh" --id ID --dir "<cwd>" --start <start> --ticket N > "<scratchpad>/run-record.md" </dev/null

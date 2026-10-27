@@ -697,6 +697,10 @@ command mv "$FAKE_GH/comments-52.json" "$FAKE_GH/comments-52.page2.json"
 printf '[]' >"$FAKE_GH/comments-52.json"
 check "run accounts for the commits: a record on page two" "#52 from $pushed" "$(cont "$(run)")"
 command rm -f "$FAKE_GH/comments-52.page2.json"
+# A record from a Project with a Distribution repo names each repo's count
+# apart (#216); the Project's count still gives the start.
+record 52 'Supervised run of #52' "1 commit after $(g rev-parse --short "$pushed") in the Project repo, no commits after abc1234 in the Distribution repo"
+check "run accounts for the commits: a record naming the Distribution repo" "#52 from $pushed" "$(cont "$(run)")"
 # A queue of one still refuses, but step.sh can continue the ticket.
 kids "$(issue 52 ready-for-agent)"
 record 52 'Supervised run of #52' "1 commit after $(g rev-parse --short "$pushed")"

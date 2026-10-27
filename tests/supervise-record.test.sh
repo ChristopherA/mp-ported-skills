@@ -816,6 +816,70 @@ check "record: the parked field follows the outcome" "parked" \
 check "record: a parked-N branch alone adds no parked field" "" "$(record | grep '^- parked')"
 repo_git "$repo" branch -D parked-56 >/dev/null
 
+# A Project with a Distribution repo (#216): the worker commits there, so
+# the outcome counts that repo's commits after --dist-start as well, each
+# repo's count after its own start.
+dremote="$work/dproject.git"
+dproj="$work/dproject"
+dist="$work/dist"
+git init -q --bare "$dremote"
+git init -q -b main "$dproj"
+mkdir -p "$dproj/docs/agents"
+echo ../dist >"$dproj/docs/agents/distribution-repo.md"
+repo_git "$dproj" add docs
+repo_git "$dproj" commit -q -m start
+repo_git "$dproj" remote add origin "$dremote"
+repo_git "$dproj" push -q -u origin main 2>/dev/null
+pstart=$(git -C "$dproj" rev-parse HEAD)
+pshort=$(git -C "$dproj" rev-parse --short "$pstart")
+git init -q -b main "$dist"
+repo_git "$dist" commit -q --allow-empty -m start
+dstart=$(git -C "$dist" rev-parse HEAD)
+dshort=$(git -C "$dist" rev-parse --short "$dstart")
+repo_git "$dist" commit -q --allow-empty -m "worker's first commit"
+repo_git "$dist" commit -q --allow-empty -m "worker's second commit"
+setup
+drecord() { record --dir "$dproj" --start "$pstart" "$@"; }
+out=$(drecord --dist-start "$dstart")
+check "dist: commits only in the Distribution repo" \
+    "no commits after $pshort in the Project repo, 2 commits after $dshort in the Distribution repo, PR #72, ticket #56 CLOSED" \
+    "$(field outcome "$out")"
+check "dist: no note when both repos are counted" "" "$(printf '%s\n' "$out" | grep '^- note: .*Distribution')"
+repo_git "$dproj" commit -q --allow-empty -m "worker's project commit"
+check "dist: commits in both repos" \
+    "1 commit after $pshort in the Project repo, 2 commits after $dshort in the Distribution repo, PR #72, ticket #56 CLOSED" \
+    "$(field outcome "$(drecord --dist-start "$dstart")")"
+# A worker in a worktree of the Project: --project names the Project folder.
+git -C "$dproj" worktree add -q "$work/dproject-wt" 2>/dev/null
+check "dist: a worktree checkout with --project" \
+    "1 commit after $pshort in the Project repo, 2 commits after $dshort in the Distribution repo, PR #72, ticket #56 CLOSED" \
+    "$(field outcome "$(drecord --dir "$work/dproject-wt" --project "$dproj" --dist-start "$dstart")")"
+git -C "$dproj" worktree remove --force "$work/dproject-wt"
+# A --dir that is the Distribution repo: the Project's commits from --project.
+check "dist: --dir is the Distribution repo" \
+    "1 commit after $pshort in the Project repo, 2 commits after $dshort in the Distribution repo, PR #72, ticket #56 CLOSED" \
+    "$(field outcome "$(drecord --dir "$dist" --project "$dproj" --dist-start "$dstart")")"
+# No --dist-start: the record is still written, and says what it left out.
+out=$(drecord)
+check "dist: no --dist-start, outcome says not counted" \
+    "1 commit after $pshort in the Project repo, Distribution repo commits not counted (no --dist-start), PR #72, ticket #56 CLOSED" \
+    "$(field outcome "$out")"
+check "dist: no --dist-start, a note" "1" "$(printf '%s\n' "$out" | grep -c '^- note: .*--dist-start')"
+# A --dist-start that is not a commit there: unknown, with a note.
+out=$(drecord --dist-start "$pstart")
+check "dist: a bad --dist-start, outcome unknown" \
+    "1 commit after $pshort in the Project repo, commits unknown in the Distribution repo, PR #72, ticket #56 CLOSED" \
+    "$(field outcome "$out")"
+check "dist: a bad --dist-start, a note" "1" "$(printf '%s\n' "$out" | grep -c '^- note: .*Distribution repo')"
+# A hand-run session counts the Distribution repo too.
+check "dist: --session counts the Distribution repo" \
+    "1 commit after $pshort in the Project repo, 2 commits after $dshort in the Distribution repo, ticket #56 CLOSED" \
+    "$(field outcome "$(PATH="$work/bin:$PATH" sh "$scripts/record.sh" --session "$sid" --dir "$dproj" --start "$pstart" \
+        --ticket 56 --dist-start "$dstart" </dev/null)")"
+# --dist-start for a Project with no Distribution repo is a usage error.
+record --dist-start "$start" >/dev/null 2>&1
+check "dist: --dist-start with no Distribution repo exits 1" "1" "$?"
+
 # A worker that made no API calls has no zone reading, and says why.
 setup
 jq -c 'select(.type != "assistant")' "$cfg/projects/-work-project/$sid.jsonl" >"$work/t"

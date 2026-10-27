@@ -76,7 +76,13 @@
 #                            reports restarted it (#138)
 # * shared actions           actions.sh's lines, or none
 #   outcome                  commits in START..HEAD, the job's PRs and
-#                            issues (*), and the ticket's state from gh
+#                            issues (*), and the ticket's state from gh.
+#                            When the Project names a Distribution repo
+#                            (distribution.sh), each repo's count apart:
+#                            the Project's, then the Distribution repo's
+#                            in DIST_START..HEAD, each after its own start
+#                            (#216). With no --dist-start, the Distribution
+#                            part says it was not counted
 #   parked                   only for a parked worker (#158): the question
 #                            from the last turn end whose text has a
 #                            `Parked:` line, and its local branch parked-N
@@ -97,11 +103,18 @@
 # Usage:
 #   record.sh --id ID --dir DIR --start SHA --ticket N
 #             [--supervisor SESSION_ID] [--now ISO-8601 UTC]
+#             [--project PROJECT] [--dist-start DIST_SHA]
 #   record.sh --session SESSION_ID --dir DIR --start SHA --ticket N
+#             [--project PROJECT] [--dist-start DIST_SHA]
 #
 # DIR is the checkout the worker committed in (watch.sh's cwd line), START
 # the commit the branch started at. The supervisor's session defaults to
-# $CLAUDE_CODE_SESSION_ID, the session running this script.
+# $CLAUDE_CODE_SESSION_ID, the session running this script. PROJECT is the
+# Project folder, which names the Distribution repo; it defaults to DIR,
+# which may be a worktree. DIST_SHA is the Distribution repo's head when the
+# run started (the snapshot's `dist head` line); giving it for a Project with
+# no Distribution repo is a usage error. When DIR is the Distribution repo,
+# the Project's commits are counted in PROJECT.
 
 set -u
 
@@ -110,6 +123,8 @@ SESSION=""
 DIR=""
 START=""
 TICKET=""
+PROJECT=""
+DIST_START=""
 SUPERVISOR="${CLAUDE_CODE_SESSION_ID:-}"
 NOW=""
 
@@ -123,9 +138,11 @@ while [ $# -gt 0 ]; do
         --ticket)     need_value "$@"; TICKET="${2#\#}"; shift 2 ;;
         --supervisor) need_value "$@"; SUPERVISOR="$2"; shift 2 ;;
         --now)        need_value "$@"; NOW="$2"; shift 2 ;;
+        --project)    need_value "$@"; PROJECT="$2"; shift 2 ;;
+        --dist-start) need_value "$@"; DIST_START="$2"; shift 2 ;;
         --help)
-            printf 'Usage: record.sh --id ID --dir DIR --start SHA --ticket N [--supervisor SESSION_ID] [--now ISO]\n'
-            printf '       record.sh --session SESSION_ID --dir DIR --start SHA --ticket N\n'
+            printf 'Usage: record.sh --id ID --dir DIR --start SHA --ticket N [--supervisor SESSION_ID] [--now ISO] [--project DIR] [--dist-start SHA]\n'
+            printf '       record.sh --session SESSION_ID --dir DIR --start SHA --ticket N [--project DIR] [--dist-start SHA]\n'
             printf 'Prints the run record as a Markdown list, then note lines for sources it could not read.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
@@ -140,7 +157,19 @@ fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 case $TICKET in *[!0-9]*) fail "--ticket needs an issue number, not '$TICKET'" ;; esac
 [ -d "$DIR" ] || fail "not a directory: $DIR"
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the worker's job is unknown"
-git -C "$DIR" rev-parse -q --verify "$START^{commit}" >/dev/null || fail "not a commit in $DIR: $START"
+[ -n "$PROJECT" ] || PROJECT=$DIR
+[ -d "$PROJECT" ] || fail "not a directory: $PROJECT"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# The Project's Distribution repo, when it names one (#216). One it names
+# but distribution.sh cannot read is counted as unknown, not as none.
+dist="" dist_unread=""
+dist=$(sh "$SCRIPT_DIR/distribution.sh" --dir "$PROJECT" </dev/null 2>/dev/null) || dist="" dist_unread=1
+[ -z "$DIST_START" ] || [ -n "$dist$dist_unread" ] || fail "--dist-start given, but $PROJECT names no Distribution repo"
+# The Project's commits are counted in DIR, or in PROJECT when DIR is the
+# Distribution repo.
+proj_git=$DIR
+[ -z "$dist" ] || [ "$(CDPATH= cd -- "$DIR" && pwd -P)" != "$dist" ] || proj_git=$PROJECT
+git -C "$proj_git" rev-parse -q --verify "$START^{commit}" >/dev/null || fail "not a commit in $proj_git: $START"
 [ -n "$NOW" ] || NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 jq -en --arg t "$NOW" '$t | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601' >/dev/null 2>&1 ||
     fail "--now needs an ISO 8601 UTC time such as 2026-09-29T06:15:24Z, not '$NOW'"
@@ -148,7 +177,6 @@ zone_k=${MP_SMART_ZONE_K:-150}
 cost_wait=${MP_RECORD_COST_WAIT:-10}
 case $cost_wait in '' | *[!0-9]*) cost_wait=10 ;; esac
 case $zone_k in '' | *[!0-9]* | 0) zone_k=150 ;; esac
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/park.sh"
 errors=$(mktemp)
 trap 'command rm -f "$errors"' EXIT
@@ -478,11 +506,33 @@ if [ -n "$shared_notes" ]; then
     IFS=$oldIFS
 fi
 
-short=$(git -C "$DIR" rev-parse --short "$START")
-count=$(git -C "$DIR" rev-list --count "$START..HEAD" 2>/dev/null) || {
-    note "git rev-list $START..HEAD failed in $DIR, so the commits were not counted"
+short=$(git -C "$proj_git" rev-parse --short "$START")
+count=$(git -C "$proj_git" rev-list --count "$START..HEAD" 2>/dev/null) || {
+    note "git rev-list $START..HEAD failed in $proj_git, so the commits were not counted"
     count=""
 }
+# The Distribution repo's part of the outcome, empty when there is none.
+dist_part=""
+if [ -n "$dist_unread" ]; then
+    note "distribution.sh failed in $PROJECT, so the Distribution repo's commits were not counted"
+    dist_part="commits unknown in the Distribution repo"
+elif [ -z "$dist" ]; then
+    :
+elif [ -z "$DIST_START" ]; then
+    note "no --dist-start, so the commits in Distribution repo $dist were not counted"
+    dist_part="Distribution repo commits not counted (no --dist-start)"
+elif dist_sha=$(git -C "$dist" rev-parse -q --verify "$DIST_START^{commit}" 2>/dev/null) &&
+    dist_count=$(git -C "$dist" rev-list --count "$dist_sha..HEAD" 2>/dev/null); then
+    dist_short=$(git -C "$dist" rev-parse --short "$dist_sha")
+    case $dist_count in
+        0) dist_part="no commits after $dist_short in the Distribution repo" ;;
+        1) dist_part="1 commit after $dist_short in the Distribution repo" ;;
+        *) dist_part="$dist_count commits after $dist_short in the Distribution repo" ;;
+    esac
+else
+    note "git rev-list $DIST_START..HEAD failed in Distribution repo $dist, so its commits were not counted"
+    dist_part="commits unknown in the Distribution repo"
+fi
 if state=$(cd "$DIR" && gh issue view "$TICKET" --json state --jq .state </dev/null 2>/dev/null) && [ -n "$state" ]; then
     ticket="ticket #$TICKET $state"
 else
@@ -492,9 +542,9 @@ fi
 
 # A parked worker's work, on its local branch parked-N (#158).
 parked_branch=""
-if git -C "$DIR" rev-parse -q --verify "refs/heads/parked-$TICKET" >/dev/null 2>&1; then
+if git -C "$proj_git" rev-parse -q --verify "refs/heads/parked-$TICKET" >/dev/null 2>&1; then
     parked_branch="parked-$TICKET"
-    parked_count=$(git -C "$DIR" rev-list --count "$START..$parked_branch" 2>/dev/null) || parked_count=""
+    parked_count=$(git -C "$proj_git" rev-list --count "$START..$parked_branch" 2>/dev/null) || parked_count=""
     parked_branch="$parked_branch, $(if [ -z "$parked_count" ]; then echo "commits unknown"
         elif [ "$parked_count" = 1 ]; then echo "1 commit after $short"
         else echo "$parked_count commits after $short"; fi)"
@@ -504,7 +554,7 @@ fi
 jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launched "$launched" --arg now "$NOW" \
     --argjson w "$worker" --arg sub "$subcalls" --arg sup "$supervisor" --arg supctx "$sup_context" --arg waits "$waits" \
     --arg actions "$actions" --arg short "$short" --arg count "$count" --arg children "$children" \
-    --arg ticket "$ticket" --arg n "$TICKET" --argjson ap "$approvals_json" --arg pb "$parked_branch" "$defs"'
+    --arg ticket "$ticket" --arg n "$TICKET" --argjson ap "$approvals_json" --arg pb "$parked_branch" --arg dist "$dist_part" "$defs"'
     def plural($k; $word): "\($k) \($word)\(if $k == 1 then "" else "s" end)";
     ($session != "") as $hand
     | (if $hand then "session" else "worker" end) as $who
@@ -569,7 +619,9 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
          else "- shared actions:", ($actions | split("\n")[] | "  - \(.)") end),
       "- outcome: \([(if $count == "" then "commits unknown"
                       elif $count == "0" then "no commits after \($short)"
-                      else "\(plural($count | tonumber; "commit")) after \($short)" end),
+                      else "\(plural($count | tonumber; "commit")) after \($short)" end)
+                     + (if $dist == "" then "" else " in the Project repo" end),
+                     (select($dist != "") | $dist),
                      (select($children != "") | $children), $ticket] | join(", "))",
       ([$w.marks // [] | .[] | select(.end and (.parked // null) != null) | .parked] | last) as $pq
       | select($pq != null)

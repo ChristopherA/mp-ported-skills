@@ -7,7 +7,9 @@
 # or after a continuation that was captured too, leaving the run's commits
 # unpushed. Only that supervisor knew the run's start. The run record
 # finish.sh posts on the ticket carries it, on its `- outcome: K commits
-# after <short sha>` line, so a later session reads it there.
+# after <short sha>` line, so a later session reads it there. A Project with
+# a Distribution repo adds ` in the Project repo` after the sha, then that
+# repo's count (record.sh, #216); the Project's count is the one read.
 
 # run_start <dir> <ticket> <comments json>: the full sha of the run's start
 # when the newest run record on the ticket (comments json, oldest first, as
@@ -20,7 +22,7 @@ run_start() {
     run_start_out=$(printf '%s' "$3" | jq -r --arg n "$2" '
         [.[] | (.body // "") | select(test("^\\s*## (Supervised|Hand) run of #" + $n + "(\\D|$)"))]
         | last // "" | select(test("^\\s*## Supervised run of #"))
-        | [splits("\r?\n") | capture("^- outcome: (?<k>[0-9]+) commits? after (?<s>[0-9a-f]{7,40})(,|$)")]
+        | [splits("\r?\n") | capture("^- outcome: (?<k>[0-9]+) commits? after (?<s>[0-9a-f]{7,40})( in the Project repo)?(,|$)")]
         | first // empty | "\(.k) \(.s)"' 2>/dev/null) || return 1
     [ -n "$run_start_out" ] || return 1
     run_start_k=${run_start_out%% *}
