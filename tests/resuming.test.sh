@@ -701,19 +701,26 @@ command rm -f "$FAKE_GH/comments-52.page2.json"
 # apart (#216); the Project's count still gives the start.
 record 52 'Supervised run of #52' "1 commit after $(g rev-parse --short "$pushed") in the Project repo, no commits after abc1234 in the Distribution repo"
 check "run accounts for the commits: a record naming the Distribution repo" "#52 from $pushed" "$(cont "$(run)")"
-# A queue of one still refuses, but step.sh can continue the ticket.
+# A queue of one is offered the loop when a run is there to continue (#221).
 kids "$(issue 52 ready-for-agent)"
 record 52 'Supervised run of #52' "1 commit after $(g rev-parse --short "$pushed")"
 out=$(run)
-check "run accounts, queue of one: not offered" "$(one 52)" "$(sup "$out")"
+check "run accounts, queue of one: the loop offered" "$offer" "$(sup "$out")"
 check "run accounts, queue of one: continue line" "#52 from $pushed" "$(cont "$out")"
+agents "$(list "$(row ee55 working 14)")"
+out=$(run)
+check "run accounts, queue of one, live session: refused" \
+    "not offered: another live background session in $real: ee55 (working)" "$(sup "$out")"
+check "run accounts, queue of one, live session: continue line" "#52 from $pushed" "$(cont "$out")"
+agents '[]'
 command rm -f "$FAKE_GH/comments-52.json"
 check "unpushed and a queue of one: unchanged" "$unpushed1" "$(sup "$(run)")"
 check "unpushed and a queue of one: no push-first" "" "$(pushfirst "$(run)")"
-# A refusal that holds whatever the read finds stands when the read fails.
+# A read that worked might have found a run to continue, so the queue of one
+# does not stand when the read fails.
 : >"$FAKE_GH/comments-52.fail"
 out=$(run)
-check "queue of one, run records read fails: the queue refuses" "$(one 52)" "$(sup "$out")"
+check "queue of one, run records read fails: refused" "$unread52" "$(sup "$out")"
 check "queue of one, run records read fails: no push-first" "" "$(pushfirst "$out")"
 check "queue of one, run records read fails: no continue line" "" "$(cont "$out")"
 command rm -f "$FAKE_GH/comments-52.fail"

@@ -13,7 +13,8 @@
 # reads that repo's git too, and its work in flight is case 1. When the next
 # step is /implement #N, prints the queue a /supervise --loop would run
 # (`queue:`), a sub-issue reorder that would lengthen it (`reorder:`), and the
-# loop command, offered only for two or more tickets (`supervise:`). Writes
+# loop command, offered only for two or more tickets or a run to continue
+# (`supervise:`). Writes
 # nothing.
 #
 # Usage: sh state.sh [dir]
@@ -548,7 +549,7 @@ gather() {
     # with a clean tree and no other live background session in the folder
     # (live.sh's rule, shared with it), and the Distribution repo, when there
     # is one, read and clean. A loop is worth running only for two or more
-    # tickets, counting a reorder's.
+    # tickets, counting a reorder's, or for a run to continue.
     #
     # Unpushed commits on the default branch may be a supervised run of the
     # next ticket that a supervisor ended before pushing (#214). So the offer
@@ -634,11 +635,14 @@ gather() {
     elif [ -n "$dist_unread" ]; then refusal="distribution repo $dist_unread"
     elif [ -z "$step_n" ]; then refusal="other work in flight: ${inflight_rest#, }"
     fi
-    hard=$refusal
+    # A queue of one (lone) refuses only when no run is there to continue
+    # (#221): a continued ticket is worth a loop on its own, which goes on to
+    # whatever is ready after it.
+    hard=$refusal lone=
     if [ -n "$refusal" ]; then :
     elif ! [ "$qlen" -ge 0 ] 2>/dev/null; then refusal="the queue could not be read"
-    elif [ "$qlen" -lt 2 ]; then refusal="a queue of one (#$step_n); /supervise is worth running only for two or more tickets"
     else
+        [ "$qlen" -ge 2 ] || lone="a queue of one (#$step_n); /supervise is worth running only for two or more tickets"
         here=$(pwd -P)
         # Which sessions are live is live.sh's, shared with launch.sh, which
         # also refuses one in the Distribution repo.
@@ -669,10 +673,11 @@ gather() {
         if [ -n "$records_unread" ]; then
             [ -n "$refusal" ] || refusal="the run records on #$step_n could not be read"
         elif [ -z "$start" ]; then
-            [ -n "$refusal" ] || push_first=1
+            [ -n "$refusal$lone" ] || push_first=1
             refusal="$unpushed unpushed commits; push them first"
         fi
     fi
+    [ -z "$lone" ] || [ "$unpushed" -gt 0 ] || refusal=$lone
     if [ "$unpushed" -gt 0 ] && [ -z "$start" ] && [ -z "$push_first" ] && [ -z "$records_unread" ]; then
         [ -n "$impl" ] || return 0
     else
