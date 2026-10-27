@@ -97,6 +97,13 @@ check "step: a continue line comes before a push line" "continue #28 from $sha" 
 printf 'branch: main\n%s\npush: #28 after some commits\n' "$line" >"$work/state.txt"
 check "step: a push line of another shape stops" "stop: $line" \
     "$(sh "$scripts/step.sh" --from "$work/state.txt" </dev/null)"
+# SKILL.md's route for that step: the push goes through Push on approval,
+# plugin update included, and a declined or failed one launches no worker.
+for phrase in "run its steps 2 to 5 over \`origin/<default>..HEAD\`, its checked-push rule included" \
+    "On a no, no answer, a \`fail\` line or an error, launch nothing"; do
+    check "skill: push then implement: $phrase" yes \
+        "$(if grep -qF -- "$phrase" "$scripts/../SKILL.md"; then echo yes; else echo no; fi)"
+done
 printf 'branch: main\nnext: 2 /implement #52 (%s): #52 t52\ncontinue: #28 from %s\n' "$you" "$sha" >"$work/state.txt"
 check "step: an accepted next: comes first" "implement #52" \
     "$(sh "$scripts/step.sh" --from "$work/state.txt" </dev/null)"
