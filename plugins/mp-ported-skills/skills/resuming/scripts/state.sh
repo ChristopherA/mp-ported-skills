@@ -653,12 +653,17 @@ gather() {
         fi
     fi
     loop="/mp-ported-skills:supervise $shown --loop --model claude-opus-5-5 --effort medium"
-    start= push_first=
+    # A read of the run records that fails is told apart from one that finds
+    # no run (#222): a read that worked might have continued the ticket, so
+    # it gives no push-first advice, and the lines print as they would for it.
+    start= push_first= unread=
     if [ "$unpushed" -gt 0 ] && [ -z "$early" ]; then
-        if [ -z "$hard" ] &&
-            comments=$(gh api "repos/{owner}/{repo}/issues/$step_n/comments?per_page=100" --paginate 2>/dev/null) &&
-            comments=$(printf '%s' "$comments" | jq -cs 'add // []' 2>/dev/null) &&
-            start=$(run_start . "$step_n" "$comments"); then
+        if [ -n "$hard" ]; then
+            refusal="$unpushed unpushed commits; push them first"
+        elif ! comments=$(gh api "repos/{owner}/{repo}/issues/$step_n/comments?per_page=100" --paginate 2>/dev/null) ||
+            ! comments=$(printf '%s' "$comments" | jq -cs 'add // []' 2>/dev/null); then
+            refusal="the run records on #$step_n could not be read" unread=1
+        elif start=$(run_start . "$step_n" "$comments"); then
             :
         else
             start=
@@ -666,7 +671,7 @@ gather() {
             refusal="$unpushed unpushed commits; push them first"
         fi
     fi
-    if [ "$unpushed" -gt 0 ] && [ -z "$start" ] && [ -z "$push_first" ]; then
+    if [ "$unpushed" -gt 0 ] && [ -z "$start$push_first$unread" ]; then
         [ -n "$impl" ] || return 0
     else
         [ -z "${qout:-}" ] || printf '%s\n' "$qout"

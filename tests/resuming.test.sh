@@ -48,7 +48,9 @@ cat >"$work/bin/gh" <<'EOF'
 [ -n "${FAKE_GH_FAIL:-}" ] && { echo "gh: not logged in" >&2; exit 1; }
 case "$1 $2" in
     "api user") echo '{"login":"me"}' ;;
-    "api "*/comments*) n=${2%/comments*}; n=${n##*/}; cat "$FAKE_GH/comments-$n.json"
+    "api "*/comments*) n=${2%/comments*}; n=${n##*/}
+        [ -f "$FAKE_GH/comments-$n.fail" ] && exit 1
+        cat "$FAKE_GH/comments-$n.json"
         case " $* " in *" --paginate "*)
             if [ -f "$FAKE_GH/comments-$n.page2.json" ]; then cat "$FAKE_GH/comments-$n.page2.json"; fi ;; esac ;;
     "api "*/sub_issues*) n=${2%/sub_issues*}; n=${n##*/}
@@ -667,6 +669,22 @@ out=$(run)
 check "unpushed only: push-first names the push, then the loop" "git push origin main; then $offer" "$(pushfirst "$out")"
 check "unpushed only: no continue line" "" "$(cont "$out")"
 check "unpushed only: next line unchanged" "1 work in flight: 1 unpushed commits, in motion #24 t24; next child #52 (ready-for-agent, /implement #52, you type it; user-invoked): t52" "$(next "$out")"
+# A read of the run records that fails is not a ticket no run accounts for
+# (#222): no push-first advice, since a read that worked might continue it.
+unread52="not offered: the run records on #52 could not be read"
+: >"$FAKE_GH/comments-52.fail"
+out=$(run)
+check "unpushed, run records read fails: refused" "$unread52" "$(sup "$out")"
+check "unpushed, run records read fails: no push-first" "" "$(pushfirst "$out")"
+check "unpushed, run records read fails: no continue line" "" "$(cont "$out")"
+check "unpushed, run records read fails: the queue under the parent" "#52 #53" "$(queue "$out")"
+command rm -f "$FAKE_GH/comments-52.fail"
+printf 'not json' >"$FAKE_GH/comments-52.json"
+out=$(run)
+check "unpushed, run records merge fails: refused" "$unread52" "$(sup "$out")"
+check "unpushed, run records merge fails: no push-first" "" "$(pushfirst "$out")"
+check "unpushed, run records merge fails: no continue line" "" "$(cont "$out")"
+command rm -f "$FAKE_GH/comments-52.json"
 record 52 'Supervised run of #52' "1 commit after $(g rev-parse --short "$pushed")"
 out=$(run)
 check "run accounts for the commits: the loop offered" "$offer" "$(sup "$out")"
@@ -732,6 +750,12 @@ command rm -f "$FAKE_GH/comments-52.json"
 out=$(run)
 check "case 2, unpushed only: refused" "$unpushed1" "$(sup "$out")"
 check "case 2, unpushed only: push-first" "git push origin main; then $offer" "$(pushfirst "$out")"
+: >"$FAKE_GH/comments-52.fail"
+out=$(run)
+check "case 2, run records read fails: refused" "$unread52" "$(sup "$out")"
+check "case 2, run records read fails: no push-first" "" "$(pushfirst "$out")"
+check "case 2, run records read fails: next line unchanged" "1 work in flight: 1 unpushed commits" "$(next "$out")"
+command rm -f "$FAKE_GH/comments-52.fail"
 kids "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)"
 g push -q
 prs '[{"number":61,"title":"own pr","headRefName":"y","isCrossRepository":false}]'
