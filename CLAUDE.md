@@ -94,6 +94,10 @@ A fake that serves a fixture file fails a read through its own switch, as `comme
 
 A stub that stands in for a real command refuses what the real one refuses, with the same exit status, as the sweep stub in `tests/supervise-push.test.sh` exits 2 on an empty range. A stub that accepts every input passes a case the real command fails: `push.sh` swept a repo with nothing to push, the real sweep exited 2, and a live push was refused while its test, on a stub that took the empty range, passed (#179).
 
+## Tickets that wait on this one
+
+Before a build changes a value or behavior that another open ticket builds on, read the tickets blocked by this one (`gh issue list --state open --search '"Blocked by: #N"'`, then each whole, comments included). A later ticket's brief can hold a maintainer decision about the same value: #181's build lowered the zone capture to 64% from its measured margin, while #215's brief, blocked by #181, recorded the decision that no worker is captured below 80%, and only the capture's sweep found it, after the build.
+
 ## Grant actions
 
 A new grant action, or a change to what one covers, goes into every list of the actions, not only the scripts that enforce it: `grant.sh`, the classifier `shared-action-classify.sh` (`grant_action`), `launch.sh`'s grants text, `actions.sh`, `answer.sh`, `capturing`'s `before-clear.sh` and its `SKILL.md`, the template in `setup-mp-ported-skills`' `setup.sh`, `docs/agents/supervision.md`, and ADR 0005. Find them with `rg -l 'issue-create' plugins docs`. A list left behind still accepts the old set: in #141, `before-clear.sh` would have reported a Distribution repo push as covered by the `push` grant, and the hook would then have refused it.
