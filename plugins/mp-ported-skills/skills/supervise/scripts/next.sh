@@ -157,6 +157,7 @@ read_step() {
     fi
 }
 ran_has() { for r in $(ran_list); do [ "$r" = "$1" ] && return 0; done; return 1; }
+cont_ticket() { n=${1#continue #}; printf '%s\n' "${n%% *}"; } # continue #N from S -> N
 
 status=$(git -C "$DIR" status --porcelain) || fail "git status failed in $DIR"
 dirty=$(printf '%s' "$status" | grep -c '^')
@@ -180,7 +181,7 @@ ahead=${counts##*[!0-9]}
 if [ "$ahead" -gt 0 ]; then
     read_step
     case $step in
-        "continue #"*) n=${step#continue #}; n=${n%% *}; ! ran_has "$n" ;;
+        "continue #"*) ! ran_has "$(cont_ticket "$step")" ;;
         *) false ;;
     esac || halt "not-landed: $(plural "$ahead" commit) on $branch not on $up"
 fi
@@ -229,7 +230,7 @@ case $step in
         [ -z "$scripts_line" ] || printf '%s\n' "$scripts_line"
         echo "next $step" ;;
     "continue #"*)
-        n=${step#continue #}; n=${n%% *}
+        n=$(cont_ticket "$step")
         ! ran_has "$n" ||
             halt "repeat: #$n ran earlier in this loop and state.sh still offers to continue it"
         [ -z "$scripts_line" ] || printf '%s\n' "$scripts_line"

@@ -64,7 +64,7 @@ Run it with the Bash tool's `run_in_background`, since a ticket outlasts a foreg
 
 ## 4. Report
 
-One report, by the first line `watch.sh` printed. A `blocked question` or `blocked input needed` first goes through Routine answers: read `${CLAUDE_SKILL_DIR}/routine-answers.md` and follow it; only one it does not answer is reported by the items here. Whatever the outcome, it lists the shared actions the worker took, with `<cwd>` from `watch.sh` and `<start>` from step 1. For a settled run, take them after the capture and any push (Capture, below), since the capture can take shared actions of its own:
+One report, by the first line `watch.sh` printed. A report that ends this session while a zone-captured ticket still has work to build and no continuation launched, on any path, first runs Zone capture's Wrap-up before a continuation: read `${CLAUDE_SKILL_DIR}/zone-capture.md` and follow that section. A `blocked question` or `blocked input needed` first goes through Routine answers: read `${CLAUDE_SKILL_DIR}/routine-answers.md` and follow it; only one it does not answer is reported by the items here. Whatever the outcome, it lists the shared actions the worker took, with `<cwd>` from `watch.sh` and `<start>` from step 1. For a settled run, take them after the capture and any push (Capture, below), since the capture can take shared actions of its own:
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/actions.sh" --id ID --dir "<cwd>" --start <start> </dev/null
