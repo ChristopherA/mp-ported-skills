@@ -104,7 +104,8 @@
 # the list needs assistant text stamped at or after it, or reads as working
 # (one with no transcript found stands; a block that names its waitingFor is
 # not gated) (#127). --zone reads a working worker's zone reading from its
-# transcript at each poll, and returns `capture-due` once zone.sh calls it due; a
+# transcript at each poll, and returns `capture-due` once zone.sh calls it due,
+# at the capture point for the model the job's flags name (#215); a
 # worker with no transcript found, or no reading, goes on working.
 #
 # With --detail PATH, the full result goes to PATH: every line above, then
@@ -210,13 +211,14 @@ case $AFTER in *[!0-9]*) fail "--after needs epoch seconds, not '$AFTER'" ;; esa
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the profile being watched is unknown"
 # With --zone, the capture must come before the worker compacts: zone.sh
 # --compact refuses a force point at or past the auto-compact point of the
-# model the job's flags name (#181), before the first poll.
+# model the job's flags name (#181), before the first poll. Each poll's
+# zone.sh --due takes the same model, which sets the capture point (#215).
+zone_model=""
 if [ -n "$ZONE" ]; then
     job="$CLAUDE_CONFIG_DIR/jobs/$ID/state.json"
-    model=""
-    [ ! -f "$job" ] || model=$(jq -r '(.respawnFlags // []) as $f | ($f | index("--model")) as $i
+    [ ! -f "$job" ] || zone_model=$(jq -r '(.respawnFlags // []) as $f | ($f | index("--model")) as $i
         | if $i == null then empty else $f[$i + 1] // empty end' "$job" 2>/dev/null)
-    sh "$(dirname -- "$0")/zone.sh" --compact "$model" </dev/null >/dev/null || exit 1
+    sh "$(dirname -- "$0")/zone.sh" --compact "$zone_model" </dev/null >/dev/null || exit 1
 fi
 if [ -n "$SINCE" ]; then
     [ -n "$DIR" ] || fail "--since needs --dir"
@@ -488,7 +490,7 @@ report() {
                 if turn_ended "$session_id"; then
                     out=$(printf 'done%s\nnote claude agents still said working' "${out#working}")
                 elif [ -n "$ZONE" ] && t=$(transcript_of "$(session_id_of "$1")") && [ -n "$t" ] &&
-                    reading=$(sh "$(dirname -- "$0")/zone.sh" --transcript "$t" --due </dev/null 2>/dev/null); then
+                    reading=$(sh "$(dirname -- "$0")/zone.sh" --transcript "$t" --due --model "$zone_model" </dev/null 2>/dev/null); then
                     out=$(printf 'capture-due%s\nreading %s\n%s' "${out#working}" \
                         "$(printf '%s\n' "$reading" | head -n 1)" "$(printf '%s\n' "$reading" | sed -n 2p)")
                 fi

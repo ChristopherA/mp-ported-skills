@@ -131,27 +131,49 @@ check "threshold: zone.sh names it in its not-due line" "not due: below $thresho
 # --- the auto-compact point, against the force point ---------------------------
 compact() { zone --compact "$@"; }
 out=$(compact claude-opus-5-5); rc=$?
-check "compact: a 1M model passes" "compact point 533% of zone (80% of a 1000k window)" "$out"
+check "compact: a 1M model passes, and captures at 100%" "compact point 533% of zone (80% of a 1000k window)
+capture due at 100% of zone, forced at 108%" "$out"
 check "compact: a 1M model exits 0" "0" "$rc"
-check "compact: a [1m] model id is a 1M window" "compact point 533% of zone (80% of a 1000k window)" \
+check "compact: a [1m] model id is a 1M window" "compact point 533% of zone (80% of a 1000k window)
+capture due at 100% of zone, forced at 108%" \
     "$(compact 'claude-sonnet-5[1m]')"
-out=$(compact claude-sonnet-5); rc=$?
-check "compact: an unknown window is read as 200k, and says so" "note: the context window of model claude-sonnet-5 is not known, so the smallest, 200k, is used
-compact point 106% of zone (80% of a 200k window)" "$out"
+out=$(compact claude-made-up-1); rc=$?
+check "compact: an unknown window is read as 200k, and says so" "note: the context window of model claude-made-up-1 is not known, so the smallest, 200k, is used
+compact point 106% of zone (80% of a 200k window)
+capture due at 64% of zone, forced at 72%" "$out"
 check "compact: the default override with a 200k window exits 0" "0" "$rc"
 check "compact: no model is read as 200k, and says so" "note: the worker's model is not known, so the smallest context window, 200k, is used
-compact point 106% of zone (80% of a 200k window)" "$(compact '')"
-out=$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; compact claude-sonnet-5 2>&1 | grep -v '^note: ') )
+compact point 106% of zone (80% of a 200k window)
+capture due at 64% of zone, forced at 72%" "$(compact '')"
+out=$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; compact claude-made-up-1 2>&1 | grep -v '^note: ') )
 check "compact: a low override refuses, naming both points" "Error: the zone capture's force point, $force% of zone, plus the largest growth measured between two polls, ${margin}k tokens, reaches the worker's auto-compact point, 80% of zone (60% of a 200k window), so it could compact before the capture" "$out"
-(export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; compact claude-sonnet-5 >/dev/null 2>&1); rc=$?
+(export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; compact claude-made-up-1 >/dev/null 2>&1); rc=$?
 check "compact: a refusal exits 1" "1" "$rc"
-check "compact: the same low override passes on a 1M window" "compact point 400% of zone (60% of a 1000k window)" \
+check "compact: the same low override passes on a 1M window" "compact point 400% of zone (60% of a 1000k window)
+capture due at 100% of zone, forced at 108%" \
     "$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; compact claude-opus-5-5) )"
-check "compact: an override with a leading zero is read as decimal" "compact point 400% of zone (60% of a 1000k window)" \
+check "compact: an override with a leading zero is read as decimal" "compact point 400% of zone (60% of a 1000k window)
+capture due at 100% of zone, forced at 108%" \
     "$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=060; compact claude-opus-5-5) )"
 check "compact: a larger zone moves the force point" "1" \
-    "$( (export MP_SMART_ZONE_K=220; compact claude-sonnet-5 >/dev/null 2>&1; echo $?) )"
+    "$( (export MP_SMART_ZONE_K=220; compact claude-made-up-1 >/dev/null 2>&1; echo $?) )"
 compact >/dev/null; check "compact: needs a value" "1" "$?"
+
+# --- the capture point, by the room the compact point leaves -------------------
+# A compact point at least ZONE_CAPTURE_ROOM past the wide capture point, 150%
+# of zone, captures at 100% and forces 8 points later; any lower one keeps
+# the 200k window's pair. 1000k * 33% / 220k is exactly 150%; 1000k * 82% /
+# 550k is 149%.
+wide=$(sed -n 's/^ZONE_CAPTURE_WIDE=\([0-9][0-9]*\).*/\1/p' "$scripts/zone.sh")
+room=$(sed -n 's/^ZONE_CAPTURE_ROOM=\([0-9][0-9]*\).*/\1/p' "$scripts/zone.sh")
+check "capture point: the wide one is 100% of zone" "100" "$wide"
+check "capture point: it needs 50 points of room" "50" "$room"
+check "capture point: a compact point of exactly 150% captures at 100%" "compact point 150% of zone (33% of a 1000k window)
+capture due at 100% of zone, forced at 108%" \
+    "$( (export MP_SMART_ZONE_K=220 CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=33; compact claude-opus-5-5) )"
+check "capture point: one at 149% keeps 64% and 72%" "compact point 149% of zone (82% of a 1000k window)
+capture due at 64% of zone, forced at 72%" \
+    "$( (export MP_SMART_ZONE_K=550 CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=82; compact claude-opus-5-5) )"
 
 # --- due, at a safe point ----------------------------------------------------
 # call <tokens> <tool_use id or empty> -- a main-chain call row
@@ -171,6 +193,7 @@ notified() { # <task id> -- a task-notification prompt row
         message: {role: "user", content: ("<task-notification>\n<task-id>" + $id + "</task-id>\n<status>completed</status>\n</task-notification>")}}'
 }
 due() { zone --transcript "$work/t.jsonl" --due; }
+due_on() { zone --transcript "$work/t.jsonl" --due --model "$1"; } # <model>
 
 { call 60000 a; result a; call 96000 b; result b; } >"$work/t.jsonl"
 out=$(due); rc=$?
@@ -233,6 +256,42 @@ not due: background task rev1 is running" "$(due)"
 check "due: a running tool call holds at any reading" "106% of zone
 not due: a tool call is running" "$(due)"
 
+# The capture point follows the worker's model: a 1M window captures at 100%
+# and forces at 108%; a window not known, or no model, keeps 64% and 72%.
+{ call 60000 a; result a; call 120000 b; result b; } >"$work/t.jsonl"
+check "due: a 1M model is not due at 80%" "80% of zone
+not due: below 100% of zone" "$(due_on claude-opus-5-5)"
+{ call 60000 a; result a; call 149999 b; result b; } >"$work/t.jsonl"
+check "due: a 1M model is not due at 99%" "99% of zone
+not due: below 100% of zone" "$(due_on claude-opus-5-5)"
+{ call 60000 a; result a; call 150000 b; result b; } >"$work/t.jsonl"
+out=$(due_on claude-opus-5-5); rc=$?
+check "due: a 1M model is due at 100%" "100% of zone
+due" "$out"
+check "due: a 1M model due exits 0" "0" "$rc"
+{ call 60000 a; result a '{"isAsync":true,"agentId":"rev1"}'; call 160499 b; result b; } >"$work/t.jsonl"
+check "due: a 1M model's background task holds at 106%" "106% of zone
+not due: background task rev1 is running" "$(due_on 'claude-sonnet-5[1m]')"
+{ call 60000 a; result a '{"isAsync":true,"agentId":"rev1"}'; call 162000 b; result b; } >"$work/t.jsonl"
+check "due: a 1M model's background task is cut at 108%" "108% of zone
+due: background task rev1 is cut" "$(due_on claude-opus-5-5)"
+{ call 60000 a; result a; call 96000 b; result b; } >"$work/t.jsonl"
+check "due: a window not known is due at 64%" "64% of zone
+due" "$(due_on claude-made-up-1)"
+check "due: an empty model is due at 64%" "64% of zone
+due" "$(due_on '')"
+{ call 60000 a; result a; call 94500 b; result b; } >"$work/t.jsonl"
+check "due: a window not known names 64% in its not-due line" "63% of zone
+not due: below 64% of zone" "$(due_on claude-made-up-1)"
+{ call 60000 a; result a '{"isAsync":true,"agentId":"rev1"}'; call 108000 b; result b; } >"$work/t.jsonl"
+check "due: a window not known cuts a background task at 72%" "72% of zone
+due: background task rev1 is cut" "$(due_on claude-made-up-1)"
+{ call 60000 a; result a; call 352000 b; result b; } >"$work/t.jsonl"
+check "due: a compact point of 149% is due at 64%" "64% of zone
+due" "$( (export MP_SMART_ZONE_K=550 CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=82; due_on claude-opus-5-5) )"
+zone --transcript "$work/t.jsonl" --model >/dev/null; check "due: --model needs a value" "1" "$?"
+zone --compact claude-opus-5-5 --model claude-opus-5-5 >/dev/null; check "due: --model is not for --compact" "1" "$?"
+
 # A last line still being written is skipped.
 { call 60000 a; result a; call 102000 b; result b; printf '{"type":"assistant","mess'; } >"$work/t.jsonl"
 check "due: a half-written last line is skipped" "68% of zone
@@ -265,14 +324,14 @@ job() { # <model or empty>
 }
 
 { call 60000 a; result a; call 90000 b; result b; } >"$work/t.jsonl"; put
-job claude-sonnet-5
+job claude-made-up-1
 out=$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; watch --zone) ); rc=$?
 check "watch --zone: a low override refuses before the watch, naming both points" "Error: the zone capture's force point, $force% of zone, plus the largest growth measured between two polls, ${margin}k tokens, reaches the worker's auto-compact point, 80% of zone (60% of a 200k window), so it could compact before the capture" \
     "$(printf '%s\n' "$out" | grep -v '^note: ')"
 check "watch --zone: a refusal exits 1" "1" "$rc"
 check "watch: without --zone, the override is not checked" "working
 cwd /work/project" "$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; watch) )"
-check "watch --zone: an unknown window says so, and watches on" "note: the context window of model claude-sonnet-5 is not known, so the smallest, 200k, is used
+check "watch --zone: an unknown window says so, and watches on" "note: the context window of model claude-made-up-1 is not known, so the smallest, 200k, is used
 working
 cwd /work/project" "$(watch --zone)"
 job ""
@@ -282,6 +341,17 @@ cwd /work/project" "$(watch --zone)"
 job claude-opus-5-5
 check "watch --zone: the low override passes on a 1M model" "working
 cwd /work/project" "$( (export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=60; watch --zone) )"
+{ call 60000 a; result a; call 148500 b; result b; } >"$work/t.jsonl"; put
+check "watch --zone: a 1M model at 99% is still working" "working
+cwd /work/project" "$(watch --zone)"
+{ call 60000 a; result a; call 150000 b; result b; } >"$work/t.jsonl"; put
+check "watch --zone: a 1M model at 100% is capture-due" "capture-due
+cwd /work/project
+reading 100% of zone
+due" "$(watch --zone)"
+# The checks below read the 200k window's points; its note is checked above.
+job claude-made-up-1
+watch() { sh "$scripts/watch.sh" --id c2a368ee --file "$fixtures/working-busy.json" "$@" </dev/null 2>&1 | grep -v '^note: '; }
 
 { call 60000 a; result a; call 102000 b; result b; } >"$work/t.jsonl"; put
 check "watch --zone: due returns capture-due, with the reading" "capture-due

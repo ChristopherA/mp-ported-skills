@@ -27,4 +27,4 @@ The largest growths are several calls landing inside one poll interval (parallel
 - `ZONE_FORCE * 1.5k + 50k < 160k`, so `ZONE_FORCE` is at most 73; it is set to 72.
 - `ZONE_CAPTURE` keeps its 8-point gap below the force point: 64.
 
-On a 1M window (`claude-opus-5-5`, `claude-fable-5-1`, or a `[1m]` model id) the compact point is about 533% of zone, far above both. `zone.sh --compact MODEL`, which `watch.sh --zone` runs before its first poll, refuses when the running override and the model's window put the force point plus the margin at or past the compact point.
+On a 1M window (`claude-opus-5-5`, `claude-fable-5-1`, or a `[1m]` model id) the compact point is about 533% of zone, far above both. From #215, a worker whose compact point is at least 150% of zone is captured at `ZONE_CAPTURE_WIDE`, 100%, and forced at 108%; the force point plus the margin, about 141% of zone, still stays below that compact point. `zone.sh --compact MODEL`, which `watch.sh --zone` runs before its first poll, refuses when the running override and the model's window put the force point plus the margin at or past the compact point.
