@@ -108,6 +108,8 @@ The deny-shared-actions hook scans the whole text of a Bash command, quoted text
 
 A worker closes its own ticket under the `issue-close` grant with a plain `gh issue close N`, and puts what landed in its commit messages. `--comment` adds an issue comment, which the `issue-comment` grant covers only for a capture's findings: in #221 the auto-mode classifier refused `gh issue close 221 --comment ...` as an external write, and the plain close then went through.
 
+A worker takes each granted shared action in its own Bash call: the push, then the close, then the plugin update. In #215 the auto-mode classifier refused one call that chained `git push`, `gh issue close` and `claude plugin update`, with no reason given; the same three, run one per call, each went through.
+
 ## Calling claude from scripts
 
 A `claude` option that takes a list (`--allowedTools`, `--disallowedTools`, and any other `claude --help` shows as `<tools...>` or `<values...>`) goes before another option, never right before the prompt, as `launch.sh` places `--disallowedTools`. A list option reads every word after it that does not start with `-`, so the prompt becomes an entry in the list: `claude -p --disallowedTools EnterWorktree 'Reply OK'` warns that the deny rule "Reply" matches no known tool, then fails with `Input must be provided`.
