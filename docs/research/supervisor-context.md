@@ -39,20 +39,30 @@ The base read **75,161** and 75,158.
 | Source | How it was removed | Tokens |
 |---|---|---|
 | Profile and Project instructions, all of them (103.9 KB) | `claudeMdExcludes` on every `CLAUDE.md` and rule | 36,303 |
-| - the profile's rules (23 files, 76.3 KB) | `claudeMdExcludes` on `rules/**` | 24,663 |
-| - this repo's `CLAUDE.md` (25.9 KB) | `claudeMdExcludes` | 8,199 |
+| - the profile's rules (23 files, 76.3 KB) | `claudeMdExcludes` on `rules/**` | 25,618 (matched; 24,663 first) |
+| - this repo's `CLAUDE.md` (26.4 KB) | `claudeMdExcludes` | 9,168 (matched; 8,199 first) |
 | - the profile's `CLAUDE.md` (3.1 KB) | `claudeMdExcludes` | 1,244 |
 | - the Hub's `CLAUDE.md` (1.0 KB) | `claudeMdExcludes` | 419 |
-| - not removed by any one exclude (rest of the 36,303) | by difference | 1,778 |
+| - the rest, by difference | | 1,778 read, about 0 matched (below) |
 | The `Artifact` tool | `--disallowedTools` | 12,188 |
 | `Workflow` | `--disallowedTools` | 1,979 |
 | Claude in Chrome | `--no-chrome` | 1,639 |
 | The `cloudflare` plugin | `enabledPlugins` off in `--settings` | 1,074 |
-| `SendFeedback` | `--disallowedTools` | 1,113, unconfirmed |
-| `ScheduleWakeup` | `--disallowedTools` | 872, unconfirmed |
+| `SendFeedback` | `--disallowedTools` | 1,956 (1,955 and 1,957, matched) |
+| `ScheduleWakeup` | `--disallowedTools` | 1,696 (twice, matched) |
 | All six unused tools at once | all of the above | 20,636 |
 
-The six one-at-a-time readings add to 18,865, 1,771 short of the 20,636 they read together. The environment and listing block varied by up to 2.2 KB between probes with the same flags (20,218 to 22,416 bytes), likely the `cloudflare` MCP server's connection state at the first call, so a single reading under about 600 tokens of change is noise. `SendFeedback` (5.6 KB of tool text) and `ScheduleWakeup` (4.8 KB) read lower than their bytes suggest beside `Workflow` (5.5 KB, 1,979), and need a second probe each.
+The environment and listing block, the system-role message after the prompt, varied between probes with the same flags: 20,218 bytes in some and 21,943 to 22,416 in others, likely the `cloudflare` MCP server's connection state at the first call. Two bases with the same flags read 75,307 at 20,218 bytes and 76,151 at 22,208, so its swing is worth up to 844 tokens (2.36 bytes a token). A reading is good only against a base whose block has the same size, so the `SendFeedback`, `ScheduleWakeup`, rules and repo `CLAUDE.md` probes were run again in matched pairs (by then this repo's `CLAUDE.md` had grown 495 bytes, so the instructions block was 105,617 bytes):
+
+| Probe | Block | Base | Removed |
+|---|---|---|---|
+| `SendFeedback` (5.6 KB of tool text) | 22,208 | 76,151 | 1,955 and 1,957 |
+| `ScheduleWakeup` (4.8 KB) | 22,208 | 76,151 | 1,696 and 1,696 |
+| the profile's rules (73.3 KB) | 20,218 | 75,307 | 25,618 |
+| this repo's `CLAUDE.md` (26.7 KB) | 20,218 | 75,307 | 9,168 |
+
+The first readings of these four (1,113, 872, 24,663 and 8,199) each ran with a larger block than their base, which hid 600 to 950 tokens of the removal. Matched, the four instruction sources add to 25,618 + 9,168 + 1,244 + 419 = 36,449, against 36,303 for all of them at once plus about 170 for the 495 bytes since: the 1,778 was the block's swing, not a source no exclude reaches. The removed bytes agree: 73,257 + 26,224 + 3,282 + 1,113 = 103,876, exactly what the all-instructions exclude removed. Matched, the six tools add to 12,188 + 1,979 + 1,956 + 1,696 + 1,639 + 1,074 = 20,532, against 20,636 together.
+
 
 `supervise`'s text, counted from its text: a probe in plan mode (so it could not act on the text) whose prompt carried the file as data, against the same prompt without it (77,631).
 
@@ -61,11 +71,29 @@ The six one-at-a-time readings add to 18,865, 1,771 short of the 20,636 they rea
 | `SKILL.md` at 0.8.109 | 48,747 | 16,310 |
 | `loop.md` at 0.8.109 | 11,606 | 4,085 |
 
-Both read about 2.9 to 3.0 bytes a token, not the 2.6 to 2.7 above, so `SKILL.md` is 16.3k, not the 13k #228 assumed.
+The `SKILL.md` probe's environment block was 1,750 bytes smaller than its base's, so its 16,310 is about 740 short: `SKILL.md` is near 17.0k, 2.9 bytes a token of its text (2.88 of the request's escaped text), not the 13k #228 assumed. `loop.md`'s probe had the same block as the `SKILL.md` one.
 
-A narrower ticket read, the title and the latest comment with an `## Agent Brief` heading or the body when there is none (`--jq '{title, brief: (([.comments[] | select(.body | test("^## Agent Brief"; "m"))] | last | .body) // .body)}'`), read 1,083 for #166, 1,284 for #185 and 1,277 for #184, against the full reads in By step. The launch summary (`SKILL.md`, Launch) is the only use of step 1's read.
+### The supervisor's first call, accounted for
 
-Not yet done: the narrower read adopted or rejected, and the 94,106 accounted for to under 3k (the base plus `SKILL.md` as it was at that run, the background-session section, the `/clear` and `/reload-plugins` messages and the instructions' growth since), and what the 1,778 is.
+Supervisor 68550ae8's first call against base-a (75,161), part by part, in bytes from the request rows, converted at the ratio measured for that kind of text:
+
+| Part | Bytes, supervisor vs base | Tokens |
+|---|---|---|
+| Base: system prompt, 17 tools, instructions, environment block, the probe's prompt | | 75,161 |
+| `supervise`'s `SKILL.md` at 0.8.106 | +51,233 (2.88 a token) | +17,790 |
+| Environment and listing block | 22,670 vs 20,218 (2.36) | +1,039 |
+| The `/clear` and `/reload-plugins` messages and the skill's command line, less the probe's prompt | +1,806 (about 2.5) | +720 |
+| Instructions, smaller then | 103,805 vs 105,122 (2.86) | -460 |
+| The background-session section, which the supervisor does not carry | 6,166 vs 7,304 (about 2.9) | -390 |
+| Predicted | | 93,860 |
+| Read | | 94,106 |
+| Unexplained | | 246 |
+
+By source, then, the supervisor's 94.1k is: instructions 35.8k (profile rules 25.6k, this repo's `CLAUDE.md` 9.2k, the profile's `CLAUDE.md` 1.2k, the Hub's 0.4k, less the 0.5k they have grown since); the six unused tools 20.6k (`Artifact` 12.2k); `supervise`'s `SKILL.md` 17.8k; the system prompt, the core tools and the environment and listing block 19.3k; the session's command messages 0.7k; and 0.2k unexplained. A loop adds `loop.md`'s 4.1k when it reads it.
+
+### Step 1's ticket read
+
+The full read (By step) cost 3,215 on #166 (2 comments), 11,579 on #185 (14 comments) and 2,291 on #184, whose 35.8 KB was past the Bash output limit and saved to a file, so only its preview was read. A narrower read, the title and the latest comment with an `## Agent Brief` heading or the body when there is none (`--jq '{title, brief: (([.comments[] | select(.body | test("^## Agent Brief"; "m"))] | last | .body) // .body)}'`), read 1,083, 1,284 and 1,277. The launch summary is the only use of step 1's read, and it is built to the latest Agent Brief or the body; the worker reads the whole ticket itself under `/implement`. So the narrower read saves 2k to 10k a ticket, more as a ticket collects progress notes and run records, and loses nothing the supervisor uses. It is adopted in `SKILL.md` step 1 (0.8.110). On a ticket whose full read was past the output limit it also replaces a file preview with the brief itself.
 
 ## By step
 
@@ -74,7 +102,8 @@ Growth per step, from the three sessions:
 | Step | Tokens |
 |---|---|
 | `step.sh` | 360 to 2,500 |
-| Ticket read (`gh issue view N --json title,body,comments`, step 1) | 3,215 for #166 (2 comments, 4.0 KB); 11,579 for #185 (14 comments, 18.6 KB); a ticket past the Bash output limit, such as #184 (35.8 KB), is saved to a file and reads 2,291 with only its preview, before the file is read |
+| Ticket read (step 1), full (`gh issue view N --json title,body,comments`, before 0.8.110) | 3,215 for #166 (2 comments, 4.0 KB); 11,579 for #185 (14 comments, 18.6 KB); a ticket past the Bash output limit, such as #184 (35.8 KB), is saved to a file and reads 2,291 with only its preview, before the file is read |
+| Ticket read (step 1), title and latest Agent Brief (0.8.110) | 1,083 for #166, 1,284 for #185, 1,277 for #184 |
 | `launch.sh` | about 300 |
 | `view.sh` and `watch.sh` started | about 800 |
 | Each worker turn end: the watch's task notification, reading its output, `last-message.sh` | 2,000 to 3,500 |
