@@ -547,6 +547,10 @@ issues "$(list "$(issue 52 ready-for-agent)")"
 out=$(run)
 check "queue: case 2, one ready ticket" "#52" "$(queue "$out")"
 check "supervise: not offered for a queue of one" "$(one 52)" "$(sup "$out")"
+agents "$(list "$(row ee55 working 14)")"
+check "supervise: a queue of one beside a live session still names the queue" "$(one 52)" "$(sup "$(run)")"
+agents '[]'
+check "supervise: a queue of one when claude agents fails still names the queue" "$(one 52)" "$(sup "$(FAKE_CLAUDE_FAIL=1 run)")"
 check "supervise: next line unchanged" "2 /implement #52 (you type it; user-invoked): #52 t52" "$(next "$out")"
 issues "$(list "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)")"
 out=$(run)

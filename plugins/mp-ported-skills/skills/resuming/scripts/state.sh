@@ -14,8 +14,7 @@
 # step is /implement #N, prints the queue a /supervise --loop would run
 # (`queue:`), a sub-issue reorder that would lengthen it (`reorder:`), and the
 # loop command, offered only for two or more tickets or a run to continue
-# (`supervise:`). Writes
-# nothing.
+# (`supervise:`). Writes nothing.
 #
 # Usage: sh state.sh [dir]
 #   dir defaults to the current folder. Reports everything; an unreached
@@ -635,14 +634,18 @@ gather() {
     elif [ -n "$dist_unread" ]; then refusal="distribution repo $dist_unread"
     elif [ -z "$step_n" ]; then refusal="other work in flight: ${inflight_rest#, }"
     fi
-    # A queue of one (lone) refuses only when no run is there to continue
-    # (#221): a continued ticket is worth a loop on its own, which goes on to
-    # whatever is ready after it.
+    # A queue of one refuses only when no run is there to continue (#221): a
+    # continued ticket is worth a loop on its own, which goes on to whatever
+    # is ready after it. With unpushed commits it waits on the run records
+    # (lone): one that accounts for them lifts it, and none leaves the
+    # unpushed refusal, with no push-first advice.
     hard=$refusal lone=
     if [ -n "$refusal" ]; then :
     elif ! [ "$qlen" -ge 0 ] 2>/dev/null; then refusal="the queue could not be read"
+    elif [ "$qlen" -lt 2 ] && [ "$unpushed" -eq 0 ]; then
+        refusal="a queue of one (#$step_n); /supervise is worth running only for two or more tickets"
     else
-        [ "$qlen" -ge 2 ] || lone="a queue of one (#$step_n); /supervise is worth running only for two or more tickets"
+        [ "$qlen" -ge 2 ] || lone=1
         here=$(pwd -P)
         # Which sessions are live is live.sh's, shared with launch.sh, which
         # also refuses one in the Distribution repo.
@@ -660,7 +663,8 @@ gather() {
     # A read of the run records that fails is told apart from one that finds
     # no run (#222): a read that worked might have continued the ticket, so
     # it gives no push-first advice. Its lines print as a continued run's
-    # would, and a refusal that holds whatever the read finds stands.
+    # would, and a refusal set before the read, which holds whatever it
+    # finds, stands.
     start= push_first= records_unread=
     if [ "$unpushed" -gt 0 ] && [ -z "$early" ]; then
         if [ -n "$hard" ]; then :
@@ -677,7 +681,6 @@ gather() {
             refusal="$unpushed unpushed commits; push them first"
         fi
     fi
-    [ -z "$lone" ] || [ "$unpushed" -gt 0 ] || refusal=$lone
     if [ "$unpushed" -gt 0 ] && [ -z "$start" ] && [ -z "$push_first" ] && [ -z "$records_unread" ]; then
         [ -n "$impl" ] || return 0
     else
