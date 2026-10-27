@@ -854,6 +854,9 @@ git -C "$dproj" worktree add -q "$work/dproject-wt" 2>/dev/null
 check "dist: a worktree checkout with --project" \
     "1 commit after $pshort in the Project repo, 2 commits after $dshort in the Distribution repo, PR #72, ticket #56 CLOSED" \
     "$(field outcome "$(drecord --dir "$work/dproject-wt" --project "$dproj" --dist-start "$dstart")")"
+check "dist: a worktree checkout without --project" \
+    "1 commit after $pshort in the Project repo, 2 commits after $dshort in the Distribution repo, PR #72, ticket #56 CLOSED" \
+    "$(field outcome "$(drecord --dir "$work/dproject-wt" --dist-start "$dstart")")"
 git -C "$dproj" worktree remove --force "$work/dproject-wt"
 # A --dir that is the Distribution repo: the Project's commits from --project.
 check "dist: --dir is the Distribution repo" \
@@ -871,6 +874,19 @@ check "dist: a bad --dist-start, outcome unknown" \
     "1 commit after $pshort in the Project repo, commits unknown in the Distribution repo, PR #72, ticket #56 CLOSED" \
     "$(field outcome "$out")"
 check "dist: a bad --dist-start, a note" "1" "$(printf '%s\n' "$out" | grep -c '^- note: .*Distribution repo')"
+# A Distribution repo path that is a plain folder inside another repo is
+# not counted as that repo: unknown, with a note.
+echo plain >"$dproj/docs/agents/distribution-repo.md"
+mkdir -p "$dproj/plain"
+repo_git "$dproj" commit -q -am "name a plain folder"
+repo_git "$dproj" push -q origin main 2>/dev/null
+out=$(drecord --dist-start "$dstart")
+check "dist: a plain folder, outcome unknown" \
+    "2 commits after $pshort in the Project repo, commits unknown in the Distribution repo, PR #72, ticket #56 CLOSED" \
+    "$(field outcome "$out")"
+check "dist: a plain folder, a note" "1" "$(printf '%s\n' "$out" | grep -c '^- note: .*not a repo of its own')"
+repo_git "$dproj" reset -q --hard HEAD~1
+repo_git "$dproj" push -q -f origin main 2>/dev/null
 # A hand-run session counts the Distribution repo too.
 check "dist: --session counts the Distribution repo" \
     "1 commit after $pshort in the Project repo, 2 commits after $dshort in the Distribution repo, ticket #56 CLOSED" \

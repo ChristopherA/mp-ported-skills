@@ -88,6 +88,12 @@ A settled run (`done` after its capture and any push, the end of Push on approva
 sh "${CLAUDE_SKILL_DIR}/scripts/finish.sh" --dir "<project folder>" --cwd "<cwd>" --id ID --start <start> --ticket N --record "<scratchpad>/run-record.md" --session "${CLAUDE_SESSION_ID}" --session-dir "$PWD" </dev/null
 ```
 
+With a Distribution repo:
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/finish.sh" --dir "<project folder>" --cwd "<cwd>" --id ID --start <start> --dist-start <dist start> --ticket N --record "<scratchpad>/run-record.md" --session "${CLAUDE_SESSION_ID}" --session-dir "$PWD" </dev/null
+```
+
 It runs, in order, `stop.sh`, `view.sh --close`, `actions.sh`, the glance, `record.sh` to the record file and `gh issue comment` posting it, each as the passages below describe, and writes their full output to the `detail` file it names. When nothing needs the maintainer it prints one `clean <url>; shared actions: ...; glance: <reading>` line: report the URL as the run record's comment, the shared actions (`none`, or the ones the record lists), and the glance line as it reads. Otherwise it prints one line per item, each reported as the passages below say: an `ungranted`, `pushed by someone else` or `note` line from `actions.sh`, `viewer not closed:`, `actions not read:`, `record failed:`, or `post failed: ...` or `post printed no URL` with the record's path; then `record <url>`, the shared-actions count and `glance:`. Read the detail file only for an item whose line does not say enough. A `stop failed:` line, with the `finish with:` line after it, exits 1 before anything past the stop, and a refusal of the `finish.sh` call itself, by the classifier or a permission prompt, runs none of it: for either, read `${CLAUDE_SKILL_DIR}/stop-refused.md` and follow it. On a worker that Push on approval or Post on approval already stopped, `stop.sh` finds it stopped and the rest runs as usual.
 
 The passages below are for what `finish.sh` does not cover: `moved`, `stopped`, `gone`, and a worker left running.
@@ -136,6 +142,12 @@ Then record the run, whatever the outcome, with the same `<cwd>` and `<start>` a
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/record.sh" --id ID --dir "<cwd>" --start <start> --ticket N > "<scratchpad>/run-record.md" </dev/null
+```
+
+With a Distribution repo:
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/record.sh" --id ID --dir "<cwd>" --project "<project folder>" --start <start> --dist-start <dist start> --ticket N > "<scratchpad>/run-record.md" </dev/null
 ```
 
 It prints the record as a Markdown list, one field a line; `record.sh`'s header names each field and where it comes from. `supervisor context` is this session's context at its last call before the launch and at its last call so far, as a percentage of the zone: what the run cost a loop's zone (#118). A field whose source was not read says `unknown`, with a `note` line naming the source. The supervisor's own cost reads `unknown` while this session runs, because a running interactive session's transcript holds no cost row yet; its calls and tokens are still counted. Post it on the ticket, run in the Project folder, and include it in the report:

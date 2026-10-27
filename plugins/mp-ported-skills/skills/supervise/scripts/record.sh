@@ -110,8 +110,9 @@
 # DIR is the checkout the worker committed in (watch.sh's cwd line), START
 # the commit the branch started at. The supervisor's session defaults to
 # $CLAUDE_CODE_SESSION_ID, the session running this script. PROJECT is the
-# Project folder, which names the Distribution repo; it defaults to DIR,
-# which may be a worktree. DIST_SHA is the Distribution repo's head when the
+# Project folder, which names the Distribution repo and whose tracker holds
+# the ticket; it defaults to DIR, or to DIR's main checkout when DIR is a
+# linked worktree. DIST_SHA is the Distribution repo's head when the
 # run started (the snapshot's `dist head` line); giving it for a Project with
 # no Distribution repo is a usage error. When DIR is the Distribution repo,
 # the Project's commits are counted in PROJECT.
@@ -157,18 +158,30 @@ fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 case $TICKET in *[!0-9]*) fail "--ticket needs an issue number, not '$TICKET'" ;; esac
 [ -d "$DIR" ] || fail "not a directory: $DIR"
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the worker's job is unknown"
-[ -n "$PROJECT" ] || PROJECT=$DIR
+# A linked worktree's main checkout is the first one git lists.
+if [ -z "$PROJECT" ]; then
+    PROJECT=$DIR
+    dirs=$(git -C "$DIR" rev-parse --path-format=absolute --git-dir --git-common-dir 2>/dev/null) &&
+        [ "$(printf '%s\n' "$dirs" | sed -n 1p)" != "$(printf '%s\n' "$dirs" | sed -n 2p)" ] &&
+        PROJECT=$(git -C "$DIR" worktree list --porcelain | sed -n '1s/^worktree //p')
+fi
 [ -d "$PROJECT" ] || fail "not a directory: $PROJECT"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # The Project's Distribution repo, when it names one (#216). One it names
-# but distribution.sh cannot read is counted as unknown, not as none.
+# that distribution.sh cannot read, or that is not a repo of its own, is
+# counted as unknown, not as none: a plain folder inside another repo would
+# have git count that repo's commits.
 dist="" dist_unread=""
 dist=$(sh "$SCRIPT_DIR/distribution.sh" --dir "$PROJECT" </dev/null 2>/dev/null) || dist="" dist_unread=1
 [ -z "$DIST_START" ] || [ -n "$dist$dist_unread" ] || fail "--dist-start given, but $PROJECT names no Distribution repo"
-# The Project's commits are counted in DIR, or in PROJECT when DIR is the
-# Distribution repo.
+if [ -n "$dist" ] && [ "$(git -C "$dist" rev-parse --show-toplevel 2>/dev/null)" != "$dist" ]; then
+    dist_unread="$dist is not a repo of its own"
+fi
+# The Project's commits are counted in DIR, or in PROJECT when DIR is in
+# the Distribution repo.
 proj_git=$DIR
-[ -z "$dist" ] || [ "$(CDPATH= cd -- "$DIR" && pwd -P)" != "$dist" ] || proj_git=$PROJECT
+[ -z "$dist" ] || [ -n "$dist_unread" ] ||
+    [ "$(git -C "$DIR" rev-parse --show-toplevel 2>/dev/null)" != "$dist" ] || proj_git=$PROJECT
 git -C "$proj_git" rev-parse -q --verify "$START^{commit}" >/dev/null || fail "not a commit in $proj_git: $START"
 [ -n "$NOW" ] || NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 jq -en --arg t "$NOW" '$t | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601' >/dev/null 2>&1 ||
@@ -511,29 +524,31 @@ count=$(git -C "$proj_git" rev-list --count "$START..HEAD" 2>/dev/null) || {
     note "git rev-list $START..HEAD failed in $proj_git, so the commits were not counted"
     count=""
 }
-# The Distribution repo's part of the outcome, empty when there is none.
-dist_part=""
-if [ -n "$dist_unread" ]; then
+# The Distribution repo's count for the outcome: none (no such repo),
+# uncounted (no --dist-start), unknown, or counted, with dist_count after
+# dist_short.
+dist_outcome=none dist_count="" dist_short=""
+if [ "$dist_unread" = 1 ]; then
     note "distribution.sh failed in $PROJECT, so the Distribution repo's commits were not counted"
-    dist_part="commits unknown in the Distribution repo"
+    dist_outcome=unknown
+elif [ -n "$dist_unread" ]; then
+    note "$dist_unread, so the Distribution repo's commits were not counted"
+    dist_outcome=unknown
 elif [ -z "$dist" ]; then
     :
 elif [ -z "$DIST_START" ]; then
     note "no --dist-start, so the commits in Distribution repo $dist were not counted"
-    dist_part="Distribution repo commits not counted (no --dist-start)"
+    dist_outcome=uncounted
 elif dist_sha=$(git -C "$dist" rev-parse -q --verify "$DIST_START^{commit}" 2>/dev/null) &&
     dist_count=$(git -C "$dist" rev-list --count "$dist_sha..HEAD" 2>/dev/null); then
     dist_short=$(git -C "$dist" rev-parse --short "$dist_sha")
-    case $dist_count in
-        0) dist_part="no commits after $dist_short in the Distribution repo" ;;
-        1) dist_part="1 commit after $dist_short in the Distribution repo" ;;
-        *) dist_part="$dist_count commits after $dist_short in the Distribution repo" ;;
-    esac
+    dist_outcome=counted
 else
     note "git rev-list $DIST_START..HEAD failed in Distribution repo $dist, so its commits were not counted"
-    dist_part="commits unknown in the Distribution repo"
+    dist_outcome=unknown
 fi
-if state=$(cd "$DIR" && gh issue view "$TICKET" --json state --jq .state </dev/null 2>/dev/null) && [ -n "$state" ]; then
+# The ticket is read from the Project's tracker, which DIR may not be.
+if state=$(cd "$PROJECT" && gh issue view "$TICKET" --json state --jq .state </dev/null 2>/dev/null) && [ -n "$state" ]; then
     ticket="ticket #$TICKET $state"
 else
     note "gh issue view $TICKET failed, so the ticket's state was not read"
@@ -554,8 +569,12 @@ fi
 jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launched "$launched" --arg now "$NOW" \
     --argjson w "$worker" --arg sub "$subcalls" --arg sup "$supervisor" --arg supctx "$sup_context" --arg waits "$waits" \
     --arg actions "$actions" --arg short "$short" --arg count "$count" --arg children "$children" \
-    --arg ticket "$ticket" --arg n "$TICKET" --argjson ap "$approvals_json" --arg pb "$parked_branch" --arg dist "$dist_part" "$defs"'
+    --arg ticket "$ticket" --arg n "$TICKET" --argjson ap "$approvals_json" --arg pb "$parked_branch" \
+    --arg dist "$dist_outcome" --arg dcount "$dist_count" --arg dshort "$dist_short" "$defs"'
     def plural($k; $word): "\($k) \($word)\(if $k == 1 then "" else "s" end)";
+    def after($k; $s): if $k == "" then "commits unknown"
+                       elif $k == "0" then "no commits after \($s)"
+                       else "\(plural($k | tonumber; "commit")) after \($s)" end;
     ($session != "") as $hand
     | (if $hand then "session" else "worker" end) as $who
     | (if $hand then $w.started // "" else $launched end) as $launched
@@ -617,11 +636,11 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
        | if $actions == "" or $actions == "none" then "- shared actions: none"
          elif $actions == "unknown" then "- shared actions: unknown"
          else "- shared actions:", ($actions | split("\n")[] | "  - \(.)") end),
-      "- outcome: \([(if $count == "" then "commits unknown"
-                      elif $count == "0" then "no commits after \($short)"
-                      else "\(plural($count | tonumber; "commit")) after \($short)" end)
-                     + (if $dist == "" then "" else " in the Project repo" end),
-                     (select($dist != "") | $dist),
+      "- outcome: \([after($count; $short) + (if $dist == "none" then "" else " in the Project repo" end),
+                     (if $dist == "none" then empty
+                      elif $dist == "uncounted" then "Distribution repo commits not counted (no --dist-start)"
+                      elif $dist == "unknown" then "commits unknown in the Distribution repo"
+                      else "\(after($dcount; $dshort)) in the Distribution repo" end),
                      (select($children != "") | $children), $ticket] | join(", "))",
       ([$w.marks // [] | .[] | select(.end and (.parked // null) != null) | .parked] | last) as $pq
       | select($pq != null)
