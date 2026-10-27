@@ -113,6 +113,11 @@ check "skill: ticket read no longer reads every comment" no \
 check "skill: ticket read takes the latest Agent Brief" '{"title":"t","brief":"## Agent Brief\nnew"}' \
     "$(printf '%s' '{"title":"t","body":"b","comments":[{"body":"## Agent Brief\nold"},{"body":"## Agent Brief\nnew"},{"body":"a note"}]}' |
         jq -c "$brief_jq")"
+# The heading may follow other lines of its comment. A "m" flag does not make
+# `^` match there, in jq or in gh's gojq; an inline (?m) does in both.
+check "skill: ticket read finds a brief heading below the comment's first line" '{"title":"t","brief":"> from triage\n## Agent Brief\nnew"}' \
+    "$(printf '%s' '{"title":"t","body":"b","comments":[{"body":"> from triage\n## Agent Brief\nnew"}]}' |
+        jq -c "$brief_jq")"
 check "skill: ticket read falls back to the body" '{"title":"t","brief":"b"}' \
     "$(printf '%s' '{"title":"t","body":"b","comments":[{"body":"a note with ## Agent Brief inline"}]}' |
         jq -c "$brief_jq")"
