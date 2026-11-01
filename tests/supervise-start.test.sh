@@ -31,6 +31,9 @@ check() { # <name> <expected> <actual>
 contains() { # <file> <fixed string> -- yes or no
     if [ -f "$1" ] && grep -qF -- "$2" "$1"; then echo yes; else echo no; fi
 }
+has_line() { # <file> <whole line> -- yes or no
+    if [ -f "$1" ] && grep -qxF -- "$2" "$1"; then echo yes; else echo no; fi
+}
 
 unused=$(sed -n 's/^UNUSED="\(.*\)"$/\1/p' "$launch")
 check "launch.sh names its unused tools on one UNUSED line" \
@@ -39,7 +42,7 @@ commas=$(printf '%s' "$unused" | tr ' ' ',')
 quoted=$(printf '%s' "$unused" | sed 's/[^ ]*/"&"/g; s/ /, /g')
 
 check "SKILL.md has a section on starting the supervisor's session" yes \
-    "$(contains "$skill" '## Starting this session')"
+    "$(has_line "$skill" '## Starting this session')"
 check "the start command drops launch.sh's unused tools and Chrome" \
     "claude --disallowedTools $commas --no-chrome" \
     "$(grep -x "claude --disallowedTools [A-Za-z,]* --no-chrome" "$skill")"
@@ -48,14 +51,16 @@ check "the section says why each tool is left out" yes \
 check "the section names the saving's source" yes \
     "$(contains "$skill" '`docs/research/supervisor-context.md`')"
 check "the app route names the server's lack of a tool deny" yes \
-    "$(contains "$skill" '`claude remote-control` server')"
+    "$(contains "$skill" 'the server takes `--no-chrome` but no tool deny')"
 check "the app route gives the same tools as a settings deny" yes \
     "$(contains "$skill" "\"permissions\": {\"deny\": [$quoted]}")"
-check "the app route says the settings file must be git-ignored" yes \
-    "$(contains "$skill" 'git-ignored')"
+check "the app route says to start the server without Chrome" yes \
+    "$(contains "$skill" 'Start the server with `--no-chrome`')"
+check "the app route says to git-ignore the settings file" yes \
+    "$(contains "$skill" 'Add the file to `.gitignore` when git does not already ignore it')"
 
 check "the research records the start command's first call" yes \
-    "$(contains "$research" '## A supervisor started without its unused tools (#229)')"
+    "$(has_line "$research" '### A supervisor started without its unused tools (#229)')"
 check "the research records the start command against its base" yes \
     "$(contains "$research" '| Started with the start command | 57,747 |')"
 
