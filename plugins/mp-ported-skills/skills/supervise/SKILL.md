@@ -8,6 +8,16 @@ Run one ticket in a Project, from the Hub or from inside the Project, as the mai
 
 The Project folder, relative to this session's folder or absolute, is the first word here (`.` when this session runs inside the Project); `--model <id>`, `--effort <level>`, `--watch tmux` or `--watch iterm`, and `--loop`, optionally with a ticket count (`--loop 2`), may follow: $ARGUMENTS
 
+## Starting this session
+
+No step of this skill, `capturing` or `resuming` calls `Artifact`, `Workflow`, `ScheduleWakeup`, `SendFeedback` or Claude in Chrome: a supervisor does not publish a page, run a workflow, schedule a `/loop` wakeup, draft feedback or drive a browser. `launch.sh` leaves the same ones out of a worker. A supervisor started from a terminal without them has 20.4k tokens less at its first call, about 14 points of a 150k zone (`docs/research/supervisor-context.md`):
+
+```sh
+claude --disallowedTools Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome
+```
+
+Then type `/mp-ported-skills:supervise ...` in it. From the Claude app, a session gets only what its `claude remote-control` server was started with, and the server takes `--no-chrome` but no tool deny (Claude Code 2.1.316). There, put the same deny in the settings of the folder the server runs in, `.claude/settings.local.json`: `"permissions": {"deny": ["Artifact", "Workflow", "ScheduleWakeup", "SendFeedback"]}`. It holds for every session started in that folder, the maintainer's own included, until removed, and the file must be git-ignored, or `launch.sh` refuses the tree as dirty.
+
 ## Policy
 
 The supervisor drives build-loop defaults and nothing else:
