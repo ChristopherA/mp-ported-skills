@@ -298,6 +298,9 @@ new_dist() {
     printf '{"name": "d", "version": "1.2.4"}\n' >"$dist/plugin/.claude-plugin/plugin.json"
     repo_git "$dist" commit -q -am "Bump plugin to 1.2.4"
     dist_head=$(git -C "$dist" rev-parse HEAD)
+    # The launch record release.sh leaves for worker 3fb49286 (#164).
+    dist_record=$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-launch-3fb49286)
+    printf 'distribution %s\n' "$dist" >"$dist_record"
 }
 dpush() { # [args...] -- push.sh for worker 3fb49286 with both starts
     sh "$scripts/push.sh" --dir "$project" --id 3fb49286 --start "$start" --dist-start "$dist_start" "$@" </dev/null 2>&1
@@ -355,8 +358,7 @@ new_dist 1
 command cp -R "$dist" "$work/launched$n"
 command cp -R "$dist_remote" "$work/launched$n.git"
 git -C "$work/launched$n" remote set-url origin "$work/launched$n.git"
-printf 'distribution %s\n' "$work/launched$n" \
-    >"$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-launch-3fb49286)"
+printf 'distribution %s\n' "$work/launched$n" >"$dist_record"
 out=$(dpush --sweep "$sweep"); rc=$?
 check "launch record: exits 0" "0" "$rc"
 check "launch record: says origin names another repo" "note the Distribution repo is $work/launched$n, as the launch of 3fb49286 checked; origin now names $dist" \
@@ -364,11 +366,18 @@ check "launch record: says origin names another repo" "note the Distribution rep
 check "launch record: the launch's repo is pushed" "$dist_head" "$(git -C "$work/launched$n.git" rev-parse main)"
 check "launch record: the repo origin names is not" "$dist_start" "$(git -C "$dist_remote" rev-parse main)"
 command rm -rf "$work/launched$n"
-printf 'distribution %s\n' "$work/launched$n" \
-    >"$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-launch-3fb49286)"
+printf 'distribution %s\n' "$work/launched$n" >"$dist_record"
 out=$(dpush --check --sweep "$sweep"); rc=$?
 check "launch record: a launch's repo now missing is refused, by its source" "1 Error: Distribution repo $work/launched$n, checked at the launch of 3fb49286, is missing" \
     "$rc $(printf '%s\n' "$out" | grep -v '^note')"
+
+# With no launch record, as for a worker launched before it existed, origin
+# names the repo, with a note.
+new_dist 1
+command rm -f "$dist_record"
+out=$(dpush --check --sweep "$sweep"); rc=$?
+check "no launch record: origin's repo is checked, with a note" "0 note no Distribution repo was recorded at 3fb49286's launch, so it was read from origin: $dist" \
+    "$rc $(printf '%s\n' "$out" | grep '^note')"
 
 # Only the Distribution repo has commits: the Project is passed over.
 new_dist

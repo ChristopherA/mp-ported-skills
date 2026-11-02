@@ -117,6 +117,13 @@ printf 'c2a368ee\n' >"$mk"
 command rm -f "$rec"
 check "marker_launch_dist: a marker with no distribution line and no record fails" "1 " "$(ld)"
 command rm -f "$mk"
+check "marker_line: a key and value, or a bare key" "distribution /d
+distribution" "$(marker_line distribution /d; marker_line distribution "")"
+marker_write "$work/w1" c2a368ee distribution /d
+marker_write "$work/w2" c2a368ee distribution
+check "marker_write: the id, then the line, read back by marker_field" "c2a368ee 0 /d c2a368ee 0 " \
+    "$(marker_holder "$work/w1") $(v=$(marker_field "$work/w1" distribution); echo "$? $v") $(marker_holder "$work/w2") $(v=$(marker_field "$work/w2" distribution); echo "$? $v")"
+check "marker_write: fails when the file cannot be written" "1" "$(marker_write "$work/nodir/m" x distribution 2>/dev/null; echo $?)"
 
 # --- settle.sh -------------------------------------------------------------
 . "$scripts/settle.sh"

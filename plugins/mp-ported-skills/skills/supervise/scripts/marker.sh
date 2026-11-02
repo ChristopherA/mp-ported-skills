@@ -32,6 +32,12 @@
 # marker_field FILE KEY prints the value of FILE's first `KEY <value>` line,
 # empty for a bare `KEY` line, and exits 1 when FILE has no such line.
 #
+# marker_line KEY [VALUE] prints a `KEY VALUE` line, or a bare `KEY` line
+# for an empty VALUE: the form marker_field reads.
+#
+# marker_write FILE ID KEY [VALUE] writes a marker naming worker ID, with
+# one marker_line after it, and fails when FILE cannot be written.
+#
 # marker_record_path DIR ID prints the absolute path of worker ID's launch
 # record in DIR, whether or not it exists, and fails as marker_path does.
 #
@@ -54,16 +60,24 @@ marker_field() {
         END { if (!found) exit 1; print v }' "$1"
 }
 
+marker_line() {
+    printf '%s%s\n' "$1" "${2:+ $2}"
+}
+
+marker_write() {
+    { printf '%s\n' "$2"; marker_line "$3" "${4:-}"; } >"$1"
+}
+
 marker_record_path() {
     git -C "$1" rev-parse --path-format=absolute --git-path "mp-supervise-launch-$2"
 }
 
 marker_launch_dist() {
-    _mmarker=$(marker_path "$1" 2>/dev/null) || return 1
-    if [ -f "$_mmarker" ] && [ "$(marker_holder "$_mmarker")" = "$2" ] &&
-        marker_field "$_mmarker" distribution; then
+    marker_file=$(marker_path "$1" 2>/dev/null) || return 1
+    if [ -f "$marker_file" ] && [ "$(marker_holder "$marker_file")" = "$2" ] &&
+        marker_field "$marker_file" distribution; then
         return 0
     fi
-    _mrecord=$(marker_record_path "$1" "$2" 2>/dev/null) || return 1
-    [ -f "$_mrecord" ] && marker_field "$_mrecord" distribution
+    marker_record=$(marker_record_path "$1" "$2" 2>/dev/null) || return 1
+    [ -f "$marker_record" ] && marker_field "$marker_record" distribution
 }

@@ -166,11 +166,11 @@ while [ "$try" -lt "$TRIES" ]; do
         fi
         if [ -n "$dist" ]; then
             dist_marker=$(marker_path "$dist" 2>/dev/null) &&
-                printf '%s\nproject %s\n' "$ID" "$DIR" >"$dist_marker" ||
+                marker_write "$dist_marker" "$ID" project "$DIR" ||
                 echo "note the marker for $ID was not written in Distribution repo $dist, so it is not held read-only"
         fi
         marker=$(marker_path "$DIR" 2>/dev/null) &&
-            printf '%s\ndistribution%s\n' "$ID" "${dist:+ $dist}" >"$marker" ||
+            marker_write "$marker" "$ID" distribution "$dist" ||
             echo "note the marker for $ID was not written in $DIR, so the checkout is not held read-only"
         echo "after $resumed_at"
         echo "resumed $ID"

@@ -142,16 +142,20 @@ START=$(git -C "$DIR" rev-parse -q --verify "$START^{commit}") || fail "not a co
 # now, since the marker check needs it gone. A fetch since cannot repoint
 # it; when origin now names another, a `note` line says so. With no record,
 # as for a worker launched before the record existed, it is read from origin
-# as launch.sh read it.
-origin_dist=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null) ||
-    fail "distribution.sh failed, so the Distribution repo is unknown"
+# as launch.sh read it, with a `note` line when origin names one, and a
+# failed read is an error only then.
 if DIST=$(marker_launch_dist "$DIR" "$ID"); then
     dist_named="checked at the launch of $ID"
-    [ "$DIST" = "$origin_dist" ] ||
+    if origin_dist=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null 2>/dev/null) &&
+        [ "$DIST" != "$origin_dist" ]; then
         echo "note the Distribution repo is ${DIST:-none}, as the launch of $ID checked; origin now names ${origin_dist:-none}"
+    fi
 else
-    DIST=$origin_dist
+    DIST=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null) ||
+        fail "distribution.sh failed, so the Distribution repo is unknown"
     dist_named="named in docs/agents/distribution-repo.md"
+    [ -z "$DIST" ] ||
+        echo "note no Distribution repo was recorded at $ID's launch, so it was read from origin: $DIST"
 fi
 if [ -n "$DIST" ]; then
     [ -n "$DIST_START" ] ||

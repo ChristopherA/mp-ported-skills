@@ -16,8 +16,9 @@
 # push.sh holds the repo the launch checked, not what origin names by then.
 # With neither a `distribution` line nor a record, the repo is read with
 # distribution.sh, and a `note` line says so when DIR's marker is there, as
-# one from before the line existed. Its marker is removed first when it names ID, and
-# left, with an error, when it names another worker, as DIR's is.
+# one from before the line existed. The Distribution repo's marker is
+# removed first when it names ID, and left, with an error, when it names
+# another worker, as DIR's is.
 #
 # Usage:
 #   release.sh --dir DIR --id ID
@@ -59,7 +60,7 @@ fi
 record=$(marker_record_path "$DIR" "$ID")
 if dist=$(marker_launch_dist "$DIR" "$ID"); then
     if [ -f "$marker" ]; then
-        printf 'distribution%s\n' "${dist:+ $dist}" >"$record" ||
+        marker_line distribution "$dist" >"$record" ||
             echo "note the launch record $record was not written, so a resume of $ID after this release reads its Distribution repo from origin"
     fi
 else

@@ -138,7 +138,7 @@ Release the marker whenever the worker was stopped or is gone, and `stop.sh` did
 sh "${CLAUDE_SKILL_DIR}/scripts/release.sh" --dir "<project folder>" --id ID </dev/null
 ```
 
-It prints `released ID`, or `no marker in <folder>`, then `released ID in <path>` when it also cleared the marker in the Project's Distribution repo. Before clearing the marker it keeps the Distribution repo the launch checked, or none, in the worker's launch record, so a later `resume.sh` and `push.sh` use that repo even when origin names another by then (#164). A `note` line before them says the repo was read from origin instead, when the marker is from before the launch recorded it; report that line. Exit 1: the marker names another worker, or the folder is not a checkout; report it and leave the marker.
+It prints `released ID`, or `no marker in <folder>`, then `released ID in <path>` when it also cleared the marker in the Project's Distribution repo. Before clearing the marker it keeps the Distribution repo the launch checked, or none, in the worker's launch record, so a later `resume.sh` and `push.sh` use that repo even when origin names another by then (#164). A `note` line before them says the repo was read from origin instead, when the marker is from before the launch recorded it, or that the record could not be written; report it. Exit 1: the marker names another worker, or the folder is not a checkout; report it and leave the marker.
 
 With `--watch tmux` or `--watch iterm`, once the worker is stopped or gone, close its viewer: read `${CLAUDE_SKILL_DIR}/watching.md`, Closing the viewer. While the worker is left running (`blocked`, `hang`), leave its viewer open, in either mode: it is where the maintainer answers.
 

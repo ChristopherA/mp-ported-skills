@@ -521,13 +521,13 @@ fi
 # Project's marker says so on a bare `distribution` line, which release.sh
 # keeps for a resume after it (marker.sh, #164).
 if [ -n "$DIST" ]; then
-    printf '%s\nproject %s\n' "$id" "$DIR" >"$dist_marker" ||
+    marker_write "$dist_marker" "$id" project "$DIR" ||
         reject "could not write the marker $dist_marker, so Distribution repo $DIST is not held read-only"
-    printf '%s\ndistribution %s\n' "$id" "$DIST" >"$marker" || {
+    marker_write "$marker" "$id" distribution "$DIST" || {
         command rm -f "$dist_marker"
         reject "could not write the marker $marker, so this checkout is not held read-only"
     }
 else
-    printf '%s\ndistribution\n' "$id" >"$marker" || reject "could not write the marker $marker, so this checkout is not held read-only"
+    marker_write "$marker" "$id" distribution || reject "could not write the marker $marker, so this checkout is not held read-only"
 fi
 echo "$id"
