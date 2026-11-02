@@ -81,6 +81,14 @@ for item in \
 do
     check "the summary lists: $item" yes "$(section_has "$loop" "$end" "$item")"
 done
+check "a parked ticket's commits are on its branch" yes \
+    "$(section_has "$loop" "$end" 'for a parked ticket `<start>..parked-N`')"
+check "a ticket with no run record reads unknown cost, not zero" yes \
+    "$(section_has "$loop" "$end" '`no record` and its cost `unknown`')"
+check "the waiting list is built before the summary posts" yes \
+    "$(section_has "$loop" "$end" 'Build step 2'"'"'s list before posting')"
+check "zone capture's loop ends point to Loop end" 2 \
+    "$(grep -c -F 'the loop ends there (Loop end, `loop.md`)' "$dir/zone-capture.md")"
 check "the summary lists built and parked tickets alike" yes \
     "$(section_has "$loop" "$end" 'each ticket the loop ran, built or parked, in order')"
 
