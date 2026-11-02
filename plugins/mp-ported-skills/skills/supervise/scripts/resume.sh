@@ -34,7 +34,11 @@
 # reads the turn that ended before the stop as the resumed turn's end (#122).
 # On a wake it writes the worker's marker in DIR, and in the Project's
 # Distribution repo when it names one, as launch.sh does (#76, #125), with
-# a `note` line before `after` for each it could not write.
+# a `note` line before `after` for each it could not write. The Distribution
+# repo is the one the launch checked (#164): from DIR's marker while it
+# names the worker, or else from the launch record release.sh left
+# (marker.sh), with none when the launch had none. With neither, it is read
+# from origin with distribution.sh, and a `note` line says so.
 #
 # Usage:
 #   resume.sh --id ID --dir DIR --prompt TEXT [--settle S] [--interval S]
@@ -154,24 +158,19 @@ while [ "$try" -lt "$TRIES" ]; do
         # (#76), after the Report step's release.sh cleared the marker.
         # A Distribution repo (#125) is held again too, each marker naming
         # the other repo, as launch.sh writes them. The repo is the one the
-        # launch recorded in DIR's marker, while that is still there, so a
-        # fetch since cannot repoint it; once released, it is read again.
-        marker=$(marker_path "$DIR" 2>/dev/null)
-        dist=""
-        [ -z "$marker" ] || [ ! -f "$marker" ] || [ "$(head -n 1 "$marker")" != "$ID" ] ||
-            dist=$(sed -n 's/^distribution //p' "$marker")
-        [ -n "$dist" ] || dist=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null 2>/dev/null)
+        # launch checked, from DIR's marker or the launch record (#164), so
+        # a fetch since cannot repoint it.
+        if ! dist=$(marker_launch_dist "$DIR" "$ID"); then
+            dist=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null 2>/dev/null)
+            echo "note no Distribution repo was recorded at $ID's launch, so it was read from origin: ${dist:-none}"
+        fi
         if [ -n "$dist" ]; then
             dist_marker=$(marker_path "$dist" 2>/dev/null) &&
                 printf '%s\nproject %s\n' "$ID" "$DIR" >"$dist_marker" ||
                 echo "note the marker for $ID was not written in Distribution repo $dist, so it is not held read-only"
-            line="distribution $dist"
-        else
-            line=""
         fi
         marker=$(marker_path "$DIR" 2>/dev/null) &&
-            printf '%s\n%s' "$ID" "${line:+$line
-}" >"$marker" ||
+            printf '%s\ndistribution%s\n' "$ID" "${dist:+ $dist}" >"$marker" ||
             echo "note the marker for $ID was not written in $DIR, so the checkout is not held read-only"
         echo "after $resumed_at"
         echo "resumed $ID"

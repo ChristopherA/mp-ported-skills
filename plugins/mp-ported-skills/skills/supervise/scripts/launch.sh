@@ -517,7 +517,9 @@ fi
 
 # Each marker names the other repo on its second line, so release.sh clears
 # both from the Project and the read-only hook's refusal in the Distribution
-# repo names the Project folder to release.
+# repo names the Project folder to release. With no Distribution repo the
+# Project's marker says so on a bare `distribution` line, which release.sh
+# keeps for a resume after it (marker.sh, #164).
 if [ -n "$DIST" ]; then
     printf '%s\nproject %s\n' "$id" "$DIR" >"$dist_marker" ||
         reject "could not write the marker $dist_marker, so Distribution repo $DIST is not held read-only"
@@ -526,6 +528,6 @@ if [ -n "$DIST" ]; then
         reject "could not write the marker $marker, so this checkout is not held read-only"
     }
 else
-    echo "$id" >"$marker" || reject "could not write the marker $marker, so this checkout is not held read-only"
+    printf '%s\ndistribution\n' "$id" >"$marker" || reject "could not write the marker $marker, so this checkout is not held read-only"
 fi
 echo "$id"

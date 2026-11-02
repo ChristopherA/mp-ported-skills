@@ -10,16 +10,21 @@
 # in place.
 #
 # A Project with a Distribution repo (#125) has a marker there too. DIR's
-# marker names it on a `distribution <path>` line; without one, the repo is
-# read with distribution.sh. Its marker is removed first when it names ID,
-# and left, with an error, when it names another worker, as DIR's is.
+# marker names it on its `distribution` line, and the launch record
+# (marker.sh, #164) once DIR's marker is gone. Before removing DIR's marker
+# this writes that line to ID's launch record, so a later resume.sh or
+# push.sh holds the repo the launch checked, not what origin names by then.
+# With neither a `distribution` line nor a record, the repo is read with
+# distribution.sh, and a `note` line says so when DIR's marker is there, as
+# one from before the line existed. Its marker is removed first when it names ID, and
+# left, with an error, when it names another worker, as DIR's is.
 #
 # Usage:
 #   release.sh --dir DIR --id ID
 #
-# Prints `released ID`, or `no marker in DIR`, then `released ID in DIST`
-# when the Distribution repo's marker was removed. Exits 0 released or no
-# marker; 1 not released.
+# Prints any `note` line, then `released ID`, or `no marker in DIR`, then
+# `released ID in DIST` when the Distribution repo's marker was removed.
+# Exits 0 released or no marker; 1 not released.
 
 set -u
 . "$(dirname -- "$0")/marker.sh"
@@ -47,17 +52,27 @@ DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
 
 marker=$(marker_path "$DIR" 2>/dev/null) ||
     fail "$DIR is not a git checkout"
-dist=""
 if [ -f "$marker" ]; then
-    held=$(head -n 1 "$marker")
+    held=$(marker_holder "$marker")
     [ "$held" = "$ID" ] || fail "the marker in $DIR names worker $held, not $ID; left in place"
-    dist=$(sed -n 's/^distribution //p' "$marker")
 fi
-[ -n "$dist" ] || dist=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null 2>/dev/null)
+record=$(marker_record_path "$DIR" "$ID")
+if dist=$(marker_launch_dist "$DIR" "$ID"); then
+    if [ -f "$marker" ]; then
+        printf 'distribution%s\n' "${dist:+ $dist}" >"$record" ||
+            echo "note the launch record $record was not written, so a resume of $ID after this release reads its Distribution repo from origin"
+    fi
+else
+    # With no marker either, nothing of the launch is left to keep: the read
+    # only finds a Distribution repo marker left behind.
+    dist=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null 2>/dev/null)
+    [ ! -f "$marker" ] ||
+        echo "note no Distribution repo was recorded at $ID's launch, so it was read from origin: ${dist:-none}"
+fi
 dist_released=""
 if [ -n "$dist" ] && dist_marker=$(marker_path "$dist" 2>/dev/null) &&
     [ -f "$dist_marker" ]; then
-    dist_held=$(head -n 1 "$dist_marker")
+    dist_held=$(marker_holder "$dist_marker")
     [ "$dist_held" = "$ID" ] ||
         fail "the marker in Distribution repo $dist names worker $dist_held, not $ID; left in place"
     command rm -f "$dist_marker" || fail "could not remove $dist_marker"

@@ -348,6 +348,28 @@ check "dist push: actions.sh names the Project's branch as the supervisor's push
     "branch origin/main pushed by the supervisor on the maintainer's approval: holds the worker's commits" \
     "$(sh "$scripts/actions.sh" --id 3fb49286 --dir "$project" --start "$start" </dev/null)"
 
+# The launch record's Distribution repo is checked and pushed, not the one
+# origin names by then (#164): a copy of the repo, with its own remote, is
+# the launch's, while origin still names $dist.
+new_dist 1
+command cp -R "$dist" "$work/launched$n"
+command cp -R "$dist_remote" "$work/launched$n.git"
+git -C "$work/launched$n" remote set-url origin "$work/launched$n.git"
+printf 'distribution %s\n' "$work/launched$n" \
+    >"$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-launch-3fb49286)"
+out=$(dpush --sweep "$sweep"); rc=$?
+check "launch record: exits 0" "0" "$rc"
+check "launch record: says origin names another repo" "note the Distribution repo is $work/launched$n, as the launch of 3fb49286 checked; origin now names $dist" \
+    "$(printf '%s\n' "$out" | grep '^note')"
+check "launch record: the launch's repo is pushed" "$dist_head" "$(git -C "$work/launched$n.git" rev-parse main)"
+check "launch record: the repo origin names is not" "$dist_start" "$(git -C "$dist_remote" rev-parse main)"
+command rm -rf "$work/launched$n"
+printf 'distribution %s\n' "$work/launched$n" \
+    >"$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-launch-3fb49286)"
+out=$(dpush --check --sweep "$sweep"); rc=$?
+check "launch record: a launch's repo now missing is refused, by its source" "1 Error: Distribution repo $work/launched$n, checked at the launch of 3fb49286, is missing" \
+    "$rc $(printf '%s\n' "$out" | grep -v '^note')"
+
 # Only the Distribution repo has commits: the Project is passed over.
 new_dist
 out=$(dpush --sweep "$sweep")

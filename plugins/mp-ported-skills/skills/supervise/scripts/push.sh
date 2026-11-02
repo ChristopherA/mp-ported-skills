@@ -137,14 +137,26 @@ DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
 git -C "$DIR" rev-parse --git-dir >/dev/null 2>&1 || fail "not a git checkout: $DIR"
 START=$(git -C "$DIR" rev-parse -q --verify "$START^{commit}") || fail "not a commit in $DIR: $START"
 
-# The Distribution repo, read from origin as launch.sh read it: the marker
-# that also names it is gone by now, since the marker check needs it gone.
-DIST=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null) ||
+# The Distribution repo the launch checked (#164), from the launch record
+# release.sh left (marker.sh): the marker that also names it is gone by
+# now, since the marker check needs it gone. A fetch since cannot repoint
+# it; when origin now names another, a `note` line says so. With no record,
+# as for a worker launched before the record existed, it is read from origin
+# as launch.sh read it.
+origin_dist=$(sh "$(dirname -- "$0")/distribution.sh" --dir "$DIR" </dev/null) ||
     fail "distribution.sh failed, so the Distribution repo is unknown"
+if DIST=$(marker_launch_dist "$DIR" "$ID"); then
+    dist_named="checked at the launch of $ID"
+    [ "$DIST" = "$origin_dist" ] ||
+        echo "note the Distribution repo is ${DIST:-none}, as the launch of $ID checked; origin now names ${origin_dist:-none}"
+else
+    DIST=$origin_dist
+    dist_named="named in docs/agents/distribution-repo.md"
+fi
 if [ -n "$DIST" ]; then
     [ -n "$DIST_START" ] ||
         fail "--dist-start is required: $DIR names Distribution repo $DIST (give the snapshot's dist head line)"
-    [ -d "$DIST" ] || fail "Distribution repo $DIST, named in docs/agents/distribution-repo.md, is missing"
+    [ -d "$DIST" ] || fail "Distribution repo $DIST, $dist_named, is missing"
     git -C "$DIST" rev-parse --git-dir >/dev/null 2>&1 || fail "Distribution repo $DIST is not a git checkout"
     DIST_START=$(git -C "$DIST" rev-parse -q --verify "$DIST_START^{commit}") ||
         fail "not a commit in Distribution repo $DIST: $DIST_START"

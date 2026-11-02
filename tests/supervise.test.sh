@@ -1018,7 +1018,8 @@ renamed() { # <name> <jq filter> <recorded name>
     check "launch: $1 exits 0" "0" "$rc"
     check "launch: $1 prints the id" "c2a368ee" "$(command cat "$work/launch-out")"
     check "launch: $1 stops nothing" "" "$(command cat "$fake/calls" 2>/dev/null)"
-    check "launch: $1 writes the marker" "c2a368ee" "$(command cat "$marker" 2>/dev/null)"
+    check "launch: $1 writes the marker" "c2a368ee
+distribution" "$(command cat "$marker" 2>/dev/null)"
     check "launch: $1 notes it" "note: session c2a368ee is named '$3', not 'worker project #56: Add the thing'" "$err"
 }
 renamed "name not recorded" '| .name = "mattpocock skills implementation"' "mattpocock skills implementation"
@@ -1066,7 +1067,8 @@ check "launch: no job state says why" "Error: no job state for session c2a368ee 
 # The worker's marker, which the read-only hook reads (#76).
 command rm -f "$marker"
 launch --ticket 56 >/dev/null 2>&1
-check "launch: writes the worker's marker" "c2a368ee" "$(command cat "$marker" 2>/dev/null)"
+check "launch: writes the worker's marker" "c2a368ee
+distribution" "$(command cat "$marker" 2>/dev/null)"
 command rm -f "$marker"
 (export FAKE_STATE_FILTER='| .cwd = "/elsewhere"'; launch --ticket 56 >/dev/null 2>&1)
 check "launch: a worker that failed a check leaves no marker" "no" "$([ -f "$marker" ] && echo yes || echo no)"
@@ -1129,7 +1131,8 @@ not_launched "an unreadable session list" "Error: claude agents --json --all fai
 echo 0ld0ld00 >"$marker"
 out=$(launch --ticket 56 2>&1); rc=$?
 check "launch: a stale marker does not block" "0 c2a368ee" "$rc $out"
-check "launch: a stale marker is replaced" "c2a368ee" "$(command cat "$marker")"
+check "launch: a stale marker is replaced" "c2a368ee
+distribution" "$(command cat "$marker")"
 mkdir -p "$work/not-a-repo"
 out=$(PATH="$work/bin:$PATH" sh "$scripts/launch.sh" --dir "$work/not-a-repo" --ticket 56 </dev/null 2>&1); rc=$?
 check "launch: not a git checkout exits 1" "1 Error: $work/not-a-repo is not a git checkout; not launched" "$rc $out"
@@ -1314,10 +1317,11 @@ check "launch checked-push: without issue-comment and sub-issue, no park" "" \
 command rm -f "$(git -C "$checked" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
 
 # --- release.sh --------------------------------------------------------------
-echo c2a368ee >"$marker"
+printf 'c2a368ee\ndistribution\n' >"$marker"
 out=$(sh "$scripts/release.sh" --dir "$project" --id 7a6a0741 </dev/null 2>&1); rc=$?
 check "release: another worker's marker exits 1" "1" "$rc"
-check "release: another worker's marker is kept" "c2a368ee" "$(command cat "$marker")"
+check "release: another worker's marker is kept" "c2a368ee
+distribution" "$(command cat "$marker")"
 check "release: another worker's marker says so" "Error: the marker in $project names worker c2a368ee, not 7a6a0741; left in place" "$out"
 out=$(sh "$scripts/release.sh" --dir "$project" --id c2a368ee </dev/null 2>&1); rc=$?
 check "release: removes the worker's marker" "0 released c2a368ee no" "$rc $out $([ -f "$marker" ] && echo yes || echo no)"
@@ -1325,6 +1329,18 @@ out=$(sh "$scripts/release.sh" --dir "$project" --id c2a368ee </dev/null 2>&1); 
 check "release: no marker is not an error" "0 no marker in $project" "$rc $out"
 out=$(cd "$project" && sh "$scripts/release.sh" --dir . --id c2a368ee </dev/null 2>&1)
 check "release: names the folder by its full path" "no marker in $project" "$out"
+# The release keeps the marker's distribution line in the worker's launch
+# record (#164), for a resume or push after it.
+record=$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-launch-c2a368ee)
+check "release: keeps the launch's distribution line in the launch record" "distribution" "$(command cat "$record" 2>/dev/null)"
+# A marker from before the distribution line existed, with no record: the
+# release reads origin, and says so.
+command rm -f "$record"
+echo c2a368ee >"$marker"
+out=$(sh "$scripts/release.sh" --dir "$project" --id c2a368ee </dev/null 2>&1); rc=$?
+check "release: a marker with no distribution line is released, with a note" "0 note no Distribution repo was recorded at c2a368ee's launch, so it was read from origin: none
+released c2a368ee no" "$rc $out $([ -f "$record" ] && echo yes || echo no)"
+printf 'distribution\n' >"$record"
 sh "$scripts/release.sh" --dir "$project" </dev/null >/dev/null 2>&1
 check "release: --id is required" "1" "$?"
 sh "$scripts/release.sh" --id c2a368ee </dev/null >/dev/null 2>&1
@@ -1390,7 +1406,8 @@ $sid
 /mp-ported-skills:capturing" "$(command cat "$fake/resume-args")"
 check "resume: runs in the project folder" "$project" "$(command cat "$fake/cwd")"
 check "resume: sets the config dir" "$cfg" "$(command cat "$fake/env")"
-check "resume: writes the worker's marker, live again" "c2a368ee" "$(command cat "$marker" 2>/dev/null)"
+check "resume: writes the worker's marker, live again" "c2a368ee
+distribution" "$(command cat "$marker" 2>/dev/null)"
 command rm -f "$marker"
 
 # stopped may never show: a row with no pid for the settle time is enough,
@@ -1568,7 +1585,7 @@ stop_worker() { # <agents lists...> -- then stop.sh's options after --
 }
 finish="sh \"$scripts/stop.sh\" --dir \"$project\" --id c2a368ee"
 
-echo c2a368ee >"$marker"
+printf 'c2a368ee\ndistribution\n' >"$marker"
 out=$(stop_worker pid "$fixtures/stopped.json" 2>&1); rc=$?
 check "stop: exit 0" "0" "$rc"
 check "stop: stops, then releases the marker" "stopped c2a368ee
@@ -1580,7 +1597,7 @@ check "stop: the marker is gone" "no" "$([ -f "$marker" ] && echo yes || echo no
 # stopped may never show (#77): a row with no pid for the settle time is
 # enough, and a pid showing again starts the settle time over, as in
 # resume.sh.
-echo c2a368ee >"$marker"
+printf 'c2a368ee\ndistribution\n' >"$marker"
 out=$(stop_worker pid nopid -- --settle 2 --interval 1 2>&1); rc=$?
 check "stop: no pid for the settle time is stopped" "0 stopped c2a368ee
 released c2a368ee" "$rc $out"
@@ -1588,13 +1605,13 @@ released c2a368ee" "$rc $out"
 # and end the settle time a read early, so three or four are both right.
 n=$(command cat "$fake/count")
 check "stop: waits out the settle time" "yes" "$([ "$n" -ge 3 ] && [ "$n" -le 4 ] && echo yes || echo "no ($n reads)")"
-echo c2a368ee >"$marker"
+printf 'c2a368ee\ndistribution\n' >"$marker"
 stop_worker nopid pid nopid -- --settle 1 --interval 1 >/dev/null 2>&1
 check "stop: a pid starts the settle time over" "4" "$(command cat "$fake/count")"
 
 # stop.sh waits too until the daemon's roster drops the job (#185), so a
 # resume after it wakes the worker.
-echo c2a368ee >"$marker"
+printf 'c2a368ee\ndistribution\n' >"$marker"
 out=$( (reset_roster "$held" "$held" "$freed"
         stop_rostered() { reset_fake; command cp "$work/roster-seq" "$fake/roster-seq"
             mkdir -p "$cfg/jobs/c2a368ee"; command cp "$fixtures/job-state.json" "$cfg/jobs/c2a368ee/state.json"
@@ -1606,7 +1623,7 @@ released c2a368ee
 reads 3" "$rc $out"
 
 # A worker already removed is stopped too.
-echo c2a368ee >"$marker"
+printf 'c2a368ee\ndistribution\n' >"$marker"
 out=$(stop_worker "$fixtures/done.json" 2>&1); rc=$?
 check "stop: a worker not in the list is gone" "0 gone c2a368ee
 released c2a368ee" "$rc $out"
@@ -2395,6 +2412,50 @@ project $dproj no" "$rc $(command cat "$dproj_marker" "$dist2_marker") $([ -f "$
 command rm -f "$dist2_marker"
 clear_markers
 
+# After release the launch's repo still wins (#164): released with dist2,
+# while origin names $dist, the resume holds dist2 again.
+dproj_record=$(git -C "$dproj" rev-parse --path-format=absolute --git-path mp-supervise-launch-c2a368ee)
+printf 'c2a368ee\ndistribution %s\n' "$work/dist2" >"$dproj_marker"
+printf 'c2a368ee\nproject %s\n' "$dproj" >"$dist2_marker"
+out=$(sh "$scripts/release.sh" --dir "$dproj" --id c2a368ee </dev/null 2>&1); rc=$?
+check "release dist: keeps the launch's repo in the launch record" "0 released c2a368ee
+released c2a368ee in $work/dist2
+distribution $work/dist2" "$rc $out
+$(command cat "$dproj_record")"
+check "release dist: origin still names the other repo" "$dist" "$(distribution 2>&1)"
+out=$(resume_dist); rc=$?
+check "resume dist: after release, the launch's repo is held, not origin's" "0 after resumed c2a368ee
+c2a368ee
+distribution $work/dist2
+c2a368ee
+project $dproj no" "$rc $(printf '%s\n' "$out" | sed 's/ [0-9]*$//' | tr '\n' ' ' | sed 's/ $//')
+$(command cat "$dproj_marker" "$dist2_marker") $([ -f "$dist_marker" ] && echo yes || echo no)"
+command rm -f "$dist2_marker" "$dproj_record"
+clear_markers
+# A worker launched with no Distribution repo resumes with none, though
+# origin names one now.
+printf 'c2a368ee\ndistribution\n' >"$dproj_marker"
+sh "$scripts/release.sh" --dir "$dproj" --id c2a368ee </dev/null >/dev/null 2>&1
+out=$(resume_dist); rc=$?
+check "resume dist: a launch with none resumes with none" "0 after resumed c2a368ee
+c2a368ee
+distribution no" "$rc $(printf '%s\n' "$out" | sed 's/ [0-9]*$//' | tr '\n' ' ' | sed 's/ $//')
+$(command cat "$dproj_marker") $([ -f "$dist_marker" ] && echo yes || echo no)"
+command rm -f "$dproj_record"
+clear_markers
+# A marker from before the distribution line, with no record: the release
+# and the resume read origin, each with a note.
+echo c2a368ee >"$dproj_marker"
+out=$(sh "$scripts/release.sh" --dir "$dproj" --id c2a368ee </dev/null 2>&1); rc=$?
+check "release dist: a marker with no distribution line reads origin, with a note" "0 note no Distribution repo was recorded at c2a368ee's launch, so it was read from origin: $dist
+released c2a368ee no" "$rc $out $([ -f "$dproj_record" ] && echo yes || echo no)"
+out=$(resume_dist); rc=$?
+check "resume dist: no marker and no record reads origin, with a note" "0 note no Distribution repo was recorded at c2a368ee's launch, so it was read from origin: $dist
+c2a368ee
+project $dproj" "$rc $(printf '%s\n' "$out" | head -n 1)
+$(command cat "$dist_marker")"
+clear_markers
+
 # The watch snapshots the Distribution repo, and a branch or worktree made
 # there since makes the worker moved. Commits on its branch do not.
 sh "$scripts/watch.sh" --dir "$dproj" --snapshot </dev/null >"$work/dsince"
@@ -2458,7 +2519,8 @@ check "launch dist: a copy not on origin launches with no Distribution repo, wit
 note: docs/agents/distribution-repo.md is in the working tree or current branch, not on the committed origin/main; ignored" \
     "$rc $out $(grep -q '^--add-dir$' "$fake/args" && echo yes || echo no)
 $(command cat "$work/derr")"
-check "launch dist: a copy not on origin writes the Project's marker alone" "c2a368ee" "$(command cat "$dproj_marker")"
+check "launch dist: a copy not on origin writes the Project's marker alone" "c2a368ee
+distribution" "$(command cat "$dproj_marker")"
 clear_markers
 dgit "$dproj" reset --hard origin/main
 

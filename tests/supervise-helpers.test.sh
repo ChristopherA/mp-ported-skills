@@ -95,6 +95,28 @@ out=$(marker_path "$work/plain" 2>/dev/null); rc=$?
 check "marker_path outside a checkout fails" "1 " "$([ "$rc" -ne 0 ] && echo 1) $out"
 err=$(marker_path "$work/plain" 2>&1 >/dev/null)
 check "marker_path leaves git's error on stderr for the caller" "yes" "$([ -n "$err" ] && echo yes)"
+printf 'c2a368ee\ndistribution /d\n' >"$work/m1"
+printf 'c2a368ee\ndistribution\n' >"$work/m2"
+printf 'c2a368ee\ndistributions /x\n' >"$work/m3"
+check "marker_holder prints the first line" "c2a368ee" "$(marker_holder "$work/m1")"
+check "marker_field prints a field's value" "0 /d" "$(v=$(marker_field "$work/m1" distribution); echo "$? $v")"
+check "marker_field prints a bare field as empty" "0 " "$(v=$(marker_field "$work/m2" distribution); echo "$? $v")"
+check "marker_field fails with no such line, a longer key included" "1 " "$(v=$(marker_field "$work/m3" distribution); echo "$? $v")"
+check "marker_record_path names the worker's launch record" "$repo/.git/mp-supervise-launch-c2a368ee" "$(marker_record_path "$repo" c2a368ee)"
+# marker_launch_dist: the marker while it names the worker, else the record.
+mk=$(marker_path "$repo"); rec=$(marker_record_path "$repo" c2a368ee)
+ld() { v=$(marker_launch_dist "$repo" c2a368ee); echo "$? $v"; }
+check "marker_launch_dist: neither marker nor record fails" "1 " "$(ld)"
+printf 'distribution /r\n' >"$rec"
+check "marker_launch_dist: the record with no marker" "0 /r" "$(ld)"
+printf 'c2a368ee\ndistribution /m\n' >"$mk"
+check "marker_launch_dist: the marker wins over the record" "0 /m" "$(ld)"
+printf '7a6a0741\ndistribution /o\n' >"$mk"
+check "marker_launch_dist: another worker's marker is passed over" "0 /r" "$(ld)"
+printf 'c2a368ee\n' >"$mk"
+command rm -f "$rec"
+check "marker_launch_dist: a marker with no distribution line and no record fails" "1 " "$(ld)"
+command rm -f "$mk"
 
 # --- settle.sh -------------------------------------------------------------
 . "$scripts/settle.sh"
