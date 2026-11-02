@@ -88,6 +88,7 @@
 
 set -u
 . "$(dirname -- "$0")/marker.sh"
+. "$(dirname -- "$0")/own-repo.sh"
 
 DIR=""
 ID=""
@@ -161,11 +162,7 @@ if [ -n "$DIST" ]; then
     [ -n "$DIST_START" ] ||
         fail "--dist-start is required: $DIR names Distribution repo $DIST (give the snapshot's dist head line)"
     [ -d "$DIST" ] || fail "Distribution repo $DIST, $dist_named, is missing"
-    # A repo of its own (#167), not a plain folder inside one: --git-dir
-    # succeeds there too, and the push would then read the repo around it.
-    dist_real=$(CDPATH= cd -- "$DIST" 2>/dev/null && pwd -P) &&
-        [ "$(git -C "$dist_real" rev-parse --show-toplevel 2>/dev/null)" = "$dist_real" ] ||
-        fail "Distribution repo $DIST is not a git checkout"
+    own_repo_top "$DIST" >/dev/null || fail "Distribution repo $DIST is not a git checkout"
     DIST_START=$(git -C "$DIST" rev-parse -q --verify "$DIST_START^{commit}") ||
         fail "not a commit in Distribution repo $DIST: $DIST_START"
 elif [ -n "$DIST_START" ]; then

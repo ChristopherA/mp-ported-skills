@@ -52,6 +52,7 @@
 set -u
 here=$(dirname -- "$0")
 . "$here/marker.sh"
+. "$here/own-repo.sh"
 
 DIR=""
 ID=""
@@ -113,8 +114,7 @@ if ! DIST=$(sh "$here/distribution.sh" --dir "$DIR" </dev/null 2>/dev/null); the
     bad "distribution: distribution.sh failed in $DIR"
 elif [ -z "$DIST" ]; then
     bad "distribution: $DIR names no Distribution repo; close the ticket as any other"
-elif ! real=$(CDPATH= cd -- "$DIST" 2>/dev/null && pwd -P) ||
-    [ "$(git -C "$real" rev-parse --show-toplevel 2>/dev/null)" != "$real" ]; then
+elif ! real=$(own_repo_top "$DIST"); then
     bad "distribution: $DIST is not a git checkout of its own"
     DIST=""
 else

@@ -3,8 +3,8 @@
 # helpers: marker.sh (the checkout's worker marker), settle.sh (stop a
 # worker and wait until it has settled) (#137), live.sh (which background
 # sessions are live in a checkout), accept.sh (which next: step /supervise
-# takes) (#115) and park.sh (how a parked ticket and worker are told apart)
-# (#158).
+# takes) (#115), park.sh (how a parked ticket and worker are told apart)
+# (#158) and own-repo.sh (whether a path is a repo of its own) (#167).
 #
 # Sources each helper and runs its function against a scratch repo and a
 # fake `claude` first on PATH. The fake logs each call and answers
@@ -281,6 +281,21 @@ which name?" "$out"
 check "park: park_question takes the last, less its markdown" "which name?" \
     "$(jq -rn --arg t "$(printf '%s\n' '**Parked: first?**' '`Parked: which name?`')" "$park_question_def"'$t | park_question')"
 check "park: park_question with no Parked: line" null "$(jq -rn "$park_question_def"'"Done." | park_question')"
+
+# --- own-repo.sh -------------------------------------------------------------
+. "$scripts/own-repo.sh"
+own() { # <dir>: own_repo_top's output and status
+    out=$(own_repo_top "$1"); printf '%s %s' "$?" "$out"
+}
+mkdir -p "$work/own/repo/sub" "$work/own/plain"
+git -C "$work/own/repo" init -q
+ln -s "$work/own/repo" "$work/own/link"
+check "own-repo: a repo's top passes, resolved" "0 $work/own/repo" "$(own "$work/own/repo")"
+check "own-repo: a symlink to a repo's top passes, resolved" "0 $work/own/repo" "$(own "$work/own/link")"
+check "own-repo: a relative path to a repo's top passes, resolved" "0 $work/own/repo" "$(cd "$work/own/plain" && own ../repo)"
+check "own-repo: a plain folder inside a repo fails" "1 " "$(own "$work/own/repo/sub")"
+check "own-repo: a folder in no repo fails" "1 " "$(own "$work/own/plain")"
+check "own-repo: a missing folder fails" "1 " "$(own "$work/own/gone")"
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
