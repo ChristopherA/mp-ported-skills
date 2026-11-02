@@ -63,11 +63,11 @@ check "the final report lists each ticket's reading" yes \
 # folder the glance passes, and stops the loop at its zone stop (#78).
 check "the loop passes next.sh this session and its folder" yes \
     "$(contains "$loop" '--session "${CLAUDE_SESSION_ID}" --session-dir "$PWD" </dev/null')"
-check "a zone stop posts a loop summary" yes \
+check "a loop end posts a loop summary" yes \
     "$(contains "$loop" 'gh issue comment <parent> --body-file "<scratchpad>/loop-summary.md"')"
-check "a zone stop lists what waits on the maintainer and takes none" yes \
+check "a loop end lists what waits on the maintainer and takes none" yes \
     "$(contains "$loop" "Take none of them")"
-check "a zone stop ends with this session's capture" yes \
+check "a loop end ends with this session's capture" yes \
     "$(contains "$loop" 'After the final report, run `/mp-ported-skills:capturing` in this session')"
 check "the old not-a-stop text is gone" no \
     "$(cat "$supervise" "$loop" | grep -qF "not yet a stop condition" && echo yes || echo no)"

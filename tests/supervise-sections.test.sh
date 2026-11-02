@@ -90,7 +90,7 @@ check "SKILL.md keeps the done item" yes "$(contains "$skill" '- **`done`**:')"
 # The supervisor captures itself at each pause, not only at the end (#205):
 # in the Report step, after each worker's report and before a question that
 # ends its turn, listed in that order; and in a loop, between tickets, before
-# next.sh, with the Zone stop's capture still last.
+# next.sh, with Loop end's capture still last (#160).
 line_no() { # <file> <fixed string> -- first line number, or 0
     n=$(grep -n -F -- "$2" "$1" | head -n 1 | cut -d: -f1)
     echo "${n:-0}"
@@ -116,12 +116,12 @@ check "Done when names the capture after each report" yes \
 loop="$dir/loop.md"
 between=$(line_no "$loop" 'Between tickets, first capture this session')
 next_cmd=$(line_no "$loop" 'next.sh" --dir')
-zone_stop=$(line_no "$loop" '## Zone stop')
+loop_end=$(line_no "$loop" '## Loop end')
 check "loop.md captures between tickets before next.sh" yes "$(before "$between" "$next_cmd")"
 check "loop.md names the Report step's own capture" yes \
     "$(contains "$loop" "(Capturing this session, \`SKILL.md\`)")"
 final=$(line_no "$loop" '3. **Capture.** After the final report')
-check "loop.md keeps the final capture in Zone stop" yes "$(before "$zone_stop" "$final")"
+check "loop.md keeps the final capture in Loop end" yes "$(before "$loop_end" "$final")"
 check "the final capture covers what changed since the last ticket's" yes \
     "$(contains "$loop" 'covering only what changed since the capture after the last ticket')"
 
