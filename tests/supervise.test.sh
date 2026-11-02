@@ -2330,6 +2330,15 @@ name_dist '../plain
 '
 out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?
 check "launch dist: a folder that is not a repo is refused" "1 Error: Distribution repo $work/plain is not a git checkout; not launched" "$rc $out"
+# A plain folder inside a repo is not a repo of its own (#167): refused
+# before the repo around it is read, and no worker starts.
+mkdir -p "$dist/sub"
+name_dist '../dist/sub
+'
+command rm -f "$fake/args"
+out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?
+check "launch dist: a plain folder inside a repo is refused" "1 Error: Distribution repo $dist/sub is not a git checkout; not launched" "$rc $out"
+check "launch dist: a plain folder inside a repo launches nothing" "no" "$([ -f "$fake/args" ] && echo yes || echo no)"
 name_dist '.
 '
 out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?

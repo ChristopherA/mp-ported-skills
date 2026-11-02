@@ -370,6 +370,16 @@ printf 'distribution %s\n' "$work/launched$n" >"$dist_record"
 out=$(dpush --check --sweep "$sweep"); rc=$?
 check "launch record: a launch's repo now missing is refused, by its source" "1 Error: Distribution repo $work/launched$n, checked at the launch of 3fb49286, is missing" \
     "$rc $(printf '%s\n' "$out" | grep -v '^note')"
+# A plain folder inside a repo is not a Distribution repo (#167): it is
+# refused before anything is swept or pushed, not read as the repo around it.
+new_dist 1
+mkdir -p "$dist/sub"
+printf 'distribution %s\n' "$dist/sub" >"$dist_record"
+out=$(dpush --sweep "$sweep"); rc=$?
+check "launch record: a plain folder inside a repo is refused" "1 Error: Distribution repo $dist/sub is not a git checkout" \
+    "$rc $(printf '%s\n' "$out" | grep -v '^note')"
+check "launch record: a plain folder inside a repo is not swept" "no" "$([ -f "$work/sweep-log" ] && echo yes || echo no)"
+nothing_pushed "launch record: a plain folder inside a repo"
 
 # With no launch record, as for a worker launched before it existed, origin
 # names the repo, with a note.

@@ -223,10 +223,18 @@ set -- "$CONFIG"/plugins/cache/*/mattpocock-skills/*/skills/*/implement/SKILL.md
 # starts where its commits belong and alone. The default branch is found as
 # resuming's state.sh finds it. check_repo <dir> <label> runs it on one
 # repo, its errors naming the repo as <label><dir>; the Distribution repo
-# takes the same checks (#125).
+# takes the same checks (#125), and must also be a repo of its own (#167):
+# --git-dir succeeds in any folder inside a repo, so a plain folder there
+# would pass and the checks after it would read the repo around it. The
+# Project folder need not sit at its repo's top.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 check_repo() {
     git -C "$1" rev-parse --git-dir >/dev/null 2>&1 || fail "$2$1 is not a git checkout; not launched"
+    if [ -n "$2" ]; then
+        real=$(CDPATH= cd -- "$1" 2>/dev/null && pwd -P) &&
+            [ "$(git -C "$real" rev-parse --show-toplevel 2>/dev/null)" = "$real" ] ||
+            fail "$2$1 is not a git checkout; not launched"
+    fi
     # A linked worktree is refused first (#79), whatever branch it holds: a
     # worktree can hold the default branch while the main checkout is
     # elsewhere.
