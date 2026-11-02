@@ -98,6 +98,10 @@ A stub that stands in for a real command refuses what the real one refuses, with
 
 Before a build changes a value or behavior that another open ticket builds on, read the tickets blocked by this one (`gh issue list --state open --search '"Blocked by: #N"'`, then each whole, comments included). A later ticket's brief can hold a maintainer decision about the same value: #181's build lowered the zone capture to 64% from its measured margin, while #215's brief, blocked by #181, recorded the decision that no worker is captured below 80%, and only the capture's sweep found it, after the build.
 
+## A parent at 100 sub-issues
+
+GitHub holds at most 100 sub-issues under one parent, closed ones included, and a link past that fails with HTTP 422, `Parent cannot have more than 100 sub-issues`. #40 has reached it twice. The fix is #165's, with the maintainer's yes, since it posts comments: list the parent's closed children in order in one comment on the parent, unlink each (`gh api --method DELETE 'repos/{owner}/{repo}/issues/<parent>/sub_issue' -F sub_issue_id=<id>`) with a comment on it pointing at that list, then link the new ticket. `state.sh` and `step.sh` read only open children, so the unlink changes no next step. Sweep the list's titles first: one closed child's title named a private repo.
+
 ## Grant actions
 
 A new grant action, or a change to what one covers, goes into every list of the actions, not only the scripts that enforce it: `grant.sh`, the classifier `shared-action-classify.sh` (`grant_action`), `launch.sh`'s grants text, `actions.sh`, `answer.sh`, `capturing`'s `before-clear.sh` and its `SKILL.md`, the template in `setup-mp-ported-skills`' `setup.sh`, `docs/agents/supervision.md`, and ADR 0005. Find them with `rg -l 'issue-create' plugins docs`. A list left behind still accepts the old set: in #141, `before-clear.sh` would have reported a Distribution repo push as covered by the `push` grant, and the hook would then have refused it.
