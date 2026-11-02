@@ -136,7 +136,7 @@ A jq regex that must match at the start of any line of a multi-line string, such
 
 ## Checking a path is a repo
 
-To check that a path a file names is a repo of its own, compare `git -C <path> rev-parse --show-toplevel` with the path, resolved. `rev-parse --git-dir` succeeds in any folder inside a repo, so a plain folder there passes and the checks after it read the repo around it: `launch.sh` accepts such a folder as a Distribution repo (#167), and `state.sh` read the Project's own git as its Distribution repo's until #142's review.
+To check that a path a file names is a repo of its own, compare `git -C <path> rev-parse --show-toplevel` with the path, resolved. `rev-parse --git-dir` succeeds in any folder inside a repo, so a plain folder there passes and the checks after it read the repo around it: `launch.sh` and `push.sh` accepted such a folder as a Distribution repo until #167, and `state.sh` read the Project's own git as its Distribution repo's until #142's review. In `supervise`'s scripts, call `own_repo_top` from `own-repo.sh` rather than writing the comparison again.
 
 ## gh api lists
 
