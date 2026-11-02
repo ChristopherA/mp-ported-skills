@@ -302,7 +302,8 @@ if [ -n "$DIST" ]; then
             missing) fail "Distribution repo $DIST, named in docs/agents/distribution-repo.md, is missing; not launched" ;;
             not-top) fail "Distribution repo $DIST is not a git checkout; not launched" ;;
             linked-worktree) fail "Distribution repo $DIST is a linked git worktree, not its repo's main checkout; name the main checkout in docs/agents/distribution-repo.md; not launched" ;;
-            *) fail "Distribution repo $DIST is the Project's own repo; name another repo in docs/agents/distribution-repo.md, or remove it; not launched" ;;
+            own-repo) fail "Distribution repo $DIST is the Project's own repo; name another repo in docs/agents/distribution-repo.md, or remove it; not launched" ;;
+            *) fail "Distribution repo $DIST failed its path check ($reason); not launched" ;;
         esac
     fi
     check_repo "$DIST" "Distribution repo "

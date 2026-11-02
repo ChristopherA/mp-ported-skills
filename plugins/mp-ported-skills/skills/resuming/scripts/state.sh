@@ -247,7 +247,8 @@ gather() {
             missing) dist_unread="$dist not read: no such folder" ;;
             not-top) dist_unread="$dist not read: not a git checkout" ;;
             linked-worktree) dist_unread="$dist not read: a linked git worktree" ;;
-            *) dist_unread="$dist not read: the Project's own repo" ;;
+            own-repo) dist_unread="$dist not read: the Project's own repo" ;;
+            *) dist_unread="$dist not read: its path check failed ($reason)" ;;
         esac
     else
         git_state "$dist"

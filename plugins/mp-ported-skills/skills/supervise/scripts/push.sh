@@ -169,7 +169,8 @@ if [ -n "$DIST" ]; then
             missing) fail "Distribution repo $DIST, $dist_named, is missing" ;;
             not-top) fail "Distribution repo $DIST is not a git checkout" ;;
             linked-worktree) fail "Distribution repo $DIST is a linked git worktree, not its repo's main checkout" ;;
-            *) fail "Distribution repo $DIST is the Project's own repo" ;;
+            own-repo) fail "Distribution repo $DIST is the Project's own repo" ;;
+            *) fail "Distribution repo $DIST failed its path check ($reason)" ;;
         esac
     fi
     DIST_START=$(git -C "$DIST" rev-parse -q --verify "$DIST_START^{commit}") ||
