@@ -148,7 +148,9 @@
 #
 # A Project that names a Distribution repo in docs/agents/distribution-repo.md
 # on origin (distribution.sh, #125) has it checked the same way, each error
-# naming it, and refused when it is missing or is the Project's own repo.
+# naming it, and refused when it is missing, not a repo's top, a linked
+# worktree or the Project's own repo (distribution_check, shared with
+# push.sh and resuming's state.sh, #209).
 # The worker still runs in DIR, so `gh` reads the Project's tracker; it is
 # told the repo's path in its --append-system-prompt and given --add-dir
 # with it, which the job's respawnFlags must record. Checked live with
