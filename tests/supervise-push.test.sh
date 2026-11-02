@@ -380,6 +380,21 @@ check "launch record: a plain folder inside a repo is refused" "1 Error: Distrib
     "$rc $(printf '%s\n' "$out" | grep -v '^note')"
 check "launch record: a plain folder inside a repo is not swept" "no" "$([ -f "$work/sweep-log" ] && echo yes || echo no)"
 nothing_pushed "launch record: a plain folder inside a repo"
+# A linked worktree and the Project's own repo are refused too, by the path
+# check launch.sh and resuming's state.sh share (distribution-repo.sh, #209).
+new_dist 1
+git -C "$dist" worktree add -q "$work/linked$n" -b linked$n
+printf 'distribution %s\n' "$work/linked$n" >"$dist_record"
+out=$(dpush --sweep "$sweep"); rc=$?
+check "launch record: a linked worktree is refused" "1 Error: Distribution repo $work/linked$n is a linked git worktree, not its repo's main checkout" \
+    "$rc $(printf '%s\n' "$out" | grep -v '^note')"
+nothing_pushed "launch record: a linked worktree"
+new_dist 1
+printf 'distribution %s\n' "$project" >"$dist_record"
+out=$(dpush --sweep "$sweep"); rc=$?
+check "launch record: the Project's own repo is refused" "1 Error: Distribution repo $project is the Project's own repo" \
+    "$rc $(printf '%s\n' "$out" | grep -v '^note')"
+nothing_pushed "launch record: the Project's own repo"
 
 # With no launch record, as for a worker launched before it existed, origin
 # names the repo, with a note.

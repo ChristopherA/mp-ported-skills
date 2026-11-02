@@ -1,6 +1,7 @@
 #!/bin/sh
-# own-repo.sh -- sourced by launch.sh, push.sh and close.sh: whether a path
-# names a repo of its own, at its top, as a Distribution repo must (#167).
+# own-repo.sh -- sourced by close.sh and record.sh, and by every caller of
+# distribution-repo.sh, which builds on it: whether a path names a repo of
+# its own, at its top, as a Distribution repo must (#167).
 # `git rev-parse --git-dir` succeeds in any folder inside a repo, so a plain
 # folder there would pass it and every check after would read the repo
 # around it. A symlinked or relative path to a repo's top passes.

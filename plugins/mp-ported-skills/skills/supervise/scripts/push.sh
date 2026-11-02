@@ -89,6 +89,7 @@
 set -u
 . "$(dirname -- "$0")/marker.sh"
 . "$(dirname -- "$0")/own-repo.sh"
+. "$(dirname -- "$0")/distribution-repo.sh"
 
 DIR=""
 ID=""
@@ -161,8 +162,16 @@ fi
 if [ -n "$DIST" ]; then
     [ -n "$DIST_START" ] ||
         fail "--dist-start is required: $DIR names Distribution repo $DIST (give the snapshot's dist head line)"
-    [ -d "$DIST" ] || fail "Distribution repo $DIST, $dist_named, is missing"
-    own_repo_top "$DIST" >/dev/null || fail "Distribution repo $DIST is not a git checkout"
+    # The path's checks are distribution-repo.sh's, shared with launch.sh
+    # and resuming's state.sh (#209); the words are this script's.
+    if ! reason=$(distribution_check "$DIST" "$(git -C "$DIR" rev-parse --show-toplevel)"); then
+        case $reason in
+            missing) fail "Distribution repo $DIST, $dist_named, is missing" ;;
+            not-top) fail "Distribution repo $DIST is not a git checkout" ;;
+            linked-worktree) fail "Distribution repo $DIST is a linked git worktree, not its repo's main checkout" ;;
+            *) fail "Distribution repo $DIST is the Project's own repo" ;;
+        esac
+    fi
     DIST_START=$(git -C "$DIST" rev-parse -q --verify "$DIST_START^{commit}") ||
         fail "not a commit in Distribution repo $DIST: $DIST_START"
 elif [ -n "$DIST_START" ]; then

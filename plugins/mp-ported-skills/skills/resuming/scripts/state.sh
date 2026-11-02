@@ -39,6 +39,10 @@ distribution="$supervise_scripts/distribution.sh"
 # step it takes, and which background sessions are live.
 . "$supervise_scripts/accept.sh"
 . "$supervise_scripts/live.sh"
+# The Distribution repo's path checks and the repo state read, shared with
+# launch.sh and push.sh (#209).
+. "$supervise_scripts/own-repo.sh"
+. "$supervise_scripts/distribution-repo.sh"
 # The park comment's heading, shared with launch.sh's prompt text (#158).
 . "$supervise_scripts/park.sh"
 # Whether unpushed commits are a supervised run of a ticket (#214).
@@ -172,24 +176,12 @@ open_link_blockers() {
 
 # git_state <dir>: <dir>'s branch, default branch, sync with its upstream,
 # uncommitted paths and unpushed commits, in r_branch, r_default, r_sync,
-# r_dirty and r_unpushed, and the two lines that report them.
+# r_dirty and r_unpushed. All but the sync are distribution_state's, as
+# launch.sh reads them.
 git_state() {
-    r_branch=$(git -C "$1" symbolic-ref --short -q HEAD || echo "(detached)")
-    r_default=$(git -C "$1" symbolic-ref --short -q refs/remotes/origin/HEAD)
-    r_default=${r_default#origin/}
-    if [ -z "$r_default" ]; then
-        for b in main master; do
-            git -C "$1" show-ref -q --verify "refs/heads/$b" && { r_default=$b; break; }
-        done
-    fi
-    r_default=${r_default:-main}
-
-    r_dirty=$(git -C "$1" status --porcelain | wc -l | tr -d ' ')
-    if git -C "$1" remote | grep -q .; then
-        r_unpushed=$(git -C "$1" rev-list --count HEAD --not --remotes 2>/dev/null || echo 0)
-    else
-        r_unpushed=0
-    fi
+    distribution_state "$1"
+    r_branch=$distribution_branch r_default=$distribution_default
+    r_dirty=$distribution_dirty r_unpushed=$distribution_unpushed
     if up=$(git -C "$1" rev-parse --abbrev-ref -q '@{u}' 2>/dev/null); then
         counts=$(git -C "$1" rev-list --left-right --count "$up...HEAD")
         behind=${counts%%[!0-9]*} ahead=${counts##*[!0-9]}
@@ -248,14 +240,15 @@ gather() {
         dist_unread="not read: $(cat "$tmp/dist-err")"
     elif [ -z "$dist" ]; then
         :
-    elif [ ! -d "$dist" ]; then
-        dist_unread="$dist not read: no such folder"
-    # A plain folder inside a repo is not one: rev-parse would answer for
-    # the repo around it, as it would for the Project itself.
-    elif [ "$(git -C "$dist" rev-parse --show-toplevel 2>/dev/null)" != "$dist" ]; then
-        dist_unread="$dist not read: not a git checkout"
-    elif [ "$dist" = "$(git rev-parse --show-toplevel)" ]; then
-        dist_unread="$dist not read: the Project's own repo"
+    # The path's checks are launch.sh's (distribution_check): a path the
+    # launch refuses is not read here, so the offer is held back.
+    elif ! reason=$(distribution_check "$dist" "$(git rev-parse --show-toplevel)"); then
+        case $reason in
+            missing) dist_unread="$dist not read: no such folder" ;;
+            not-top) dist_unread="$dist not read: not a git checkout" ;;
+            linked-worktree) dist_unread="$dist not read: a linked git worktree" ;;
+            *) dist_unread="$dist not read: the Project's own repo" ;;
+        esac
     else
         git_state "$dist"
         echo "distribution repo: $dist"

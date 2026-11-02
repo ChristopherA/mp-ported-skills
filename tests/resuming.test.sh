@@ -921,6 +921,57 @@ printf '.\n' >"$proj/docs/agents/distribution-repo.md"
 g commit -qam 'Point at the Project'
 g push -q
 check "dist: the Project itself is not read" "$real not read: the Project's own repo" "$(line_of "$(run)" 'distribution repo')"
+
+# The path checks are launch.sh's (distribution-repo.sh, #209): for each
+# reason the launch refuses a Distribution repo, the readout does not read
+# it and holds its /supervise offer back. The launch runs against a profile
+# holding only an implement skill, and is refused before it starts anything.
+launch="$root/plugins/mp-ported-skills/skills/supervise/scripts/launch.sh"
+push="$root/plugins/mp-ported-skills/skills/supervise/scripts/push.sh"
+lcfg="$work/lcfg"
+mkdir -p "$lcfg/plugins/cache/m/mattpocock-skills/1/skills/e/implement"
+: >"$lcfg/plugins/cache/m/mattpocock-skills/1/skills/e/implement/SKILL.md"
+launch_err() { # launch.sh's stderr less its setup: lines, and its status
+    CLAUDE_CONFIG_DIR="$lcfg" sh "$launch" --dir "$proj" --ticket 52 </dev/null >/dev/null 2>"$work/launch-err"
+    printf '%s %s' "$?" "$(grep -v '^setup: ' "$work/launch-err")"
+}
+name_dist() { # <path> -- name it in distribution-repo.md, committed and pushed
+    printf '# Distribution repo\n\n%s\n' "$1" >"$proj/docs/agents/distribution-repo.md"
+    g commit -qam "Name $1"
+    g push -q
+}
+parity() { # <name> <path> <launch's words> <readout's words>
+    out=$(run)
+    check "parity $1: the launch refuses" "1 Error: Distribution repo $3; not launched" "$(launch_err)"
+    check "parity $1: the readout does not read it" "$4" "$(line_of "$out" 'distribution repo')"
+    check "parity $1: the readout holds its offer back" "not offered: distribution repo $4" "$(sup "$out")"
+}
+check "parity own-repo: the launch refuses" "1 Error: Distribution repo $real is the Project's own repo; name another repo in docs/agents/distribution-repo.md, or remove it; not launched" "$(launch_err)"
+check "parity own-repo: the readout holds its offer back" "not offered: distribution repo $real not read: the Project's own repo" "$(sup "$(run)")"
+name_dist ../gone
+parity missing ../gone "$real/../gone, named in docs/agents/distribution-repo.md, is missing" "$real/../gone not read: no such folder"
+name_dist ../plain
+parity not-top ../plain "$plain is not a git checkout" "$plain not read: not a git checkout"
+dg worktree add -q "$work/dist-linked" -b linked
+linked=$(CDPATH= cd -- "$work/dist-linked" && pwd -P)
+name_dist ../dist-linked
+parity linked-worktree ../dist-linked "$linked is a linked git worktree, not its repo's main checkout; name the main checkout in docs/agents/distribution-repo.md" "$linked not read: a linked git worktree"
+
+# Where each reads the path stays as it was: with origin's copy naming the
+# linked worktree and a later commit, not yet pushed, naming the clean
+# repo, the launch and the push act on origin's, and the readout names the
+# working tree's.
+printf '# Distribution repo\n\n../dist\n' >"$proj/docs/agents/distribution-repo.md"
+g commit -qam 'Name the clean repo, unpushed'
+check "two copies: the launch refuses origin's repo" "1 Error: Distribution repo $linked is a linked git worktree, not its repo's main checkout; name the main checkout in docs/agents/distribution-repo.md; not launched" "$(launch_err)"
+out=$(sh "$push" --dir "$proj" --id 3fb49286 --start HEAD --dist-start HEAD --no-sweep --check </dev/null 2>&1)
+check "two copies: the push checks origin's repo" "1 note no Distribution repo was recorded at 3fb49286's launch, so it was read from origin: $linked
+Error: Distribution repo $linked is a linked git worktree, not its repo's main checkout" "$? $out"
+check "two copies: the readout names the working tree's" "$dist" "$(line_of "$(run)" 'distribution repo')"
+g reset -q --hard origin/main
+dg worktree remove --force "$work/dist-linked"
+dg branch -q -D linked
+name_dist .
 printf '# Distribution repo\n' >"$proj/docs/agents/distribution-repo.md"
 g commit -qam 'No path'
 g push -q

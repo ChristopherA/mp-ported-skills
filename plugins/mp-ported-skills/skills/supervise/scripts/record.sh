@@ -174,8 +174,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 dist="" dist_unread=""
 dist=$(sh "$SCRIPT_DIR/distribution.sh" --dir "$PROJECT" </dev/null 2>/dev/null) || dist="" dist_unread=1
 [ -z "$DIST_START" ] || [ -n "$dist$dist_unread" ] || fail "--dist-start given, but $PROJECT names no Distribution repo"
-if [ -n "$dist" ] && [ "$(git -C "$dist" rev-parse --show-toplevel 2>/dev/null)" != "$dist" ]; then
-    dist_unread="$dist is not a repo of its own"
+# Whether it is a repo of its own is own-repo.sh's, shared with launch.sh,
+# push.sh and close.sh; a symlinked path to a repo's top passes, resolved.
+. "$SCRIPT_DIR/own-repo.sh"
+if [ -n "$dist" ]; then
+    if dist_top=$(own_repo_top "$dist"); then
+        dist=$dist_top
+    else
+        dist_unread="$dist is not a repo of its own"
+    fi
 fi
 # The Project's commits are counted in DIR, or in PROJECT when DIR is in
 # the Distribution repo.

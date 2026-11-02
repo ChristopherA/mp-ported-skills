@@ -4,7 +4,8 @@
 # worker and wait until it has settled) (#137), live.sh (which background
 # sessions are live in a checkout), accept.sh (which next: step /supervise
 # takes) (#115), park.sh (how a parked ticket and worker are told apart)
-# (#158) and own-repo.sh (whether a path is a repo of its own) (#167).
+# (#158), own-repo.sh (whether a path is a repo of its own) (#167) and
+# distribution-repo.sh (a Distribution repo's path checks and state) (#209).
 #
 # Sources each helper and runs its function against a scratch repo and a
 # fake `claude` first on PATH. The fake logs each call and answers
@@ -296,6 +297,46 @@ check "own-repo: a relative path to a repo's top passes, resolved" "0 $work/own/
 check "own-repo: a plain folder inside a repo fails" "1 " "$(own "$work/own/repo/sub")"
 check "own-repo: a folder in no repo fails" "1 " "$(own "$work/own/plain")"
 check "own-repo: a missing folder fails" "1 " "$(own "$work/own/gone")"
+
+# --- distribution-repo.sh -----------------------------------------------------
+. "$scripts/distribution-repo.sh"
+dcheck() { # <path> <project top>: distribution_check's output and status
+    out=$(distribution_check "$1" "$2"); printf '%s %s' "$?" "$out"
+}
+dg() { git -C "$work/drepo/r" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@" >/dev/null 2>&1; }
+mkdir -p "$work/drepo/r/sub" "$work/drepo/proj"
+git -C "$work/drepo/r" init -q -b main
+git -C "$work/drepo/proj" init -q -b main
+dg commit --allow-empty -m seed
+dg worktree add "$work/drepo/linked" -b linked
+ln -s "$work/drepo/r" "$work/drepo/link"
+check "distribution: a repo's top passes, silent" "0 " "$(dcheck "$work/drepo/r" "$work/drepo/proj")"
+check "distribution: a symlink to a repo's top passes" "0 " "$(dcheck "$work/drepo/link" "$work/drepo/proj")"
+check "distribution: a missing folder" "1 missing" "$(dcheck "$work/drepo/gone" "$work/drepo/proj")"
+check "distribution: a plain folder inside a repo is not its top" "1 not-top" "$(dcheck "$work/drepo/r/sub" "$work/drepo/proj")"
+check "distribution: a folder in no repo is not a top" "1 not-top" "$(dcheck "$work/own/plain" "$work/drepo/proj")"
+check "distribution: a linked worktree" "1 linked-worktree" "$(dcheck "$work/drepo/linked" "$work/drepo/proj")"
+check "distribution: the Project's own repo" "1 own-repo" "$(dcheck "$work/drepo/r" "$work/drepo/r")"
+check "distribution: the Project's own repo, by a symlink" "1 own-repo" "$(dcheck "$work/drepo/link" "$work/drepo/r")"
+
+dstate() { # <dir>: distribution_state's status and variables
+    distribution_state "$1"; printf '%s %s %s %s %s' "$?" "$distribution_branch" "$distribution_default" "$distribution_dirty" "$distribution_unpushed"
+}
+check "distribution state: clean, no remote" "0 main main 0 0" "$(dstate "$work/drepo/r")"
+echo x >"$work/drepo/r/a"; echo y >"$work/drepo/r/b"
+check "distribution state: uncommitted paths counted" "0 main main 2 0" "$(dstate "$work/drepo/r")"
+command rm -f "$work/drepo/r/a" "$work/drepo/r/b"
+git init -q --bare "$work/drepo/r.git"
+dg remote add origin "$work/drepo/r.git"
+dg push -u origin main
+dg remote set-head origin main
+dg commit --allow-empty -m wip
+check "distribution state: commits no remote holds counted" "0 main main 0 1" "$(dstate "$work/drepo/r")"
+dg checkout -b topic
+check "distribution state: the branch against origin's default" "0 topic main 0 1" "$(dstate "$work/drepo/r")"
+dg checkout --detach
+check "distribution state: a detached HEAD" "0 (detached) main 0 1" "$(dstate "$work/drepo/r")"
+check "distribution state: git status failing exits 1, dirty 0" "1 (detached) main 0 0" "$(dstate "$work/drepo/gone" 2>/dev/null)"
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

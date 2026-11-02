@@ -171,6 +171,7 @@ set -u
 . "$(dirname -- "$0")/live.sh"
 . "$(dirname -- "$0")/park.sh"
 . "$(dirname -- "$0")/own-repo.sh"
+. "$(dirname -- "$0")/distribution-repo.sh"
 
 DIR=""
 TICKET=""
@@ -221,38 +222,29 @@ set -- "$CONFIG"/plugins/cache/*/mattpocock-skills/*/skills/*/implement/SKILL.md
 
 # The entry check (#76): the checkout is on its default branch, its tree is
 # clean, and no other background session is live in it, so the worker
-# starts where its commits belong and alone. The default branch is found as
-# resuming's state.sh finds it. check_repo <dir> <label> runs it on one
-# repo, its errors naming the repo as <label><dir>; the Distribution repo
-# takes the same checks (#125), and must also be a repo of its own
-# (own-repo.sh, #167). The Project folder need not sit at its repo's top.
+# starts where its commits belong and alone. check_repo <dir> <label> runs
+# it on one repo, its errors naming the repo as <label><dir>, its state read
+# as resuming's state.sh reads it (distribution-repo.sh, #209). The Project
+# folder is checked here for a git checkout and a linked worktree, and need
+# not sit at its repo's top; the Distribution repo takes the same state
+# checks (#125) after distribution_check, below, has checked its path.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 check_repo() {
-    git -C "$1" rev-parse --git-dir >/dev/null 2>&1 || fail "$2$1 is not a git checkout; not launched"
-    [ -z "$2" ] || own_repo_top "$1" >/dev/null || fail "$2$1 is not a git checkout; not launched"
-    # A linked worktree is refused first (#79), whatever branch it holds: a
-    # worktree can hold the default branch while the main checkout is
-    # elsewhere.
-    if ! linked=$(sh "$SCRIPT_DIR/main-checkout.sh" "$1" </dev/null); then
-        [ -z "$2" ] || fail "$2$1 is a linked git worktree, not its repo's main checkout; name the main checkout in docs/agents/distribution-repo.md; not launched"
-        fail "$linked; not launched"
+    if [ -z "$2" ]; then
+        git -C "$1" rev-parse --git-dir >/dev/null 2>&1 || fail "$1 is not a git checkout; not launched"
+        # A linked worktree is refused first (#79), whatever branch it
+        # holds: a worktree can hold the default branch while the main
+        # checkout is elsewhere.
+        linked=$(sh "$SCRIPT_DIR/main-checkout.sh" "$1" </dev/null) || fail "$linked; not launched"
     fi
-    status=$(git -C "$1" status --porcelain) || fail "git status failed in $2$1, so its tree is unconfirmed; not launched"
-    dirty=$(printf '%s' "$status" | grep -c '^')
+    distribution_state "$1" || fail "git status failed in $2$1, so its tree is unconfirmed; not launched"
+    dirty=$distribution_dirty
     if [ "$dirty" -gt 0 ]; then
         [ "$dirty" = 1 ] && paths=path || paths=paths
         fail "$2$1 has uncommitted changes ($dirty $paths); commit or clear them before launching a worker there; not launched"
     fi
-    branch=$(git -C "$1" symbolic-ref --short -q HEAD || echo "(detached)")
-    default=$(git -C "$1" symbolic-ref --short -q refs/remotes/origin/HEAD)
-    default=${default#origin/}
-    if [ -z "$default" ]; then
-        for b in main master; do
-            git -C "$1" show-ref -q --verify "refs/heads/$b" && { default=$b; break; }
-        done
-    fi
-    default=${default:-main}
-    [ "$branch" = "$default" ] || fail "$2$1 is on $branch, not the default branch $default; not launched"
+    default=$distribution_default
+    [ "$distribution_branch" = "$default" ] || fail "$2$1 is on $distribution_branch, not the default branch $default; not launched"
 }
 check_repo "$DIR" ""
 project_default=$default
@@ -303,7 +295,16 @@ printf 'setup: %s %s\n' "$SUPERVISION" "$supervision" >&2
 DIST=$(sh "$SCRIPT_DIR/distribution.sh" --dir "$DIR" </dev/null) ||
     fail "distribution.sh failed, so the Distribution repo is unknown; not launched"
 if [ -n "$DIST" ]; then
-    [ -d "$DIST" ] || fail "Distribution repo $DIST, named in docs/agents/distribution-repo.md, is missing; not launched"
+    # The path's checks are distribution-repo.sh's, shared with push.sh and
+    # resuming's state.sh (#209); the words are this script's.
+    if ! reason=$(distribution_check "$DIST" "$top"); then
+        case $reason in
+            missing) fail "Distribution repo $DIST, named in docs/agents/distribution-repo.md, is missing; not launched" ;;
+            not-top) fail "Distribution repo $DIST is not a git checkout; not launched" ;;
+            linked-worktree) fail "Distribution repo $DIST is a linked git worktree, not its repo's main checkout; name the main checkout in docs/agents/distribution-repo.md; not launched" ;;
+            *) fail "Distribution repo $DIST is the Project's own repo; name another repo in docs/agents/distribution-repo.md, or remove it; not launched" ;;
+        esac
+    fi
     check_repo "$DIST" "Distribution repo "
     dist_default=$default
     # Where a parked worker resets the Distribution repo (#158). A continued
@@ -311,8 +312,6 @@ if [ -n "$DIST" ]; then
     # upstream, which holds none of the ticket's unpushed work.
     dist_start=$(git -C "$DIST" rev-parse --short HEAD)
     [ -z "$CONTINUE" ] || dist_start="origin/$dist_default"
-    [ "$(git -C "$DIST" rev-parse --show-toplevel)" != "$(git -C "$DIR" rev-parse --show-toplevel)" ] ||
-        fail "Distribution repo $DIST is the Project's own repo; name another repo in docs/agents/distribution-repo.md, or remove it; not launched"
 fi
 default=$project_default
 
