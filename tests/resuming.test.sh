@@ -857,6 +857,10 @@ distribution repo branch: main (default main), in sync with origin/main, as of l
 distribution repo uncommitted paths: 0; unpushed commits: 0" "$(printf '%s\n' "$out" | sed -n '1,5p')"
 check "dist: clean, next is the child" "1 work in flight: $child" "$(next "$out")"
 check "dist: clean, supervise offered" "$offer" "$(sup "$out")"
+kept=$(command cat "$FAKE_GH/issues.json")
+issues "$(list "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)")"
+check "dist: clean, a ready ticket is case 2" "2 /implement #52" "$(next "$(run)" | cut -d' ' -f1-3)"
+issues "$kept"
 # launch.sh refuses a live background session in the Distribution repo too.
 agents "$(list "$(row dd77 working 21 "$dist")")"
 check "dist: a live session there, supervise not offered" \
@@ -891,6 +895,21 @@ echo x >"$proj/scratch"
 check "dist: the Project's items first" "1 work in flight: 1 uncommitted paths, 1 uncommitted paths in distribution repo $dist, $child" "$(next "$(run)")"
 command rm -f "$dist/scratch" "$proj/scratch"
 
+# unread_case2 <name> <not-read words>: with no in-motion parent and a ready
+# ticket that would otherwise be case 2, the unread Distribution repo is
+# case 1, the ticket the runner-up, and the offer still held back (#168).
+unread_case2() {
+    kept=$(command cat "$FAKE_GH/issues.json")
+    issues "$(list "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)")"
+    u_out=$(run)
+    check "case 2 $1: next is case 1" "1 work in flight: distribution repo $2" "$(next "$u_out")"
+    check "case 2 $1: runner-up is the ticket" "2 /implement #52" "$(runner "$u_out" | cut -d' ' -f1-3)"
+    check "case 2 $1: supervise not offered" "not offered: distribution repo $2" "$(sup "$u_out")"
+    printf '%s\n' "$u_out" >"$work/state-out"
+    check "case 2 $1: step.sh stops" "stop: next: 1 work in flight: distribution repo $2" "$(sh "$root/plugins/mp-ported-skills/skills/supervise/scripts/step.sh" --from "$work/state-out")"
+    issues "$kept"
+}
+
 # The working tree's copy is read, as the other docs/agents files are.
 printf '../gone\n' >"$proj/docs/agents/distribution-repo.md"
 out=$(run)
@@ -906,9 +925,14 @@ g push -q
 plain=$(CDPATH= cd -- "$work/plain" && pwd -P)
 out=$(run)
 check "dist: not a git checkout is not read" "$plain not read: not a git checkout" "$(line_of "$out" 'distribution repo')"
-check "dist: not read, next unchanged" "1 work in flight: $child" "$(next "$out")"
+# One that cannot be read is case 1 work in flight (#168), after git's items
+# and before the in-motion ticket, so step.sh stops on it.
+check "dist: not read is case 1" "1 work in flight: distribution repo $plain not read: not a git checkout, $child" "$(next "$out")"
 check "dist: not read is never clean" "not offered: distribution repo $plain not read: not a git checkout" "$(sup "$out")"
-check "dist: not read, tracker unreached, not called clean" "undecided: git shows nothing in flight, but the distribution repo was not read; the tracker was not read" "$(next "$(FAKE_GH_FAIL=1 run)")"
+printf '%s\n' "$out" >"$work/state-out"
+check "dist: not read, step.sh stops" "stop: next: 1 work in flight: distribution repo $plain not read: not a git checkout, $child" "$(sh "$root/plugins/mp-ported-skills/skills/supervise/scripts/step.sh" --from "$work/state-out")"
+check "dist: not read, tracker unreached, still case 1" "1 work in flight: distribution repo $plain not read: not a git checkout" "$(next "$(FAKE_GH_FAIL=1 run)")"
+check "dist: not read, tracker unreached, runner-up" "none known: the tracker was not read" "$(runner "$(FAKE_GH_FAIL=1 run)")"
 # A folder inside the Project is no repo of its own, and the Project is not
 # its own Distribution repo.
 printf 'docs\n' >"$proj/docs/agents/distribution-repo.md"
@@ -917,10 +941,12 @@ g push -q
 out=$(run)
 check "dist: a folder inside the Project is not read" "$real/docs not read: not a git checkout" "$(line_of "$out" 'distribution repo')"
 check "dist: a folder inside the Project, supervise not offered" "not offered: distribution repo $real/docs not read: not a git checkout" "$(sup "$out")"
+unread_case2 inside "$real/docs not read: not a git checkout"
 printf '.\n' >"$proj/docs/agents/distribution-repo.md"
 g commit -qam 'Point at the Project'
 g push -q
 check "dist: the Project itself is not read" "$real not read: the Project's own repo" "$(line_of "$(run)" 'distribution repo')"
+unread_case2 own-repo "$real not read: the Project's own repo"
 
 # The path checks are launch.sh's (distribution-repo.sh, #209): for each
 # reason the launch refuses a Distribution repo, the readout does not read
@@ -945,6 +971,7 @@ parity() { # <name> <path> <launch's words> <readout's words>
     check "parity $1: the launch refuses" "1 Error: Distribution repo $3; not launched" "$(launch_err)"
     check "parity $1: the readout does not read it" "$4" "$(line_of "$out" 'distribution repo')"
     check "parity $1: the readout holds its offer back" "not offered: distribution repo $4" "$(sup "$out")"
+    unread_case2 "$1" "$4"
 }
 check "parity own-repo: the launch refuses" "1 Error: Distribution repo $real is the Project's own repo; name another repo in docs/agents/distribution-repo.md, or remove it; not launched" "$(launch_err)"
 check "parity own-repo: the readout holds its offer back" "not offered: distribution repo $real not read: the Project's own repo" "$(sup "$(run)")"
@@ -978,6 +1005,7 @@ g push -q
 out=$(run)
 check "dist: no path line is not read" "not read: Error: docs/agents/distribution-repo.md in the working tree names no path" "$(line_of "$out" 'distribution repo')"
 check "dist: no path line, supervise not offered" "not offered: distribution repo not read: Error: docs/agents/distribution-repo.md in the working tree names no path" "$(sup "$out")"
+unread_case2 no-path "not read: Error: docs/agents/distribution-repo.md in the working tree names no path"
 
 g rm -q docs/agents/distribution-repo.md
 g commit -qm 'No Distribution repo'

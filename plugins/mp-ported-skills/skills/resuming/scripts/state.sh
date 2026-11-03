@@ -234,7 +234,10 @@ gather() {
     # read: this readout only reads, so it needs none of the protection
     # launch.sh gets from origin's copy. One that cannot be read is never
     # clean: its reason goes in dist_unread, which keeps the /supervise
-    # offer back.
+    # offer back, and is case 1 work in flight after git's items (#168):
+    # the Project's setup is broken, and a ticket built now would fail or
+    # land in the Project. It stays out of inflight_rest, so the offer reads
+    # the step as it would be without it and names the not-read reason.
     dist= dist_inflight= dist_unread=
     if ! dist=$(sh "$distribution" --dir . --working-tree </dev/null 2>"$tmp/dist-err"); then
         dist_unread="not read: $(cat "$tmp/dist-err")"
@@ -258,7 +261,10 @@ gather() {
         dist_inflight=$(git_inflight " in distribution repo $dist")
         inflight="$inflight$dist_inflight" inflight_rest="$inflight_rest$dist_inflight"
     fi
-    [ -z "$dist_unread" ] || echo "distribution repo: $dist_unread"
+    if [ -n "$dist_unread" ]; then
+        echo "distribution repo: $dist_unread"
+        inflight="$inflight, distribution repo $dist_unread"
+    fi
 
     # Issue numbers the default branch's commit messages close.
     close_re='(close[sd]?|fix(e[sd])?|resolve[sd]?):? +#'
@@ -494,11 +500,7 @@ gather() {
 "; }
     [ -n "$inflight" ] && add_case "1 work in flight: ${inflight#, }"
     if [ $reached = 0 ]; then
-        if [ -n "$dist_unread" ]; then
-            [ -n "$inflight" ] || add_case "undecided: git shows nothing in flight, but the distribution repo was not read; the tracker was not read"
-        else
-            [ -n "$inflight" ] || add_case "undecided: git shows nothing in flight; the tracker was not read"
-        fi
+        [ -n "$inflight" ] || add_case "undecided: git shows nothing in flight; the tracker was not read"
         add_case "none known: the tracker was not read"
     else
         [ -n "$pick" ] && add_case "2 /implement ${pick%% *} $you_type: $pick"
@@ -553,10 +555,11 @@ gather() {
     # is offered all the same, and a `push:` line names the push /supervise
     # asks the maintainer for before its first launch (#223), which step.sh
     # hands on. Otherwise the lines are as they were: no queue: line, and the
-    # unpushed refusal.
+    # unpushed refusal. A Distribution repo that cannot be read is left out
+    # of the offer's step the same way, and refuses it below.
     first=$(printf '%s' "$cases" | sed -n 1p)
     offer=$first
-    if [ "$unpushed" -gt 0 ]; then
+    if [ "$unpushed" -gt 0 ] || [ -n "$dist_unread" ]; then
         if [ -n "$inflight_rest" ]; then offer="1 work in flight: ${inflight_rest#, }"
         else offer=$(printf '%s' "$cases" | sed -n 2p); fi
     fi
