@@ -8,9 +8,12 @@
 # after the worker finished. The second hung call ignored SIGTERM. So the
 # call runs in a process group of its own under a perl parent, which sends
 # SIGKILL to the whole group once the limit passes: no handler can catch
-# or ignore it. The call's stdout and stderr go to temporary files rather
-# than the caller's pipe, and are replayed after it ends, so a process it
-# leaves behind cannot hold the caller's `$( )` open.
+# or ignore it. A TERM, INT or HUP to the perl parent, as stopping the
+# caller sends, kills the group the same way, since a signal to the
+# caller's group no longer reaches the call. The call's stdout and stderr
+# go to temporary files rather than the caller's pipe, and are replayed
+# after it ends, so a process it leaves behind cannot hold the caller's
+# `$( )` open.
 #
 # The limit is MP_AGENTS_TIMEOUT seconds, a whole number of 1 or more;
 # unset or anything else reads as 60. A normal call answers in a second or
@@ -54,6 +57,9 @@ agents_list() {
         }
         setpgrp($pid, $pid);
         $SIG{ALRM} = sub { kill "KILL", -$pid; kill "KILL", $pid; waitpid $pid, 0; exit 124 };
+        for my $sig (qw(TERM INT HUP)) {
+            $SIG{$sig} = sub { kill "KILL", -$pid; kill "KILL", $pid; waitpid $pid, 0; exit 128 + ($sig eq "TERM" ? 15 : $sig eq "INT" ? 2 : 1) };
+        }
         alarm $limit;
         waitpid $pid, 0;
         my $s = $?;

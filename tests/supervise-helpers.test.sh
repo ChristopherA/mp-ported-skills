@@ -128,6 +128,19 @@ t1=$(date +%s)
 check "agents list: a hung call returns 124 and prints nothing" "rc=124" "$out"
 check "agents list: a hung call ends within the limit and a second" "yes" "$( [ $((t1 - t0)) -le 2 ] && echo yes || echo "no, $((t1 - t0))s")"
 check "agents list: nothing of the hung call is left running" "0" "$(ps -axo command= | grep -c '^sleep 601$')"
+# Stopping the reader (a TERM to the perl parent, as a stopped watch sends)
+# ends the hung call too: it runs in a process group of its own, which a
+# signal to the caller's group does not reach.
+lists '[{"id":"a1"}]'
+(export FAKE_AGENTS_HANG=1 MP_AGENTS_TIMEOUT=30; agents_list >/dev/null 2>&1) &
+reader=$!
+i=0
+while [ "$i" -lt 50 ] && [ "$(ps -axo command= | grep -c '^sleep 601$')" -eq 0 ]; do sleep 0.1; i=$((i + 1)); done
+pkill -TERM -P "$reader" perl
+wait "$reader"
+sleep 1
+check "agents list: a TERM to the reader ends the hung call" "0" "$(ps -axo command= | grep -c '^sleep 601$')"
+pkill -9 -f '^sleep 601$' 2>/dev/null
 out=$( (export FAKE_AGENTS_HANG=1 MP_AGENTS_TIMEOUT=1; agents_list >/dev/null; agents_list) )
 check "agents list: the call after a hung one answers" '[{"id":"a1"}]' "$out"
 # Every script reads the list through agents_list: a call of its own has
