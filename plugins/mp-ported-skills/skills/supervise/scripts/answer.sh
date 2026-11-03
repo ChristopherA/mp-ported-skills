@@ -75,6 +75,7 @@ case $TICKET in *[!0-9]*) fail "--ticket needs an issue number, not '$TICKET'" ;
 [ -d "$DIR" ] || fail "not a directory: $DIR"
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the worker's profile is unknown"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/agents.sh"
 
 not_routine() { printf 'not routine: %s\n' "$1"; exit 2; }
 errors=$(mktemp)
@@ -85,7 +86,10 @@ case $STATE in
     *) not_routine "the worker is $STATE, not waiting on a question" ;;
 esac
 
-agents=$(claude agents --json --all </dev/null 2>/dev/null) &&
+# Within agents.sh's time limit (#240).
+agents=$(agents_list 2>/dev/null); rc=$?
+[ "$rc" -ne 124 ] || fail "claude agents --json --all did not answer in $(agents_limit)s"
+[ "$rc" -eq 0 ] &&
     printf '%s' "$agents" | jq -e 'type == "array"' >/dev/null 2>&1 ||
     fail "claude agents --json --all could not be read"
 sid=$(printf '%s' "$agents" | jq -r --arg id "$ID" '

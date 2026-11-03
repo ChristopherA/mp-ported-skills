@@ -91,6 +91,7 @@ done
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the session's job is unknown"
 DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
 . "$(dirname -- "$0")/marker.sh"
+. "$(dirname -- "$0")/agents.sh"
 . "$(dirname -- "$0")/settle.sh"
 . "$(dirname -- "$0")/live.sh"
 

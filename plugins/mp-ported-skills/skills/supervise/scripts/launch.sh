@@ -170,6 +170,7 @@
 
 set -u
 . "$(dirname -- "$0")/marker.sh"
+. "$(dirname -- "$0")/agents.sh"
 . "$(dirname -- "$0")/live.sh"
 . "$(dirname -- "$0")/park.sh"
 . "$(dirname -- "$0")/own-repo.sh"
@@ -318,7 +319,11 @@ if [ -n "$DIST" ]; then
 fi
 default=$project_default
 
-list=$(CLAUDE_CONFIG_DIR="$CONFIG" claude agents --json --all </dev/null 2>/dev/null) ||
+# Within agents.sh's time limit (#240).
+list=$(export CLAUDE_CONFIG_DIR="$CONFIG"; agents_list 2>/dev/null); rc=$?
+[ "$rc" -ne 124 ] ||
+    fail "claude agents --json --all did not answer in $(agents_limit)s, so other sessions in $DIR are unknown; not launched"
+[ "$rc" -eq 0 ] ||
     fail "claude agents --json --all failed, so other sessions in $DIR are unknown; not launched"
 # Which sessions are live is live.sh's, shared with resume.sh and state.sh.
 others=$(live_others "$list" "$DIR") ||

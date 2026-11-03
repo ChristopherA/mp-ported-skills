@@ -70,6 +70,7 @@ done
 DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 . "$here/marker.sh"
+. "$here/agents.sh"
 . "$here/settle.sh"
 
 [ -f "$CLAUDE_CONFIG_DIR/jobs/$ID/state.json" ] ||

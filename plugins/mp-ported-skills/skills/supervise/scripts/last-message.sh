@@ -53,8 +53,12 @@ esac
 # claude agents and the transcripts both follow the config dir, so an unset
 # one would read another profile's sessions.
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the worker's profile is unknown"
+. "$(dirname -- "$0")/agents.sh"
 
-agents=$(claude agents --json --all </dev/null 2>/dev/null) &&
+# Within agents.sh's time limit (#240).
+agents=$(agents_list 2>/dev/null); rc=$?
+[ "$rc" -ne 124 ] || fail "claude agents --json --all did not answer in $(agents_limit)s"
+[ "$rc" -eq 0 ] &&
     printf '%s' "$agents" | jq -e 'type == "array"' >/dev/null 2>&1 ||
     fail "claude agents --json --all could not be read"
 sid=$(printf '%s' "$agents" | jq -r --arg id "$ID" '

@@ -27,7 +27,12 @@
 # The stop's own status is not read, since stopping a stopped session may
 # fail; the wait is what decides.
 #
+# Each read is agents.sh's agents_list, which the caller sources first. A
+# read past its time limit counts as one failed poll and is tried again at
+# the next; agents_tries such reads in a row fail the wait (#240).
+#
 # Usage:
+#   . "$(dirname -- "$0")/agents.sh"
 #   . "$(dirname -- "$0")/settle.sh"
 #   v=$(stop_and_settle ID SETTLE INTERVAL TIMEOUT VERDICT [ROSTER]) || fail "$v"
 #
@@ -60,8 +65,20 @@ stop_and_settle() {
     claude stop "$settle_id" </dev/null >/dev/null 2>&1
     settle_begin=$(date +%s)
     settle_since=""
+    settle_hung=0
     while :; do
-        settle_list=$(claude agents --json --all </dev/null) || {
+        settle_list=$(agents_list); settle_rc=$?
+        if [ "$settle_rc" -eq 124 ]; then
+            settle_hung=$((settle_hung + 1))
+            [ "$settle_hung" -lt "$(agents_tries)" ] || {
+                echo "claude agents --json --all did not answer in $(agents_limit)s, $settle_hung times in a row, so session $settle_id's state is unknown"
+                return 1
+            }
+            sleep "$settle_every"
+            continue
+        fi
+        settle_hung=0
+        [ "$settle_rc" -eq 0 ] || {
             echo "claude agents --json --all failed, so session $settle_id's state is unknown"
             return 1
         }

@@ -39,7 +39,7 @@ check() { # <name> <expected> <actual>
 
 # Every variable the scripts read, set or unset here, so the result does not
 # depend on the session running the test.
-unset FAKE_GROW MP_SUPERVISE_WAIT MP_RESUME_BUDGET CLAUDE_PROJECT_DIR FAKE_AGENTS_FAIL FAKE_BG_OUT FAKE_NO_STATE FAKE_STATE_FILTER FAKE_RM_FAIL FAKE_GH_TITLE FAKE_GH_FAIL CLAUDE_CODE_SESSION_ATTENDED
+unset FAKE_AGENTS_HANG MP_AGENTS_TIMEOUT FAKE_GROW MP_SUPERVISE_WAIT MP_RESUME_BUDGET CLAUDE_PROJECT_DIR FAKE_AGENTS_FAIL FAKE_BG_OUT FAKE_NO_STATE FAKE_STATE_FILTER FAKE_RM_FAIL FAKE_GH_TITLE FAKE_GH_FAIL CLAUDE_CODE_SESSION_ATTENDED
 cfg="$work/config"
 mkdir -p "$cfg/plugins/cache/mkt/mattpocock-skills/1.2.3/skills/engineering/implement"
 touch "$cfg/plugins/cache/mkt/mattpocock-skills/1.2.3/skills/engineering/implement/SKILL.md"
@@ -593,6 +593,11 @@ case "$1" in
     agents)
         n=$(command cat "$fake/count" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" >"$fake/count"
         [ -n "${FAKE_AGENTS_FAIL:-}" ] && { echo "daemon unreachable" >&2; exit 1; }
+        # FAKE_AGENTS_HANG=N: the first N reads hang, ignoring every signal
+        # but KILL, as a real `claude agents` call did for 14h40m (#240).
+        if [ -n "${FAKE_AGENTS_HANG:-}" ] && [ "$n" -le "$FAKE_AGENTS_HANG" ]; then
+            trap '' TERM ALRM HUP INT; printf '[{"partial'; sleep 601
+        fi
         [ -z "${FAKE_GROW:-}" ] || echo '{}' >>"$FAKE_GROW"
         f=$(sed -n "${n}p" "$fake/seq"); [ -n "$f" ] || f=$(tail -n 1 "$fake/seq")
         if [ -f "$fake/roster-seq" ]; then
@@ -753,6 +758,27 @@ out=$( (export FAKE_AGENTS_FAIL=1; PATH="$work/bin:$PATH" sh "$scripts/watch.sh"
 rc=$?
 check "poll: failing agents command exits 1" "1" "$rc"
 check "poll: failing agents command is not gone" "" "$out"
+
+# A read that hangs (#240) is ended at agents.sh's limit and counts as one
+# failed poll: the next poll reads the real state. Hung reads 3 times in a
+# row exit 1, naming the hung call, within the limits and the polls
+# between them. Timed through a 2>&1 capture.
+reset_fake
+echo "$fixtures/done.json" >"$fake/seq"
+t0=$(date +%s)
+out=$( (export FAKE_AGENTS_HANG=1 MP_AGENTS_TIMEOUT=1; PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id 9121ff49 --interval 1 --timeout 30 </dev/null 2>&1) ); rc=$?
+t1=$(date +%s)
+check "poll: a hung read is read again at the next poll" "0 done
+cwd /work/project" "$rc $out"
+check "poll: a hung read costs its limit and one poll" "yes" "$( [ $((t1 - t0)) -le 4 ] && echo yes || echo "no, $((t1 - t0))s")"
+reset_fake
+echo "$fixtures/done.json" >"$fake/seq"
+t0=$(date +%s)
+out=$( (export FAKE_AGENTS_HANG=99 MP_AGENTS_TIMEOUT=1; PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id 9121ff49 --interval 1 --timeout 30 </dev/null 2>&1) ); rc=$?
+t1=$(date +%s)
+check "poll: reads hung 3 times in a row exit 1 naming the call" "1 Error: claude agents --json --all did not answer in 1s, 3 times in a row" "$rc $out"
+check "poll: hung reads exit within 3 limits and 2 polls" "yes" "$( [ $((t1 - t0)) -le 7 ] && echo yes || echo "no, $((t1 - t0))s")"
+check "poll: nothing of a hung read is left running" "0" "$(ps -axo command= | grep -c '^sleep 601$')"
 
 # --stall (#58): a transcript that never grows across polls is reported as
 # a hang, left running, well before the outer --timeout.
@@ -1126,6 +1152,8 @@ out=$(LAUNCH_AGENTS="$work/nostate-nopid.json"; export LAUNCH_AGENTS; launch --t
 not_launched "no state and no pid" "Error: another live background session in $project: 7a6a0741 (unknown); not launched"
 out=$( (export FAKE_AGENTS_FAIL=1; launch --ticket 56 2>&1) ); rc=$?
 not_launched "an unreadable session list" "Error: claude agents --json --all failed, so other sessions in $project are unknown; not launched"
+out=$( (export FAKE_AGENTS_HANG=1 MP_AGENTS_TIMEOUT=1; launch --ticket 56 2>&1) ); rc=$?
+not_launched "a session list read that hangs (#240)" "Error: claude agents --json --all did not answer in 1s, so other sessions in $project are unknown; not launched"
 # A marker left by a worker that is no longer live does not block, and is
 # replaced.
 echo 0ld0ld00 >"$marker"
@@ -1434,6 +1462,16 @@ check "resume: gone says so" "Error: session c2a368ee is not in claude agents; n
 out=$( (export FAKE_AGENTS_FAIL=1; resume woke "$fixtures/stopped.json" 2>&1) )
 rc=$?
 check "resume: unreadable list exits 1" "1" "$rc"
+# A hung read (#240) is read again; hung 3 times in a row, nothing is
+# resumed, within the limits.
+out=$( (export FAKE_AGENTS_HANG=1 MP_AGENTS_TIMEOUT=1; resume woke "$fixtures/stopped.json" 2>&1) ); rc=$?
+check "resume: a hung read is read again" "0 resumed c2a368ee" "$rc $(printf '%s\n' "$out" | tail -n 1)"
+t0=$(date +%s)
+out=$( (export FAKE_AGENTS_HANG=99 MP_AGENTS_TIMEOUT=1; resume woke "$fixtures/stopped.json" 2>&1) ); rc=$?
+t1=$(date +%s)
+check "resume: reads hung 3 times in a row exit 1, never resumed" "1 stop c2a368ee" "$rc $(calls)"
+check "resume: hung reads name the call" "yes" "$(printf '%s\n' "$out" | grep -q 'did not answer in 1s, 3 times in a row' && echo yes)"
+check "resume: hung reads end within their limits" "yes" "$( [ $((t1 - t0)) -le 6 ] && echo yes || echo "no, $((t1 - t0))s")"
 check "resume: unreadable list, never resumed" "stop c2a368ee" "$(calls)"
 
 printf 'not json\n' >"$work/garbage.json"
@@ -1652,6 +1690,20 @@ finish with: $finish" "$out"
 
 out=$(stop_worker garbage 2>&1); rc=$?
 check "stop: a list jq cannot read exits 1" "1 c2a368ee" "$rc $(command cat "$marker")"
+
+# A hung read (#240) is read again; hung 3 times in a row, the stop is
+# reported with the command that finishes the run, within the limits.
+echo c2a368ee >"$marker"
+out=$( (export FAKE_AGENTS_HANG=1 MP_AGENTS_TIMEOUT=1; stop_worker "$fixtures/stopped.json" 2>&1) ); rc=$?
+check "stop: a hung read is read again" "0 stopped c2a368ee
+released c2a368ee" "$rc $out"
+echo c2a368ee >"$marker"
+t0=$(date +%s)
+out=$( (export FAKE_AGENTS_HANG=99 MP_AGENTS_TIMEOUT=1; stop_worker "$fixtures/stopped.json" 2>&1) ); rc=$?
+t1=$(date +%s)
+check "stop: reads hung 3 times in a row exit 1" "1" "$rc"
+check "stop: hung reads name the call and how to finish" "yes yes" "$(printf '%s\n' "$out" | grep -q 'did not answer in 1s, 3 times in a row' && echo yes) $(printf '%s\n' "$out" | grep -q '^finish with: ' && echo yes)"
+check "stop: hung reads end within their limits" "yes" "$( [ $((t1 - t0)) -le 6 ] && echo yes || echo "no, $((t1 - t0))s")"
 
 # Stopped, but the marker could not be released: the error says the worker
 # is stopped and gives the command that releases it.

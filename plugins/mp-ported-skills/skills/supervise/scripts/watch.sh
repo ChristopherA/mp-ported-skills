@@ -128,6 +128,11 @@
 # the output is as above, whole, and --capture changes nothing.
 #
 # Exits 1 when the list cannot be read, which is never reported as gone.
+# Each read goes through agents.sh, which ends a call that runs past its
+# limit (MP_AGENTS_TIMEOUT, default 60 seconds) (#240): a hung read is one
+# failed poll, read again after --interval, and 3 in a row exit 1 with an
+# error naming the call. Before that, a hung call held the watch for hours
+# past its own --stall and --timeout, which are read between polls.
 
 set -u
 
@@ -169,6 +174,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
+. "$(dirname -- "$0")/agents.sh"
 . "$(dirname -- "$0")/park.sh"
 if [ -n "$DIR" ]; then
     [ -d "$DIR" ] || fail "not a directory: $DIR"
@@ -663,8 +669,22 @@ stall_since=$start
 block_seen=""
 block_size=""
 block_since=$start
+hung=0
 while :; do
-    if ! list=$(claude agents --json --all </dev/null); then
+    # A read past agents.sh's limit is one failed poll, read again at the
+    # next; agents_tries in a row is a failed read (#240).
+    list=$(agents_list); rc=$?
+    if [ "$rc" -eq 124 ]; then
+        hung=$((hung + 1))
+        if [ "$hung" -ge "$(agents_tries)" ]; then
+            printf 'Error: claude agents --json --all did not answer in %ss, %s times in a row\n' "$(agents_limit)" "$hung" >&2
+            exit 1
+        fi
+        sleep "$INTERVAL"
+        continue
+    fi
+    hung=0
+    if [ "$rc" -ne 0 ]; then
         printf 'Error: claude agents --json --all failed\n' >&2
         exit 1
     fi

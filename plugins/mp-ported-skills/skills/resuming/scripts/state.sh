@@ -39,6 +39,8 @@ distribution="$supervise_scripts/distribution.sh"
 # step it takes, and which background sessions are live.
 . "$supervise_scripts/accept.sh"
 . "$supervise_scripts/live.sh"
+# claude agents within a time limit (#240).
+. "$supervise_scripts/agents.sh"
 # The Distribution repo's path checks and the repo state read, shared with
 # launch.sh and push.sh (#209).
 . "$supervise_scripts/own-repo.sh"
@@ -648,7 +650,11 @@ gather() {
         here=$(pwd -P)
         # Which sessions are live is live.sh's, shared with launch.sh, which
         # also refuses one in the Distribution repo.
-        if ! list=$(claude agents --json --all </dev/null 2>/dev/null); then
+        # Within agents.sh's time limit (#240).
+        list=$(agents_list 2>/dev/null); list_rc=$?
+        if [ "$list_rc" -eq 124 ]; then
+            refusal="claude agents --json --all did not answer in $(agents_limit)s, so other sessions in $here are unknown"
+        elif [ "$list_rc" -ne 0 ]; then
             refusal="claude agents --json --all failed, so other sessions in $here are unknown"
         elif ! others=$(live_others "$list" "$here"); then
             refusal="claude agents --json --all printed no list jq could read, so other sessions in $here are unknown"

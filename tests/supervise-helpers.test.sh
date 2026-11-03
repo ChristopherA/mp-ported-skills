@@ -1,6 +1,7 @@
 #!/bin/sh
 # supervise-helpers.test.sh -- tests for the supervise skill's shared
-# helpers: marker.sh (the checkout's worker marker), settle.sh (stop a
+# helpers: agents.sh (claude agents within a time limit) (#240),
+# marker.sh (the checkout's worker marker), settle.sh (stop a
 # worker and wait until it has settled) (#137), live.sh (which background
 # sessions are live in a checkout), accept.sh (which next: step /supervise
 # takes) (#115), park.sh (how a parked ticket and worker are told apart)
@@ -11,7 +12,8 @@
 # fake `claude` first on PATH. The fake logs each call and answers
 # `agents --json --all` with the next of the lists agents.1, agents.2, ...
 # in its folder, staying on the last, and fails when FAKE_AGENTS_FAIL is
-# set. With each list N it writes roster.N, when there is one, as the
+# set. With FAKE_AGENTS_HANG=N, its first N such calls print part of a
+# list, ignore TERM, ALRM, HUP and INT, and sleep for 601 seconds. With each list N it writes roster.N, when there is one, as the
 # daemon's roster file, so the roster changes with the list. Touches
 # nothing outside its own mktemp directory.
 #
@@ -35,7 +37,7 @@ check() { # <name> <expected> <actual>
     fi
 }
 
-unset FAKE_AGENTS_FAIL CLAUDE_CODE_SESSION_ATTENDED MP_SESSION_TITLE
+unset FAKE_AGENTS_FAIL FAKE_AGENTS_HANG MP_AGENTS_TIMEOUT CLAUDE_CODE_SESSION_ATTENDED MP_SESSION_TITLE
 
 # --- fake claude -----------------------------------------------------------
 mkdir -p "$work/bin" "$work/lists"
@@ -45,6 +47,15 @@ printf '%s\n' "\$*" >>"$work/claude-calls"
 case "\$*" in
     "agents --json --all")
         [ -z "\${FAKE_AGENTS_FAIL:-}" ] || exit 1
+        if [ -n "\${FAKE_AGENTS_HANG:-}" ]; then
+            h=\$(command cat "$work/hangs" 2>/dev/null || echo 0)
+            if [ "\$h" -lt "\$FAKE_AGENTS_HANG" ]; then
+                echo \$((h + 1)) >"$work/hangs"
+                trap '' TERM ALRM HUP INT
+                printf '[{"partial'
+                sleep 601
+            fi
+        fi
         n=\$(command cat "$work/count" 2>/dev/null || echo 0)
         n=\$((n + 1))
         [ -f "$work/lists/agents.\$n" ] || n=\$((n - 1))
@@ -64,7 +75,7 @@ PATH="$work/bin:$PATH"
 
 # lists <json>...: the lists the fake answers, in order.
 lists() {
-    command rm -f "$work"/lists/agents.* "$work"/lists/roster.* "$work/roster.json" "$work/count" "$work/claude-calls"
+    command rm -f "$work"/lists/agents.* "$work"/lists/roster.* "$work/roster.json" "$work/count" "$work/claude-calls" "$work/hangs"
     i=0
     for l in "$@"; do
         i=$((i + 1))
@@ -82,6 +93,47 @@ rosters() {
 held='{"workers":{"c2a368ee":{"pid":202}}}'
 freed='{"workers":{"0ca7d123":{"pid":303}}}'
 row() { printf '[{"kind":"background","id":"c2a368ee","state":"%s","pid":%s}]' "$1" "$2"; }
+
+# --- agents.sh -------------------------------------------------------------
+. "$scripts/agents.sh"
+
+check "agents limit: unset reads as 60" "60" "$(unset MP_AGENTS_TIMEOUT; agents_limit)"
+check "agents limit: a whole number is kept" "5" "$(export MP_AGENTS_TIMEOUT=5; agents_limit)"
+for bad in abc 0 05 -3 1.5; do
+    check "agents limit: '$bad' reads as 60" "60" "$(export MP_AGENTS_TIMEOUT=$bad; agents_limit)"
+done
+lists '[{"id":"a1"}]'
+out=$(agents_list); rc=$?
+check "agents list: an answer is printed" '[{"id":"a1"}]' "$out"
+check "agents list: an answer returns 0" "0" "$rc"
+out=$( (export FAKE_AGENTS_FAIL=1; agents_list) ); rc=$?
+check "agents list: a failed call returns its status" "1" "$rc"
+# Inside a background job, as state.sh's gather runs it, a failed call
+# still returns its status: `command cat` there once ended the function
+# with cat's 0.
+# The bug needs a function as the background job, as gather is.
+bg_read() { x=$(agents_list 2>/dev/null); echo $? >"$work/bg-rc"; }
+FAKE_AGENTS_FAIL=1; export FAKE_AGENTS_FAIL
+bg_read &
+wait $!
+unset FAKE_AGENTS_FAIL
+check "agents list: a failed call in a background job returns its status" "1" "$(command cat "$work/bg-rc")"
+# A call that hangs and ignores every signal but KILL is ended at the
+# limit. Timed through a 2>&1 capture, so a process left holding the pipe
+# would show as a long wait.
+lists '[{"id":"a1"}]'
+t0=$(date +%s)
+out=$( (export FAKE_AGENTS_HANG=1 MP_AGENTS_TIMEOUT=1; agents_list 2>&1; echo "rc=$?") )
+t1=$(date +%s)
+check "agents list: a hung call returns 124 and prints nothing" "rc=124" "$out"
+check "agents list: a hung call ends within the limit and a second" "yes" "$( [ $((t1 - t0)) -le 2 ] && echo yes || echo "no, $((t1 - t0))s")"
+check "agents list: nothing of the hung call is left running" "0" "$(ps -axo command= | grep -c '^sleep 601$')"
+out=$( (export FAKE_AGENTS_HANG=1 MP_AGENTS_TIMEOUT=1; agents_list >/dev/null; agents_list) )
+check "agents list: the call after a hung one answers" '[{"id":"a1"}]' "$out"
+# Every script reads the list through agents_list: a call of its own has
+# no time limit.
+raw=$(grep -rnE --include='*.sh' '(^|[;&|(])[[:space:]]*([A-Za-z_]+=[^[:space:]]+[[:space:]]+)*(command[[:space:]]+)?claude[[:space:]]+agents' "$root/plugins" | grep -v '^[^:]*/agents\.sh:' | grep -v '^[^:]*:[0-9]*:[[:space:]]*#')
+check "agents list: no script calls claude agents on its own" "" "$raw"
 
 # --- marker.sh -------------------------------------------------------------
 . "$scripts/marker.sh"
@@ -157,6 +209,17 @@ check "a session not seen to stop times out" "1 session c2a368ee was not stopped
 lists "$(row running 101)"
 out=$(FAKE_AGENTS_FAIL=1; export FAKE_AGENTS_FAIL; stop_and_settle c2a368ee 60 0 300 settle_row); rc=$?
 check "a failed agents read is reported" "1 claude agents --json --all failed, so session c2a368ee's state is unknown" "$rc $out"
+# A read that hangs past the limit counts as one failed poll (#240): the
+# next read decides, and only reads hung that many times in a row fail.
+lists "$(row stopped null)"
+out=$( (export FAKE_AGENTS_HANG=2 MP_AGENTS_TIMEOUT=1; stop_and_settle c2a368ee 60 0 300 settle_row) ); rc=$?
+check "a hung agents read is read again" "0 stopped" "$rc $out"
+lists "$(row stopped null)"
+t0=$(date +%s)
+out=$( (export FAKE_AGENTS_HANG=9 MP_AGENTS_TIMEOUT=1; stop_and_settle c2a368ee 60 0 300 settle_row 2>&1) ); rc=$?
+t1=$(date +%s)
+check "agents reads hung 3 times in a row are reported" "1 claude agents --json --all did not answer in 1s, 3 times in a row, so session c2a368ee's state is unknown" "$rc $out"
+check "hung agents reads end the wait within their limits" "yes" "$( [ $((t1 - t0)) -le 5 ] && echo yes || echo "no, $((t1 - t0))s")"
 
 lists 'not json'
 out=$(stop_and_settle c2a368ee 60 0 300 settle_row); rc=$?

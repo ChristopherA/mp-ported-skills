@@ -120,6 +120,10 @@ A `claude` option that takes a list (`--allowedTools`, `--disallowedTools`, and 
 
 ## Shared helpers
 
+A script reads `claude agents --json --all` through `agents_list` in `supervise`'s `agents.sh`, never with a call of its own. That call can hang: twice a watch sat inside one for hours, and the second ignored SIGTERM. `agents.sh` kills it with SIGKILL past its limit (#240), and `tests/supervise-helpers.test.sh` fails on any other call.
+
+A helper that `state.sh`'s `gather` can reach through `$( )` calls programs by their plain names, never `command cat` or `command rm`. `gather` runs as a background job (`gather &`), and there macOS `/bin/sh` (bash 3.2) runs `command <program>` in place of the substitution's subshell: nothing after it runs, and the call returns that program's status. In #240, `agents_list` returned 0 for a failed read that way, and only `tests/resuming.test.sh` saw it. A non-interactive `sh` expands no aliases, so the plain names reach the programs.
+
 Code that more than one `supervise` script needs goes in a sourced helper beside them, one concern per file, as `marker.sh` and `settle.sh` are, loaded with `. "$(dirname -- "$0")/<file>"`. A helper passes everything a function reads as an argument, prefixes its globals with its file's name (`settle_*`), and leaves its error text to the caller, which adds what it did not do: a global read across two functions left `settle_row` usable only inside `stop_and_settle` until #137's review. Test a helper by sourcing it, as `tests/supervise-helpers.test.sh` does.
 
 A script that starts sourcing a helper breaks every test that copies the script alone into a scratch folder, as tests do to stub a script beside it: the copy finds no helper and exits before it runs. When a script gains a helper, `rg -n 'cp .*<script>' tests` and copy the helper too, as `tests/supervise-record.test.sh` copies `park.sh` with `record.sh`. In #158, three `actions.sh` stub checks failed only after `record.sh` began sourcing `park.sh`.
