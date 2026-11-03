@@ -859,7 +859,7 @@ check "dist: clean, next is the child" "1 work in flight: $child" "$(next "$out"
 check "dist: clean, supervise offered" "$offer" "$(sup "$out")"
 kept=$(command cat "$FAKE_GH/issues.json")
 issues "$(list "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)")"
-check "dist: clean, a ready ticket is case 2" "2 /implement #52" "$(next "$(run)" | cut -d' ' -f1-3)"
+check "dist: clean, a ready ticket is case 2" "2 /implement #52 (you type it; user-invoked): #52 t52" "$(next "$(run)")"
 issues "$kept"
 # launch.sh refuses a live background session in the Distribution repo too.
 agents "$(list "$(row dd77 working 21 "$dist")")"
@@ -903,7 +903,7 @@ unread_case2() {
     issues "$(list "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)")"
     u_out=$(run)
     check "case 2 $1: next is case 1" "1 work in flight: distribution repo $2" "$(next "$u_out")"
-    check "case 2 $1: runner-up is the ticket" "2 /implement #52" "$(runner "$u_out" | cut -d' ' -f1-3)"
+    check "case 2 $1: runner-up is the ticket" "2 /implement #52 (you type it; user-invoked): #52 t52" "$(runner "$u_out")"
     check "case 2 $1: supervise not offered" "not offered: distribution repo $2" "$(sup "$u_out")"
     printf '%s\n' "$u_out" >"$work/state-out"
     check "case 2 $1: step.sh stops" "stop: next: 1 work in flight: distribution repo $2" "$(sh "$root/plugins/mp-ported-skills/skills/supervise/scripts/step.sh" --from "$work/state-out")"
