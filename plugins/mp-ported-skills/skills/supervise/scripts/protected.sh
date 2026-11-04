@@ -22,11 +22,16 @@
 # and caches (none of them is in the list), plugins/cache/temp_git_*, and
 # what a plugin update writes beside the cache (plugins/marketplaces/, the
 # plugins/*.json catalogs, plugins/data/). Under plugins/cache/ a version
-# folder (<marketplace>/<plugin>/<version>/) that appears or disappears as
-# a whole is an update adding or pruning it and is not reported; a file
-# added, changed or removed inside a version folder present both times is.
+# folder (<marketplace>/<plugin>/<version>/) that appears whole is an
+# update adding it and is not reported, nor is one that disappears whole
+# while the same plugin gains one (a prune); one that disappears with no
+# new version beside it is reported as one line. A file added, changed or
+# removed inside a version folder present both times is reported.
 # The hook guards the whole profile directory; this record watches only the
-# files that govern a session.
+# files that govern a session. Known limit: a worker that writes a version
+# folder of its own and repoints plugins/installed_plugins.json at it is
+# not reported, since the catalogs are left out; and a route the hook
+# cannot see could rewrite this record along with a rule.
 #
 # The record lives at $CLAUDE_CONFIG_DIR/mp-supervise-protected/<id>, inside
 # the profile directory the hook refuses the worker's writes to, and outside
@@ -106,7 +111,9 @@ protected_scan() {
             [ ! -e "$protected_p" ] || set -- "$@" "$protected_p"
         done
         [ $# -eq 0 ] && exit 0
-        find "$@" -type f ! -path 'plugins/cache/temp_git_*' -exec sh -c '
+        # -H follows a protected name that is itself a symlink, such as a
+        # linked rules/ or CLAUDE.md.
+        find -H "$@" -type f ! -path 'plugins/cache/temp_git_*' -exec sh -c '
             if shasum -a 256 /dev/null >/dev/null 2>&1; then shasum -a 256 "$@"; else sha256sum "$@"; fi' sh {} +
     ) >"$3.profile" || { rm -f "$3.profile"; return 1; }
     sed 's/^\([0-9a-f]*\)  /\1 profile\//' "$3.profile" >>"$3"
@@ -160,11 +167,17 @@ protected_compare() {
         rm -rf "$protected_tmp"
         return 0
     fi
-    sed -e '1,4d' -e '$d' "$1" >"$protected_tmp/then"
-    # <change> <tag> for each difference; a plugins/cache version folder
-    # (profile/plugins/cache/<m>/<p>/<v>) present only one of the two times
-    # is an update's, and its files are not listed.
-    awk '
+    if ! sed -e '1,4d' -e '$d' "$1" >"$protected_tmp/then"; then
+        printf 'note the protected-file record for %s (%s) could not be read, so changes to protected files were not checked\n' "$2" "$1"
+        rm -rf "$protected_tmp"
+        return 0
+    fi
+    # <change> <tag> for each difference. A plugins/cache version folder
+    # (profile/plugins/cache/<m>/<p>/<v>) added whole is an update's, and
+    # its files are not listed; one removed whole is a prune's when the
+    # same plugin gained a version folder in the run, and is otherwise one
+    # `removed` line for the folder, since it may hold the running gates.
+    if ! awk '
         function tag(line) { return substr(line, index(line, " ") + 1) }
         function unit(t,   a, n) {
             n = split(t, a, "/")
@@ -172,13 +185,17 @@ protected_compare() {
                 return a[1] "/" a[2] "/" a[3] "/" a[4] "/" a[5] "/" a[6]
             return ""
         }
+        function plugin(u) { return substr(u, 1, length(u) - length(ver(u)) - 1) }
+        function ver(u,   a, n) { n = split(u, a, "/"); return a[n] }
         FNR == NR { t = tag($0); old[t] = $1; u = unit(t); if (u != "") ou[u] = 1; next }
         { t = tag($0); cur[t] = $1; u = unit(t); if (u != "") nu[u] = 1 }
         END {
+            for (u in nu) if (!(u in ou)) grew[plugin(u)] = 1
             for (t in old) {
                 if (!(t in cur)) {
                     u = unit(t)
                     if (u == "" || (u in nu)) print "removed " t
+                    else if (!(plugin(u) in grew) && !(u in gone)) { gone[u] = 1; print "removed " u }
                 } else if (old[t] != cur[t]) {
                     if (old[t] == "absent") print "added " t
                     else if (cur[t] == "absent") print "removed " t
@@ -190,7 +207,12 @@ protected_compare() {
                 u = unit(t)
                 if (u == "" || (u in ou)) print "added " t
             }
-        }' "$protected_tmp/then" "$protected_tmp/now" | LC_ALL=C sort -k 2 >"$protected_tmp/diff"
+        }' "$protected_tmp/then" "$protected_tmp/now" >"$protected_tmp/unsorted"; then
+        printf 'note the protected files could not be compared with the record for %s (%s), so changes to them were not checked\n' "$2" "$1"
+        rm -rf "$protected_tmp"
+        return 0
+    fi
+    LC_ALL=C sort -k 2 "$protected_tmp/unsorted" >"$protected_tmp/diff"
     # A commit since the record that changed a Project file.
     : >"$protected_tmp/committed"
     if [ "$protected_head" != none ]; then
@@ -206,23 +228,24 @@ protected_compare() {
     fi
     protected_short=$(printf '%.7s' "$protected_head")
     while read -r protected_change protected_tag; do
-        protected_line="protected-file $protected_change ungranted: $(protected_abs "$protected_tag")"
+        protected_line="protected-file $protected_change ungranted: $(protected_abs "$protected_dir" "$protected_cfg" "$protected_tag")"
         grep -qxF -- "$protected_tag" "$protected_tmp/committed" &&
             protected_line="$protected_line, committed since $protected_short"
         printf '%s\n' "$protected_line"
     done <"$protected_tmp/diff"
     while read -r protected_tag; do
         awk -v t="$protected_tag" 'substr($0, index($0, " ") + 1) == t { found = 1 } END { exit !found }' "$protected_tmp/diff" ||
-            printf 'protected-file committed ungranted: %s (since %s)\n' "$(protected_abs "$protected_tag")" "$protected_short"
+            printf 'protected-file committed ungranted: %s (since %s)\n' "$(protected_abs "$protected_dir" "$protected_cfg" "$protected_tag")" "$protected_short"
     done <"$protected_tmp/committed"
     rm -rf "$protected_tmp"
 }
 
-# protected_abs TAG: the tag's absolute path, from the record's dir and config.
+# protected_abs DIR CONFIG TAG: the tag's absolute path, from the record's
+# dir and config.
 protected_abs() {
-    case "$1" in
-        project/*) printf '%s/%s' "$protected_dir" "${1#project/}" ;;
-        profile/*) printf '%s/%s' "$protected_cfg" "${1#profile/}" ;;
-        *) printf '%s' "$1" ;;
+    case "$3" in
+        project/*) printf '%s/%s' "$1" "${3#project/}" ;;
+        profile/*) printf '%s/%s' "$2" "${3#profile/}" ;;
+        *) printf '%s' "$3" ;;
     esac
 }

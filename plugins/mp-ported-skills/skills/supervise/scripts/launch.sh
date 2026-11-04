@@ -453,8 +453,9 @@ set -- --model "$MODEL"
 # The protected files before the worker can touch them, renamed to the id
 # below.
 pending=$(protected_record_path "$CONFIG" "pending-$$")
-protected_record "$DIR" "$CONFIG" "$pending" 2>/dev/null ||
-    printf "note: the worker's protected files were not recorded in %s, so its report cannot check them\n" "$pending" >&2
+protected_why=$(protected_record "$DIR" "$CONFIG" "$pending" 2>&1 >/dev/null) ||
+    printf "note: the worker's protected files were not recorded in %s%s, so its report cannot check them\n" \
+        "$pending" "${protected_why:+ ($protected_why)}" >&2
 out=$(cd "$DIR" && CLAUDE_CONFIG_DIR="$CONFIG" claude --bg "$@" \
     --disallowedTools "$DENY" --no-chrome --settings "$SETTINGS" \
     --append-system-prompt "$GRANTS" --name "$NAME" --permission-mode auto \

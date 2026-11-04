@@ -171,8 +171,26 @@ mkdir -p "$cfg/cache"; printf 'c\n' >"$cfg/cache/c"
 check "no line for transcripts, job folders, memory, caches or a new plugin version folder" "" "$(cmp_out)"
 
 fresh
+mkdir -p "$cfg/plugins/cache/m/p/2.0/skills"
+printf 'new\n' >"$cfg/plugins/cache/m/p/2.0/skills/a.md"
 rm -rf "$cfg/plugins/cache/m/p/1.0"
-check "no line for a version folder pruned whole" "" "$(cmp_out)"
+check "no line for a version folder pruned whole beside a new one" "" "$(cmp_out)"
+
+fresh
+rm -rf "$cfg/plugins/cache/m/p/1.0"
+check "a version folder removed whole with no new one is one line" \
+    "protected-file removed ungranted: $cfg/plugins/cache/m/p/1.0" "$(cmp_out)"
+
+# A protected name that is a symlink is followed.
+fresh
+mv "$cfg/rules" "$work/linked-rules"
+ln -s "$work/linked-rules" "$cfg/rules"
+protected_record "$repo" "$cfg" "$rec" || echo "record failed"
+printf 'changed\n' >"$work/linked-rules/r.md"
+out=$(cmp_out)
+rm -rf "$work/linked-rules"
+check "a rule changed through a symlinked rules folder is listed" \
+    "protected-file changed ungranted: $cfg/rules/r.md" "$out"
 
 # --- a record that cannot be read ---------------------------------------
 fresh

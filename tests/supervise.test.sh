@@ -1448,6 +1448,10 @@ command cp "$precord" "$work/precord"
 mkdir -p "$cfg/rules"; printf 'changed\n' >"$cfg/rules/resume-probe.md"
 resume woke pid "$fixtures/stopped.json" >/dev/null 2>&1
 check "resume: a held worker keeps its record" 0 "$(cmp -s "$precord" "$work/precord"; echo $?)"
+command rm -f "$precord"
+resume woke pid "$fixtures/stopped.json" >/dev/null 2>&1
+check "resume: a held worker with no record is not recorded afresh" no "$([ -f "$precord" ] && echo yes || echo no)"
+command cp "$work/precord" "$precord"
 command rm -f "$marker"
 resume woke pid "$fixtures/stopped.json" >/dev/null 2>&1
 check "resume: a released worker's record is taken again" 1 "$(cmp -s "$precord" "$work/precord"; echo $?)"

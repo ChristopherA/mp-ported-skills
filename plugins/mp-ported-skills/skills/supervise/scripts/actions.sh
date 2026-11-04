@@ -18,10 +18,10 @@
 #                                      transcript, or a subagent's, that is
 #                                      a shared action
 #   protected-file <change> ungranted: <path>
-#                                      each protected file added, changed
-#                                      or removed since the record launch.sh
-#                                      took (protected.sh, #190), a route
-#                                      the edit hook could not see
+#                                      each protected file added, changed,
+#                                      removed or committed since the record
+#                                      launch.sh took (protected.sh, #190),
+#                                      a route the edit hook could not see
 # A call is a shared action when the #66 hook would refuse it, when it runs
 # a `gh pr` or `gh issue` subcommand that is not read-only (view, list,
 # status, diff, checks, checkout), or when Claude Code recorded a push or PR

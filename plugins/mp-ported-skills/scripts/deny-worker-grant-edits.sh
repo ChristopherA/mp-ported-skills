@@ -55,7 +55,9 @@
 #
 # Reads the PreToolUse payload on stdin. Prints a deny decision and exits 0
 # when the call is refused; otherwise prints nothing and exits 0. A missing
-# jq or an unreadable payload lets the call through.
+# jq or an unreadable payload lets the call through, and so does a missing
+# protected.sh, whose removal from the plugin cache the after-run comparison
+# reports.
 
 [ "${CLAUDE_CODE_SESSION_ATTENDED:-1}" = 0 ] || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
