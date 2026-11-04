@@ -596,8 +596,11 @@ gather() {
     if [ -n "$step_n" ]; then
         parent=$(printf '%s\n' "$offer" | sed -n 's/^1 work in flight: in motion #\([0-9][0-9]*\) .*/\1/p')
         if [ -n "$parent" ]; then cands=$(cat "$tmp/kids-$parent.json")
+        # Parked rows are dropped here, though frontier skips them too, so
+        # their links are not read below.
         else cands=$(printf '%s' "$rows" | jq -c --argjson open "$open_nums" --argjson fx "$fixed_nums" "$frontier_def"'
-            [.[] | select(.role == "agent" and (.n as $n | $fx | index($n) | not)) | open_line($open)]'); fi
+            [.[] | select(.role == "agent" and (.l | index("parked") | not) and (.n as $n | $fx | index($n) | not))
+             | open_line($open)]'); fi
         # Links unblocks: already read are reused: each read spends the budget.
         qlinks=$links
         for n in $(printf '%s' "$cands" | jq -r --argjson have "$links" '.[] | select(.dep > 0 and ($have | has("\(.n)") | not)) | .n'); do

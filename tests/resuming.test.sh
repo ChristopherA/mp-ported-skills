@@ -46,6 +46,7 @@ cat >"$work/bin/gh" <<'EOF'
 #!/bin/sh
 [ -n "${FAKE_GH_SLEEP:-}" ] && sleep "$FAKE_GH_SLEEP"
 [ -n "${FAKE_GH_FAIL:-}" ] && { echo "gh: not logged in" >&2; exit 1; }
+[ -n "${FAKE_GH_LOG:-}" ] && printf '%s\n' "$*" >>"$FAKE_GH_LOG"
 case "$1 $2" in
     "api user") echo '{"login":"me"}' ;;
     "api "*/comments*) n=${2%/comments*}; n=${n##*/}
@@ -90,7 +91,7 @@ export FAKE_GH="$work/gh"
 printf '[]' >"$FAKE_GH/agents.json"
 # state.sh reads `claude agents`; never let it reach the real one.
 [ "$(command -v claude)" = "$work/bin/claude" ] || { echo "FAIL fake claude is not first on PATH"; exit 1; }
-unset FAKE_GH_FAIL FAKE_CLAUDE_FAIL FAKE_GH_SLEEP MP_RESUME_BUDGET CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ATTENDED 2>/dev/null || true
+unset FAKE_GH_FAIL FAKE_GH_LOG FAKE_CLAUDE_FAIL FAKE_GH_SLEEP MP_RESUME_BUDGET CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ATTENDED 2>/dev/null || true
 
 issues() { printf '%s' "$1" >"$FAKE_GH/issues.json"; }
 prs() { printf '%s' "$1" >"$FAKE_GH/prs.json"; }
@@ -626,6 +627,14 @@ check "queue: case 2, tickets blocked only by queued ones join" "#52 #53 #54" "$
 printf 'not json' >"$FAKE_GH/deps-54.json"
 check "queue: case 2, unread links keep a ticket out" "#52 #53" "$(queue "$(run)")"
 command rm -f "$FAKE_GH/deps-54.json"
+# A parked ticket's links are never read for the queue: each read spends the
+# time budget on a ticket the replay always skips.
+issues "$(list "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)" "$(issue 54 ready-for-agent,parked 1)")"
+printf '[{"number":52,"state":"open"}]' >"$FAKE_GH/deps-54.json"
+command rm -f "$work/gh.log"
+FAKE_GH_LOG="$work/gh.log" run >/dev/null
+check "queue: case 2, a parked ticket's links are not read" "" "$(grep 'issues/54/dependencies' "$work/gh.log")"
+command rm -f "$FAKE_GH/deps-54.json" "$work/gh.log"
 
 issues "$(list "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)")"
 agents "$(list "$(row aa11 stopped null)" "$(row bb22 done null)" "$(row cc33 working 12 /elsewhere)" \
