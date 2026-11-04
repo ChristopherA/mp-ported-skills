@@ -48,8 +48,10 @@
 # at run time (`d=$CLAUDE_CONFIG_DIR; ... > "$d/x"`), a program that writes
 # on its own (`python3 -c` with an absolute path, a script run from
 # elsewhere), sed's w command, find -exec, xargs, rsync, patch, git
-# checkout. The
-# supervisor's after-run comparison reports those (#190).
+# checkout. The supervisor's after-run comparison (protected.sh) reports a
+# change those make to the grant file, the Distribution-repo file, or the
+# profile's CLAUDE.md, settings, rules, hooks, skills, agents, commands and
+# plugin cache (#190).
 #
 # Reads the PreToolUse payload on stdin. Prints a deny decision and exits 0
 # when the call is refused; otherwise prints nothing and exits 0. A missing
@@ -57,6 +59,9 @@
 
 [ "${CLAUDE_CODE_SESSION_ATTENDED:-1}" = 0 ] || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
+# The protected Project files are named once, in supervise's protected.sh,
+# which also reports after the run what this hook did not see (#190).
+. "$(dirname -- "$0")/../skills/supervise/scripts/protected.sh"
 input=$(cat)
 
 field() { printf '%s' "$input" | jq -r "$1 // empty" 2>/dev/null; }
@@ -166,17 +171,20 @@ protected() {
     kind=""
     _a=$(physical "$1")
     _l=$(lower "$_a")
-    # The grant file, found from the checkout the path lands in (its own
-    # folder, walked up to one that exists, since a write may create it).
-    # Only a path with one of the two names asks git, which is most of a
-    # call's cost.
+    # The grant file and the Distribution-repo file, named in protected.sh,
+    # found from the checkout the path lands in (its own folder, walked up
+    # to one that exists, since a write may create it). Only a path ending
+    # in one of the two names asks git, which is most of a call's cost.
     case "$_l" in
-        */docs/agents/supervision.md | */docs/agents/distribution-repo.md)
-            existing "${_a%/*}"
-            if _top=$(git -C "$existing_dir" rev-parse --show-toplevel 2>/dev/null); then
-                _top=$(lower "$_top")
-                [ "$_l" = "$_top/docs/agents/supervision.md" ] && { kind=grant; return; }
-                [ "$_l" = "$_top/docs/agents/distribution-repo.md" ] && { kind=dist; return; }
+        */docs/agents/*)
+            if protected_project_kind "docs/agents/${_l##*/docs/agents/}" >/dev/null; then
+                existing "${_a%/*}"
+                if _top=$(git -C "$existing_dir" rev-parse --show-toplevel 2>/dev/null); then
+                    _top=$(lower "$_top")
+                    case "$_l" in
+                        "$_top"/*) kind=$(protected_project_kind "${_l#"$_top"/}") && return; kind="" ;;
+                    esac
+                fi
             fi
             ;;
     esac

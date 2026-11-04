@@ -1095,6 +1095,10 @@ command rm -f "$marker"
 launch --ticket 56 >/dev/null 2>&1
 check "launch: writes the worker's marker" "c2a368ee
 distribution" "$(command cat "$marker" 2>/dev/null)"
+check "launch: records the protected files under the id (#190)" "end" \
+    "$(tail -n 1 "$cfg/mp-supervise-protected/c2a368ee" 2>/dev/null)"
+check "launch: leaves no pending record" "" \
+    "$(ls "$cfg/mp-supervise-protected" | grep -v '^c2a368ee$')"
 command rm -f "$marker"
 (export FAKE_STATE_FILTER='| .cwd = "/elsewhere"'; launch --ticket 56 >/dev/null 2>&1)
 check "launch: a worker that failed a check leaves no marker" "no" "$([ -f "$marker" ] && echo yes || echo no)"
@@ -1436,7 +1440,18 @@ check "resume: runs in the project folder" "$project" "$(command cat "$fake/cwd"
 check "resume: sets the config dir" "$cfg" "$(command cat "$fake/env")"
 check "resume: writes the worker's marker, live again" "c2a368ee
 distribution" "$(command cat "$marker" 2>/dev/null)"
+# A released worker's protected files are recorded afresh at the resume; one
+# still holding its marker keeps the record it has (#190).
+precord="$cfg/mp-supervise-protected/c2a368ee"
+check "resume: records a released worker's protected files" "end" "$(tail -n 1 "$precord" 2>/dev/null)"
+command cp "$precord" "$work/precord"
+mkdir -p "$cfg/rules"; printf 'changed\n' >"$cfg/rules/resume-probe.md"
+resume woke pid "$fixtures/stopped.json" >/dev/null 2>&1
+check "resume: a held worker keeps its record" 0 "$(cmp -s "$precord" "$work/precord"; echo $?)"
 command rm -f "$marker"
+resume woke pid "$fixtures/stopped.json" >/dev/null 2>&1
+check "resume: a released worker's record is taken again" 1 "$(cmp -s "$precord" "$work/precord"; echo $?)"
+command rm -f "$cfg/rules/resume-probe.md" "$marker"
 
 # stopped may never show: a row with no pid for the settle time is enough,
 # and a pid showing again starts the settle time over.

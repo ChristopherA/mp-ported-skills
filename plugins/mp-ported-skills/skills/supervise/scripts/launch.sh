@@ -14,6 +14,12 @@
 # without the tools in DENY or Claude in Chrome. A session that fails a check is stopped.
 # Prints the session's short id.
 #
+# Just before the launch it records what the worker's protected files hold
+# (protected.sh, #190), under the id once claude prints it, so actions.sh
+# can report a change to one that the edit hook could not see. A record it
+# could not take is a `note:` line on stderr; the launch goes on, and the
+# report says the files were not checked.
+#
 # EnterWorktree is denied because /implement workers called it on their own,
 # after launch, and committed on a worktree branch nobody pushed. The deny
 # reaches a background session. Checked live with Claude Code 2.1.285: two
@@ -174,6 +180,7 @@ set -u
 . "$(dirname -- "$0")/live.sh"
 . "$(dirname -- "$0")/park.sh"
 . "$(dirname -- "$0")/own-repo.sh"
+. "$(dirname -- "$0")/protected.sh"
 . "$(dirname -- "$0")/distribution-repo.sh"
 
 DIR=""
@@ -443,6 +450,11 @@ set -- --model "$MODEL"
 [ -z "$EFFORT" ] || set -- "$@" --effort "$EFFORT"
 # --add-dir takes a list, so another option follows it.
 [ -z "$DIST" ] || set -- "$@" --add-dir "$DIST"
+# The protected files before the worker can touch them, renamed to the id
+# below.
+pending=$(protected_record_path "$CONFIG" "pending-$$")
+protected_record "$DIR" "$CONFIG" "$pending" 2>/dev/null ||
+    printf "note: the worker's protected files were not recorded in %s, so its report cannot check them\n" "$pending" >&2
 out=$(cd "$DIR" && CLAUDE_CONFIG_DIR="$CONFIG" claude --bg "$@" \
     --disallowedTools "$DENY" --no-chrome --settings "$SETTINGS" \
     --append-system-prompt "$GRANTS" --name "$NAME" --permission-mode auto \
@@ -451,9 +463,12 @@ esc=$(printf '\033')
 id=$(printf '%s\n' "$out" | sed "s/$esc\[[0-9;]*m//g" |
     sed -n 's/^backgrounded · \([0-9a-f][0-9a-f]*\)\( · .*\)\{0,1\}$/\1/p' | head -n 1)
 if [ -z "$id" ]; then
+    rm -f "$pending"
     printf 'Error: claude --bg printed no session id:\n%s\n' "$out" >&2
     exit 1
 fi
+[ ! -f "$pending" ] || mv -f "$pending" "$(protected_record_path "$CONFIG" "$id")" ||
+    printf "note: the worker's protected-file record %s was not named for %s, so its report cannot check them\n" "$pending" "$id" >&2
 
 # A session that fails a check is stopped, not removed, so its transcript
 # stays for reading.

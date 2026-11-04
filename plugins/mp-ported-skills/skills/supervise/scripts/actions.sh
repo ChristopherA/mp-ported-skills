@@ -17,6 +17,11 @@
 #   command <status> ungranted: <cmd>  each Bash call in the worker's
 #                                      transcript, or a subagent's, that is
 #                                      a shared action
+#   protected-file <change> ungranted: <path>
+#                                      each protected file added, changed
+#                                      or removed since the record launch.sh
+#                                      took (protected.sh, #190), a route
+#                                      the edit hook could not see
 # A call is a shared action when the #66 hook would refuse it, when it runs
 # a `gh pr` or `gh issue` subcommand that is not read-only (view, list,
 # status, diff, checks, checkout), or when Claude Code recorded a push or PR
@@ -119,6 +124,7 @@ fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the worker's job is unknown"
 git -C "$DIR" rev-parse -q --verify "$START^{commit}" >/dev/null || fail "not a commit in $DIR: $START"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/protected.sh"
 hook="$SCRIPT_DIR/../../../scripts/deny-shared-actions.sh"
 [ -f "$hook" ] || fail "the shared-action hook is missing: $hook"
 
@@ -525,6 +531,18 @@ if [ -f "$posted" ]; then
 fi
 
 actions="$actions$commands"
+
+# A protected file the worker changed by a route the hook could not see
+# (#190), from the record launch.sh or resume.sh took.
+while IFS= read -r line; do
+    case $line in
+        '') ;;
+        'note '*) note "${line#note }" ;;
+        *) add "$line" ;;
+    esac
+done <<EOF_PROTECTED
+$(protected_compare "$(protected_record_path "$CLAUDE_CONFIG_DIR" "$ID")" "$ID")
+EOF_PROTECTED
 
 printf '%s%s' "$actions" "$notes"
 [ -n "$actions$notes" ] || echo none

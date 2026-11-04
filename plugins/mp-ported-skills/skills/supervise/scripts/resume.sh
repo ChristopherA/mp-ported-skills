@@ -40,6 +40,12 @@
 # (marker.sh), with none when the launch had none. With neither, it is read
 # from origin with distribution.sh, and a `note` line says so.
 #
+# Before a resume that holds the worker again after its marker was released,
+# or that finds no record of its protected files, it records them afresh
+# (protected.sh, #190), so the next report compares from this resume; while
+# the marker still names the worker, the launch's record stands and the
+# report covers both turns. A record it could not take is a `note` line.
+#
 # Usage:
 #   resume.sh --id ID --dir DIR --prompt TEXT [--settle S] [--interval S]
 #             [--timeout S] [--tries N]
@@ -94,6 +100,7 @@ DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
 . "$(dirname -- "$0")/agents.sh"
 . "$(dirname -- "$0")/settle.sh"
 . "$(dirname -- "$0")/live.sh"
+. "$(dirname -- "$0")/protected.sh"
 
 job="$CLAUDE_CONFIG_DIR/jobs/$ID/state.json"
 sid=$(jq -r '.sessionId // empty' "$job" 2>/dev/null)
@@ -136,10 +143,21 @@ stop_safe() {
 # live again, as when `claude attach` woke it.
 copies=""
 kept=""
+# A worker still holding its marker keeps the record it has; one released,
+# or with no record, is recorded afresh before the first resume, once it
+# is stopped (#190).
+protected_file=$(protected_record_path "$CLAUDE_CONFIG_DIR" "$ID")
+protected_fresh=1
+held_marker=$(marker_path "$DIR" 2>/dev/null) && [ -f "$held_marker" ] &&
+    [ "$(marker_holder "$held_marker")" = "$ID" ] && [ -f "$protected_file" ] && protected_fresh=""
 try=0
 while [ "$try" -lt "$TRIES" ]; do
     try=$((try + 1))
     stop_safe
+    if [ -n "$protected_fresh" ] && [ "$try" -eq 1 ]; then
+        protected_record "$DIR" "$CLAUDE_CONFIG_DIR" "$protected_file" 2>/dev/null ||
+            echo "note the protected files of $ID were not recorded in $protected_file, so its report cannot check them"
+    fi
     resumed_at=$(date +%s)
     out=$(cd "$DIR" && claude --bg --resume "$sid" "$PROMPT" </dev/null 2>&1)
     copy=$(printf '%s\n' "$out" | sed -n 's/.*started a copy as \([0-9a-f][0-9a-f]*\).*/\1/p' | head -n 1)
