@@ -240,11 +240,17 @@ check "unattended: the git wrapper still refuses the push" "1" "$?"
 out=$( (export CLAUDE_CODE_SESSION_ATTENDED=0; sh "$scripts/push.sh" --dir "$project" --id 3fb49286 --start "$start" --check --sweep "$sweep" </dev/null 2>&1) )
 check "unattended: --check still runs" "0" "$?"
 
+# The protected-file record launch.sh takes for worker ID (#190).
+protect() { # <dir> <id>
+    (. "$scripts/protected.sh" && protected_record "$1" "$CLAUDE_CONFIG_DIR" "$(protected_record_path "$CLAUDE_CONFIG_DIR" "$2")")
+}
+
 # --- actions.sh names the supervisor's push --------------------------------
 new_project
 push --sweep "$sweep" >/dev/null
 mkdir -p "$CLAUDE_CONFIG_DIR/jobs/3fb49286"
 printf '{"sessionId": "s1", "children": []}\n' >"$CLAUDE_CONFIG_DIR/jobs/3fb49286/state.json"
+protect "$project" 3fb49286
 mkdir -p "$CLAUDE_CONFIG_DIR/projects/p"
 : >"$CLAUDE_CONFIG_DIR/projects/p/s1.jsonl"
 check "actions: the supervisor's push, not the worker's" \
@@ -252,6 +258,7 @@ check "actions: the supervisor's push, not the worker's" \
     "$(sh "$scripts/actions.sh" --id 3fb49286 --dir "$project" --start "$start" </dev/null)"
 mkdir -p "$CLAUDE_CONFIG_DIR/jobs/4aa00000"
 command cp -f "$CLAUDE_CONFIG_DIR/jobs/3fb49286/state.json" "$CLAUDE_CONFIG_DIR/jobs/4aa00000/state.json"
+protect "$project" 4aa00000
 # Another worker's run is not covered by push.sh's record, and its empty
 # transcript holds no push of its own (#98).
 check "actions: another worker's run is not covered" \
@@ -346,6 +353,7 @@ check "dist push: both recorded in the Project, the Distribution repo's by name"
     "$(sed 's/ [^ ]*$//' "$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-pushed)")"
 mkdir -p "$CLAUDE_CONFIG_DIR/jobs/3fb49286" "$CLAUDE_CONFIG_DIR/projects/p"
 printf '{"sessionId": "s1", "children": []}\n' >"$CLAUDE_CONFIG_DIR/jobs/3fb49286/state.json"
+protect "$project" 3fb49286
 : >"$CLAUDE_CONFIG_DIR/projects/p/s1.jsonl"
 check "dist push: actions.sh names the Project's branch as the supervisor's push" \
     "branch origin/main pushed by the supervisor on the maintainer's approval: holds the worker's commits" \
@@ -607,6 +615,7 @@ check "checked code-only push: marked, with the citation and the check lines" \
     "$(printf '%s\n' "$rec" | cut -d ' ' -f 6-)"
 mkdir -p "$CLAUDE_CONFIG_DIR/jobs/3fb49286" "$CLAUDE_CONFIG_DIR/projects/p"
 printf '{"sessionId": "s1", "children": []}\n' >"$CLAUDE_CONFIG_DIR/jobs/3fb49286/state.json"
+protect "$project" 3fb49286
 : >"$CLAUDE_CONFIG_DIR/projects/p/s1.jsonl"
 check "checked code-only push: actions.sh names the grant, range and checks" \
     "branch origin/main pushed by the supervisor under checked-push (checked-push: code-only pushes): $(short "$start")..$(short "$head"); holds the worker's commits; checks: ok marker: no worker marker in the checkout; ok tree: clean; ok fast-forward: 2 ahead of origin/main, 0 behind; ok start: $(short "$start") is on origin/main; ok version: plugin/.claude-plugin/plugin.json 0.8.22 -> 0.8.23 (patch); ok sweep: clean over $(short "$start")..$(short "$head"); ok test: $suite_cmd; ok prose: no README, CHANGELOG, docs/ or .md file changed" \
@@ -711,6 +720,7 @@ check "checked dist push: both marked, each with its own checks" \
 distribution:origin/main checked-push ok distribution marker" \
     "$(pushed_record | awk -F "$TAB" '{ split($1, a, " "); split($3, c, ":"); print a[2], a[6], c[1] }')"
 printf '{"sessionId": "s1", "children": []}\n' >"$CLAUDE_CONFIG_DIR/jobs/3fb49286/state.json"
+protect "$project" 3fb49286
 out=$(sh "$scripts/actions.sh" --id 3fb49286 --dir "$project" --start "$start" </dev/null)
 check "checked dist push: actions.sh lists both pushes" "branch origin/main pushed by the supervisor under checked-push
 branch distribution:origin/main pushed by the supervisor under checked-push" \

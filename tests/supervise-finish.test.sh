@@ -109,6 +109,8 @@ worker() { # <project> -- the job, live in that Project, with its marker
     jq --arg d "$work/$1" '.cwd = $d' "$fixtures/job-state.json" >"$cfg/jobs/c2a368ee/state.json"
     git -C "$work/$1" rev-parse --git-path mp-supervise-worker >/dev/null
     echo c2a368ee >"$(git -C "$work/$1" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
+    # The protected-file record launch.sh takes (#190).
+    (. "$scripts/protected.sh" && protected_record "$work/$1" "$cfg" "$(protected_record_path "$cfg" c2a368ee)")
 }
 finish() { # <project> [finish.sh options...]
     p=$1; shift

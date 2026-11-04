@@ -74,6 +74,10 @@ short=$(git -C "$repo" rev-parse --short "$start")
 repo_git "$repo" commit -q --allow-empty -m "worker's first commit"
 repo_git "$repo" commit -q --allow-empty -m "worker's second commit"
 repo_git "$repo" push -q origin HEAD:56-topic 2>/dev/null
+# The protected-file records launch.sh takes for these workers (#190).
+for id in c2a368ee 1420c08b; do
+    (. "$scripts/protected.sh" && protected_record "$repo" "$cfg" "$(protected_record_path "$cfg" "$id")")
+done
 
 # --- the run ---------------------------------------------------------------
 # Launched 06:01:24, turn ended 06:14:24, reported 06:15:24.
