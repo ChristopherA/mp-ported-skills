@@ -124,6 +124,61 @@ run() { sh "$state" "$@" "$proj" </dev/null 2>&1; }
 check "no hook runs state.sh" "0" \
     "$(jq '[.hooks[][].hooks[].command | select(test("state\\.sh"))] | length' "$hooks")"
 
+# --- the frontier rule, written once (#208) --------------------------------
+# Every single-quoted string in state.sh (its jq programs and defs), with the
+# line it starts on, one per record, newlines as spaces. Tracks the shell's
+# quoting: comments, double quotes and $( ) inside them, so an apostrophe in
+# a comment or in double quotes opens no string.
+jq_texts() {
+    awk '
+    { text = text $0 "\n" }
+    END {
+        n = length(text); line = 1; top = 0; st[0] = "N"; depth[0] = 0; prev = "\n"
+        for (i = 1; i <= n; i++) {
+            c = substr(text, i, 1); s = st[top]
+            if (s == "S") {
+                if (c == "\047") { top--; gsub(/\n/, " ", buf); print start "\t" buf; buf = "" }
+                else buf = buf c
+            } else if (c == "\\") { i++; if (substr(text, i, 1) == "\n") line++; c = "x" }
+            else if (s == "D") {
+                if (c == "\"") top--
+                else if (c == "$" && substr(text, i + 1, 1) == "(") { i++; st[++top] = "N"; depth[top] = 0 }
+            } else {
+                if (c == "\047") { st[++top] = "S"; start = line; buf = "" }
+                else if (c == "\"") st[++top] = "D"
+                else if (c == "#" && (prev == " " || prev == "\n" || prev == "\t" || prev == ";")) {
+                    while (i < n && substr(text, i + 1, 1) != "\n") i++
+                }
+                else if (c == "$" && substr(text, i + 1, 1) == "(") { i++; st[++top] = "N"; depth[top] = 0 }
+                else if (c == "(") depth[top]++
+                else if (c == ")") { if (depth[top] > 0) depth[top]--; else if (top > 0) top-- }
+            }
+            if (c == "\n") line++
+            prev = c
+        }
+    }' "$1"
+}
+# The strings that test both blockers (.dep, body blockers or links) and the
+# parked label, by the variable each is assigned to (or its def). Only the
+# shared def may; the unblocks targets and the hand-work list each add a
+# filter of their own and are not copies of the rule.
+frontier_copies() {
+    jq_texts "$1" | while IFS="$(printf '\t')" read -r at body; do
+        case $body in *parked*) ;; *) continue ;; esac
+        case $body in *.dep*|*.line*|*links*|*.by*) ;; *) continue ;; esac
+        name=$(sed -n "${at}p" "$1" | sed -n 's/^[[:space:]]*\([a-z_]*\)=.*/\1/p')
+        case $body in *"def frontier("*) name=frontier_def ;; esac
+        printf '%s\n' "${name:-line $at}"
+    done | sort -u | tr '\n' ' ' | sed 's/ $//'
+}
+check "frontier: state.sh writes the rule only in its shared def" \
+    "frontier_def hand_rows targets" "$(frontier_copies "$state")"
+# The scan finds a copy: one added beside the def fails the check above.
+sed 's/^\( *\)ready=\$(printf/\1extra=$(printf "%s" "$rows" | jq -c '\''[.[] | select(.dep == 0 and (.l | index("parked") | not))]'\'')\
+&/' "$state" >"$work/state-copy.sh"
+check "frontier: a second copy is found" \
+    "extra frontier_def hand_rows targets" "$(frontier_copies "$work/state-copy.sh")"
+
 # --- no tracker, unreached, timed out --------------------------------------
 issues '[]'
 prs '[]'
@@ -633,6 +688,26 @@ kids "$(issue 52 ready-for-agent)" "$(issue 54 ready-for-human)" "$(issue 55 rea
 out=$(run)
 check "reorder: none for a child blocked by the one ending the queue" "" "$(reorder "$out")"
 check "reorder: none, so a queue of one" "$(one 52)" "$(sup "$out")"
+
+# One set of tickets through case 2's ready list, the next-child pick and the
+# queue replay (#208): the queue's first ticket is the one next: names, under
+# an in-motion parent and without one. #52 is parked, #53 has an open body
+# blocker, #54 an open GitHub link, so #55 is the first free ticket.
+f52=$(issue 52 ready-for-agent,parked) f53=$(issue 53 ready-for-agent 0 'Blocked by: #9')
+f54=$(issue 54 ready-for-agent 1) f55=$(issue 55 ready-for-agent) f56=$(issue 56 ready-for-agent)
+printf '[{"number":9,"state":"open"}]' >"$FAKE_GH/deps-54.json"
+issues "$(list "$(issue 9 needs-triage)" "$f52" "$f53" "$f54" "$f55" "$f56")"
+out=$(run)
+check "frontier: case 2's ready list" "#55 t55; #56 t56" "$(line_of "$out" "ready, blockers closed")"
+check "frontier: case 2's next step" "2 /implement #55 (you type it; user-invoked): #55 t55" "$(next "$out")"
+check "frontier: case 2's queue starts at its next step" "#55 #56" "$(queue "$out")"
+kids "$f52" "$f53" "$f54" "$f55" "$f56"
+out=$(run)
+check "frontier: the next child" \
+    "1 work in flight: in motion #24 t24; next child #55 (ready-for-agent, /implement #55, you type it; user-invoked): t55" \
+    "$(next "$out")"
+check "frontier: the parent's queue starts at its next child" "#55 #56" "$(queue "$out")"
+command rm -f "$FAKE_GH/deps-54.json"
 
 kids "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)"
 echo x >"$proj/scratch"

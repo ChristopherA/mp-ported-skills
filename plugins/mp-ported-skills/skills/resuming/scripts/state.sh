@@ -72,6 +72,23 @@ you_type="($you_type_bare)"
 # Case 7's suggestions, the runner-up when no later case applies.
 ideas="/grill-with-docs on a new idea, or /improve-codebase-architecture (you type these; they are user-invoked)"
 
+# The frontier rule (#208), the one test of whether a ticket is free to start,
+# shared by next_child, mark_parked, case 2's ready list and the /supervise
+# queue: not parked, and every blocker cleared. Its input is a row whose .line
+# holds its open body blockers, .l its labels and .dep its open blocked-by
+# count, with .links its open link blockers when they were read (null when
+# the read failed, which blocks). With no .links, a count above zero blocks.
+# $cleared is the blockers to treat as closed: [] for the pick, the queue so
+# far for the replay. open_line($open) keeps only a row's open body blockers.
+# tests/resuming.test.sh fails when another jq program tests both.
+frontier_def='
+    def frontier($cleared):
+        def cleared: . as $b | $cleared | index($b);
+        (.l | index("parked") | not)
+        and all(.line[]; cleared)
+        and (if has("links") then .links != null and all(.links[]; cleared) else .dep == 0 end);
+    def open_line($open): .line |= [.[] | select(. as $b | $open | index($b))];'
+
 # next_child <n>: "; next child ..." for in-motion parent #n, naming the first
 # open sub-issue in the parent's order with every blocker closed (the blocker
 # test of the frontier rule in docs/agents/issue-tracker.md) and not parked,
@@ -98,8 +115,8 @@ next_child() {
     # Kept for the /supervise queue, which replays this pick: this function
     # runs in a command substitution, so a variable would not outlive it.
     printf '%s' "$kids" >"$tmp/kids-$1.json"
-    step=$(printf '%s' "$kids" | jq -r --arg ta "$t_agent" --arg th "$t_human" --arg you "$you_type_bare" '
-        [.[] | select(.dep == 0 and (.line | length == 0) and (.l | index("parked") | not))]
+    step=$(printf '%s' "$kids" | jq -r --arg ta "$t_agent" --arg th "$t_human" --arg you "$you_type_bare" "$frontier_def"'
+        [.[] | select(frontier([]))]
         | first // empty
         | "; next child #\(.n) ("
           + (if (.l | index($ta)) then "\($ta), /implement #\(.n), \($you)"
@@ -155,9 +172,8 @@ awaiting_reply() {
 # no open blocker and no `parked` label. Reads $open_nums and $t_agent.
 mark_parked() {
     pk=
-    for n in $(printf '%s' "$1" | jq -r --argjson open "$open_nums" --arg ta "$t_agent" '
-        .[] | select((.l | index($ta)) and (.c // 0) > 0 and .dep == 0 and (.l | index("parked") | not)
-                     and ([.line[] | select(. as $b | $open | index($b))] | length == 0)) | .n'); do
+    for n in $(printf '%s' "$1" | jq -r --argjson open "$open_nums" --arg ta "$t_agent" "$frontier_def"'
+        .[] | select((.l | index($ta)) and (.c // 0) > 0 and (open_line($open) | frontier([]))) | .n'); do
         awaiting_reply "$n" && pk="$pk $n"
     done
     printf '%s' "$1" | jq -c --arg pk "$pk" '($pk | split(" ") | map(select(. != "") | tonumber)) as $pk
@@ -396,9 +412,8 @@ gather() {
             [.[] | select(.n as $n | $fx | index($n))] | map("#\(.n) \(.t)") | join("; ")')
 
         # Ready-for-agent tickets with every blocker closed, not already fixed.
-        ready_rows=$(printf '%s' "$rows" | jq -c --argjson open "$open_nums" --argjson fx "$fixed_nums" '
-            [.[] | select(.role == "agent" and .dep == 0 and (.l | index("parked") | not)
-                            and ([.line[] | select(. as $b | $open | index($b))] | length == 0)
+        ready_rows=$(printf '%s' "$rows" | jq -c --argjson open "$open_nums" --argjson fx "$fixed_nums" "$frontier_def"'
+            [.[] | select(.role == "agent" and (open_line($open) | frontier([]))
                             and (.n as $n | $fx | index($n) | not))]')
         ready=$(printf '%s' "$ready_rows" | jq -r 'map("#\(.n) \(.t)") | join("; ")')
 
@@ -581,32 +596,28 @@ gather() {
     if [ -n "$step_n" ]; then
         parent=$(printf '%s\n' "$offer" | sed -n 's/^1 work in flight: in motion #\([0-9][0-9]*\) .*/\1/p')
         if [ -n "$parent" ]; then cands=$(cat "$tmp/kids-$parent.json")
-        else cands=$(printf '%s' "$rows" | jq -c --argjson open "$open_nums" --argjson fx "$fixed_nums" '
-            [.[] | select(.role == "agent" and (.l | index("parked") | not) and (.n as $n | $fx | index($n) | not))
-             | .line |= [.[] | select(. as $b | $open | index($b))]]'); fi
+        else cands=$(printf '%s' "$rows" | jq -c --argjson open "$open_nums" --argjson fx "$fixed_nums" "$frontier_def"'
+            [.[] | select(.role == "agent" and (.n as $n | $fx | index($n) | not)) | open_line($open)]'); fi
         # Links unblocks: already read are reused: each read spends the budget.
         qlinks=$links
         for n in $(printf '%s' "$cands" | jq -r --argjson have "$links" '.[] | select(.dep > 0 and ($have | has("\(.n)") | not)) | .n'); do
             b=$(open_link_blockers "$n")
             qlinks=$(printf '%s' "$qlinks" | jq -c --arg n "$n" --argjson b "${b:-null}" '.[$n] = $b')
         done
-        qr=$(printf '%s' "$cands" | jq -c --argjson links "$qlinks" --arg ta "$t_agent" --arg p "$parent" '
-            def queued($q): . as $b | $q | index($b);
-            def free($q): .by != null and all(.by[]; queued($q));
-            def open($q): (.n | queued($q) | not) and (.l | index("parked") | not);
+        qr=$(printf '%s' "$cands" | jq -c --argjson links "$qlinks" --arg ta "$t_agent" --arg p "$parent" "$frontier_def"'
+            def startable($q): (.n as $n | $q | index($n) | not) and frontier($q);
             def replay($c): def go: .q as $q
-                | ([$c[] | select(open($q) and free($q))] | first) as $k
+                | ([$c[] | select(startable($q))] | first) as $k
                 | if $k == null then .
                   elif ($k.l | index($ta)) then .q += [$k.n] | go
                   else .end = $k.n end;
                 {q: [], end: null} | go;
-            map(.line as $line | .by = (if .dep > 0 then $links["\(.n)"] | if . then . + $line else null end
-                                        else $line end))
+            map(if .dep > 0 then .links = $links["\(.n)"] else . end)
             | . as $c | replay($c) as $r
             | ($c | map(.n)) as $ns
             | (if $p == "" or $r.end == null then null
                else ($ns | index($r.end)) as $xi
-               | ([$c[$xi + 1:][] | select(open($r.q) and (.l | index($ta)) and free($r.q))] | first) as $y
+               | ([$c[$xi + 1:][] | select(startable($r.q) and (.l | index($ta)))] | first) as $y
                | if $y == null then null
                  else ($ns | index($y.n)) as $yi
                  | {y: $y.n, yid: $y.id, yi: ($yi + 1), x: $r.end, xid: $c[$xi].id, xi: ($xi + 1),
