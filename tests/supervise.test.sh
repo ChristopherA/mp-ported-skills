@@ -1838,7 +1838,12 @@ jq -c 'select(.message.content | any(.id == "toolu_01U84F8dsqTtkMoD2YxRkZgs" or 
     "$transcripts/shared-actions.jsonl" >"$moved/$sid/subagents/agent-a1.jsonl"
 check "actions: a moved transcript's subagents are read beside it" "$others
 command refused ungranted: git push origin HEAD:main 2>&1" "$(actions)"
-command rm -rf "$moved"
+# Subagents in another project folder than the main transcript's are not
+# this session's.
+mkdir -p "$cfg/projects/-work-project"
+command mv "$moved/$sid" "$cfg/projects/-work-project/$sid"
+check "actions: subagents away from the main transcript are not read" "$others" "$(actions)"
+command rm -rf "$moved" "$cfg/projects/-work-project/$sid"
 
 # A multi-line command is listed by its first line.
 transcript just-launched -work-project "$sid"

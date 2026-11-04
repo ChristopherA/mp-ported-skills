@@ -172,6 +172,7 @@ if [ -n "$ID" ]; then
 fi
 if [ -n "$SESSION" ]; then
     [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the transcript is unknown"
+    # Only a session id needs the lookup; --transcript names the file.
     . "$(dirname -- "$0")/transcript.sh"
     FILE=$(transcript_of "$SESSION") || fail "no transcript for session $SESSION under $CLAUDE_CONFIG_DIR/projects"
 fi

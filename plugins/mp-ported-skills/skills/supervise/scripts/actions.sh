@@ -149,11 +149,12 @@ hook_reason() {
         jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null
 }
 
+. "$SCRIPT_DIR/transcript.sh"
+
 # hook_action <command>: the action a grant names for the form the hook
 # matched in it (grant_action, in the classifier the hook and the wrappers
 # share), or empty when it matched none or a form no grant covers.
 . "$SCRIPT_DIR/../../../scripts/shared-action-classify.sh"
-. "$SCRIPT_DIR/transcript.sh"
 hook_action() {
     reason=$(hook_reason "$1")
     [ -n "$reason" ] || return 0
