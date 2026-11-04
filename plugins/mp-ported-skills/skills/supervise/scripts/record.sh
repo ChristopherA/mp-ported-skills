@@ -205,13 +205,7 @@ notes=""
 note() { notes="${notes}- note: $1
 "; }
 
-# transcript <session id>: the path of its transcript in any project folder.
-transcript() {
-    for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
-        [ -f "$t" ] && { printf '%s\n' "$t"; return 0; }
-    done
-    return 1
-}
+. "$SCRIPT_DIR/transcript.sh"
 
 # Shared jq definitions: time, size and money as the record prints them, a
 # transcript's API calls, one per request in the order first written, and
@@ -355,7 +349,7 @@ read_worker() {
 # --- the worker's transcript -----------------------------------------------
 worker='{}'
 if [ -n "$sid" ]; then
-    if ! wt=$(transcript "$sid"); then
+    if ! wt=$(transcript_of "$sid"); then
         note "no transcript for session $sid under $CLAUDE_CONFIG_DIR/projects, so its calls, cost, zone, captures and typed messages were not read"
     elif ! read_worker; then
         note "transcript $wt could not be read, so its calls, cost, zone, captures and typed messages were not read"
@@ -384,7 +378,7 @@ fi
 subcalls=""
 if [ "$(printf '%s' "$worker" | jq -r '.calls != null')" = true ]; then
     subcalls=0
-    for t in "${wt%.jsonl}"/subagents/*.jsonl; do
+    for t in "$(transcript_subagents_dir "$wt")"/*.jsonl; do
         [ -f "$t" ] || continue
         if n=$(jq -s "$defs"'[.[] | objects] | calls | length' "$t" 2>/dev/null); then
             subcalls=$((subcalls + n))
@@ -405,7 +399,7 @@ elif [ -z "$SUPERVISOR" ]; then
     note "no supervisor session id (--supervisor or CLAUDE_CODE_SESSION_ID), so its share was not read"
 elif [ -z "$launched" ]; then
     note "the launch time is unknown, so the supervisor's share was not read"
-elif ! st=$(transcript "$SUPERVISOR"); then
+elif ! st=$(transcript_of "$SUPERVISOR"); then
     note "no transcript for supervisor session $SUPERVISOR under $CLAUDE_CONFIG_DIR/projects, so its share was not read"
 elif ! sup_row=$(jq -rs --arg l "$launched" --argjson z "$zone_k" "$defs"'
         ($l | epoch) as $launch

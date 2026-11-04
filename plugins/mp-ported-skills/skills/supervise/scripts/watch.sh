@@ -176,6 +176,7 @@ done
 fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 . "$(dirname -- "$0")/agents.sh"
 . "$(dirname -- "$0")/park.sh"
+. "$(dirname -- "$0")/transcript.sh"
 if [ -n "$DIR" ]; then
     [ -d "$DIR" ] || fail "not a directory: $DIR"
     DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
@@ -250,19 +251,6 @@ classify() {
 # every row without --after. turn_ended, stale_since and last_text pass it
 # with --arg after "$AFTER".
 AFTER_JQ='def not_before: $after == "" or ((.timestamp // "" | sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch 0) >= ($after | tonumber));'
-
-# transcript_of <session id>: the path of the session's main transcript, or
-# empty when none is found. It is looked for in every project folder, since
-# a worker that entered a worktree has its transcript moved to the
-# worktree's folder.
-transcript_of() {
-    [ -n "$1" ] || return 0
-    for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$1".jsonl; do
-        [ -f "$t" ] || continue
-        printf '%s\n' "$t"
-        return 0
-    done
-}
 
 # turn_ended <session id>: whether the session's transcript shows its turn
 # ended: its last conversation row is a turn_duration row with no background
@@ -379,7 +367,7 @@ transcript_size() {
     main=$(transcript_of "$1")
     [ -n "$main" ] || { echo ""; return; }
     total=0
-    for t in "$main" "${main%.jsonl}"/subagents/*.jsonl; do
+    for t in "$main" "$(transcript_subagents_dir "$main")"/*.jsonl; do
         [ -f "$t" ] || continue
         sz=$(wc -c <"$t" 2>/dev/null) || sz=0
         total=$((total + sz))

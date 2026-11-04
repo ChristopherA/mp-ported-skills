@@ -5,7 +5,8 @@
 # worker and wait until it has settled) (#137), live.sh (which background
 # sessions are live in a checkout), accept.sh (which next: step /supervise
 # takes) (#115), park.sh (how a parked ticket and worker are told apart)
-# (#158), own-repo.sh (whether a path is a repo of its own) (#167) and
+# (#158), transcript.sh (where a session's transcripts are) (#172),
+# own-repo.sh (whether a path is a repo of its own) (#167) and
 # distribution-repo.sh (a Distribution repo's path checks and state) (#209).
 #
 # Sources each helper and runs its function against a scratch repo and a
@@ -358,6 +359,23 @@ which name?" "$out"
 check "park: park_question takes the last, less its markdown" "which name?" \
     "$(jq -rn --arg t "$(printf '%s\n' '**Parked: first?**' '`Parked: which name?`')" "$park_question_def"'$t | park_question')"
 check "park: park_question with no Parked: line" null "$(jq -rn "$park_question_def"'"Done." | park_question')"
+
+# --- transcript.sh -----------------------------------------------------------
+. "$scripts/transcript.sh"
+tof() { # <session id>: transcript_of's status and output
+    out=$(transcript_of "$1"); printf '%s %s' "$?" "$out"
+}
+tcfg="$work/tcfg"
+mkdir -p "$tcfg/projects/-work-project" "$tcfg/projects/-work-project--claude-worktrees-x"
+: >"$tcfg/projects/-work-project--claude-worktrees-x/s1.jsonl"
+mkdir -p "$tcfg/projects/-work-project/s2.jsonl"
+check "transcript: found in any project folder" "0 $tcfg/projects/-work-project--claude-worktrees-x/s1.jsonl" \
+    "$(CLAUDE_CONFIG_DIR=$tcfg; tof s1)"
+check "transcript: none found prints nothing, status 1" "1 " "$(CLAUDE_CONFIG_DIR=$tcfg; tof s9)"
+check "transcript: a folder of that name is not one" "1 " "$(CLAUDE_CONFIG_DIR=$tcfg; tof s2)"
+check "transcript: an empty id finds none" "1 " "$(CLAUDE_CONFIG_DIR=$tcfg; tof '')"
+check "transcript: subagents beside the main one" "$tcfg/projects/-w/s1/subagents" \
+    "$(transcript_subagents_dir "$tcfg/projects/-w/s1.jsonl")"
 
 # --- own-repo.sh -------------------------------------------------------------
 . "$scripts/own-repo.sh"

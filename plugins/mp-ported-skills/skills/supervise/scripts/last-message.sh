@@ -54,6 +54,7 @@ esac
 # one would read another profile's sessions.
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the worker's profile is unknown"
 . "$(dirname -- "$0")/agents.sh"
+. "$(dirname -- "$0")/transcript.sh"
 
 # Within agents.sh's time limit (#240).
 agents=$(agents_list 2>/dev/null); rc=$?
@@ -65,11 +66,7 @@ sid=$(printf '%s' "$agents" | jq -r --arg id "$ID" '
     [.[] | select(.kind == "background" and .id == $id)] | first | .sessionId // empty')
 [ -n "$sid" ] || fail "claude agents lists no background session $ID"
 
-transcript=""
-for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$sid".jsonl; do
-    [ -f "$t" ] && { transcript=$t; break; }
-done
-[ -n "$transcript" ] || fail "no transcript for worker $ID (session $sid) under $CLAUDE_CONFIG_DIR/projects"
+transcript=$(transcript_of "$sid") || fail "no transcript for worker $ID (session $sid) under $CLAUDE_CONFIG_DIR/projects"
 
 # One JSON value: the last COUNT messages' text, and the transcript's last
 # conversation row, to tell whether the turn is over. Claude Code writes an

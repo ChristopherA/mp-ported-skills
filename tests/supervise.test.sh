@@ -1829,6 +1829,17 @@ jq -c 'select(.message.content | any(.id == "toolu_01XdkrXwv1TnYznyvLWKGaRN" or 
 check "actions: a subagent's succeeded push is the worker's" "$pushed" "$(actions | grep '^branch')"
 command rm -rf "$cfg/projects/-work-project/$sid"
 
+# A worker that entered a worktree has its transcript moved to the
+# worktree's folder, subagents beside it; they are read there (#172).
+moved="$cfg/projects/-work-project--claude-worktrees-x"
+transcript just-launched -work-project--claude-worktrees-x "$sid"
+mkdir -p "$moved/$sid/subagents"
+jq -c 'select(.message.content | any(.id == "toolu_01U84F8dsqTtkMoD2YxRkZgs" or .tool_use_id == "toolu_01U84F8dsqTtkMoD2YxRkZgs")) | .isSidechain = true' \
+    "$transcripts/shared-actions.jsonl" >"$moved/$sid/subagents/agent-a1.jsonl"
+check "actions: a moved transcript's subagents are read beside it" "$others
+command refused ungranted: git push origin HEAD:main 2>&1" "$(actions)"
+command rm -rf "$moved"
+
 # A multi-line command is listed by its first line.
 transcript just-launched -work-project "$sid"
 printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cd /work/project\ngit push"}}]}}' >>"$cfg/projects/-work-project/$sid.jsonl"

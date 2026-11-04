@@ -172,10 +172,8 @@ if [ -n "$ID" ]; then
 fi
 if [ -n "$SESSION" ]; then
     [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the transcript is unknown"
-    for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$SESSION".jsonl; do
-        [ -f "$t" ] && { FILE=$t; break; }
-    done
-    [ -n "$FILE" ] || fail "no transcript for session $SESSION under $CLAUDE_CONFIG_DIR/projects"
+    . "$(dirname -- "$0")/transcript.sh"
+    FILE=$(transcript_of "$SESSION") || fail "no transcript for session $SESSION under $CLAUDE_CONFIG_DIR/projects"
 fi
 [ -f "$FILE" ] || fail "no such transcript: $FILE"
 

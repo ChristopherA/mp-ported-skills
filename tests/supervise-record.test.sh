@@ -769,7 +769,7 @@ check "record: --id and --session are exclusive" "1" "$?"
 # actions.sh failing makes the field unknown, never a list of its errors.
 setup
 mkdir -p "$work/scripts"
-command cp "$scripts/record.sh" "$scripts/park.sh" "$scripts/own-repo.sh" "$work/scripts/"
+command cp "$scripts/record.sh" "$scripts/park.sh" "$scripts/own-repo.sh" "$scripts/transcript.sh" "$work/scripts/"
 printf '#!/bin/sh\necho "branch origin/x ungranted: partial"\necho "Error: the shared-action hook is missing" >&2\nexit 1\n' \
     >"$work/scripts/actions.sh"
 out=$(PATH="$work/bin:$PATH" sh "$work/scripts/record.sh" --id c2a368ee --dir "$repo" --start "$start" --ticket 56 \

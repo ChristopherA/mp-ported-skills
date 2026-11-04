@@ -76,6 +76,7 @@ case $TICKET in *[!0-9]*) fail "--ticket needs an issue number, not '$TICKET'" ;
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the worker's profile is unknown"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/agents.sh"
+. "$SCRIPT_DIR/transcript.sh"
 
 not_routine() { printf 'not routine: %s\n' "$1"; exit 2; }
 errors=$(mktemp)
@@ -95,11 +96,7 @@ agents=$(agents_list 2>/dev/null); rc=$?
 sid=$(printf '%s' "$agents" | jq -r --arg id "$ID" '
     [.[] | select(.kind == "background" and .id == $id)] | first | .sessionId // empty')
 [ -n "$sid" ] || fail "claude agents lists no background session $ID"
-transcript=""
-for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$sid".jsonl; do
-    [ -f "$t" ] && { transcript=$t; break; }
-done
-[ -n "$transcript" ] || fail "no transcript for worker $ID (session $sid) under $CLAUDE_CONFIG_DIR/projects"
+transcript=$(transcript_of "$sid") || fail "no transcript for worker $ID (session $sid) under $CLAUDE_CONFIG_DIR/projects"
 
 # One JSON value: the question, the kind it reads as, the action for a grant
 # question, or why it is not routine.

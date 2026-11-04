@@ -153,6 +153,7 @@ hook_reason() {
 # matched in it (grant_action, in the classifier the hook and the wrappers
 # share), or empty when it matched none or a form no grant covers.
 . "$SCRIPT_DIR/../../../scripts/shared-action-classify.sh"
+. "$SCRIPT_DIR/transcript.sh"
 hook_action() {
     reason=$(hook_reason "$1")
     [ -n "$reason" ] || return 0
@@ -423,12 +424,14 @@ unread=""
 [ -n "$sid" ] || unread=yes
 
 if [ -n "$sid" ]; then
-    set -- "$CLAUDE_CONFIG_DIR"/projects/*/"$sid".jsonl
-    if [ ! -f "$1" ]; then
+    if main=$(transcript_of "$sid"); then
+        set -- "$main" "$(transcript_subagents_dir "$main")"/*.jsonl
+    else
         note "no transcript for session $sid under $CLAUDE_CONFIG_DIR/projects, so its commands were not read"
         unread=yes
+        set --
     fi
-    for t in "$CLAUDE_CONFIG_DIR"/projects/*/"$sid".jsonl "$CLAUDE_CONFIG_DIR"/projects/*/"$sid"/subagents/*.jsonl; do
+    for t in "$@"; do
         [ -f "$t" ] || continue
         if ! rows=$(calls "$t"); then
             note "transcript $t could not be read, so its commands were not read"
