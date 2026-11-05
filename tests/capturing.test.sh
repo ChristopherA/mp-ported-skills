@@ -102,6 +102,12 @@ check "an ungranted in-motion relabel is listed, not run" yes \
     "$(contains "$capturing" "On \`ungranted\`, change no label, and list each label edit and its command")"
 check "a granted live check applies the relabel and the move" yes \
     "$(contains "$capturing" "When every check reads \`granted: <citation>\`, run \`live-check.sh\` again with \`--apply\`")"
+check "a ticket close is a job only when nothing is left on it (#217)" yes \
+    "$(contains "$capturing" "A ticket close is a before-clear job only when this capture's report says nothing is left on the ticket for an agent (#217)")"
+check "an unfinished ticket's close is neither run, offered nor listed, attended or not" yes \
+    "$(contains "$capturing" "attended or not, neither run, offer nor list its close")"
+check "the push of the work so far stays a job" yes \
+    "$(contains "$capturing" "a push of the work so far stays a job as before")"
 supervise="$skills/supervise/SKILL.md"
 sup_call='sh "${CLAUDE_SKILL_DIR}/../capturing/scripts/live-check.sh" --dir "<project folder>" N </dev/null'
 check "the supervisor routes the wait" yes \
