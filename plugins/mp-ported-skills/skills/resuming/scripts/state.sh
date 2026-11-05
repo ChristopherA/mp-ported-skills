@@ -94,9 +94,9 @@ frontier_def='
 # test of the frontier rule in docs/agents/issue-tracker.md) and not parked,
 # and its command; "; every open child blocked: ..." with the blockers, or
 # "parked", when none qualifies; nothing when #n has no open sub-issues.
-# Reads $open_nums, $repo_slug, $body_blockers and the label strings. The
-# weigh step reads the child's number back from "; next child #N", so keep
-# that wording. Writes the open children to $tmp/kids-<n>.json, which the
+# Reads $open_nums, $unread_refs, $repo_slug, $body_blockers and the label
+# strings. The weigh step reads the child's number back from "; next child
+# #N", so keep that wording. Writes the open children to $tmp/kids-<n>.json, which the
 # /supervise queue reads.
 # Reads every page: gh prints one array per page, merged here into one, and
 # the first page can hold only closed children.
@@ -139,9 +139,12 @@ next_child() {
             by="$by
 $(open_link_blockers "$k" | jq -r '.[]')"
         fi
-        # This repo's blockers by number, then any in other repos.
+        # This repo's blockers by number, then any in other repos, each one
+        # whose state could not be read marked "(unread)".
         by=$({ printf '%s\n' "$by" | grep -E '^[0-9]+$' | sort -un | sed 's/^/#/'
-               printf '%s\n' "$by" | grep -v -E '^([0-9]+)?$' | sort -u; } | tr '\n' ' ')
+               printf '%s\n' "$by" | grep -v -E '^([0-9]+)?$' | sort -u | while read -r r; do
+                   case " $unread_refs " in (*" $r "*) printf '%s (unread)\n' "$r" ;; (*) printf '%s\n' "$r" ;; esac
+               done; } | tr '\n' ' ')
         blocked="$blocked, #$k by ${by:-an unread blocker}"
     done
     blocked=$(printf '%s' "$blocked" | sed 's/ ,/,/g; s/ $//')
@@ -182,14 +185,15 @@ mark_parked() {
 
 # open_link_blockers <n>: a JSON array of the open tickets GitHub links as
 # blocking #n, a number for one in this repo and "owner/repo#N" for one in
-# another, so a blocker elsewhere is never read as the local ticket with its
-# number; nothing when the list cannot be read. Reads $repo_url and every
-# page, merged here as in next_child.
+# another, owner and repo in lower case as body_blockers names them, so a
+# blocker elsewhere is never read as the local ticket with its number;
+# nothing when the list cannot be read. Reads $repo_url and every page,
+# merged here as in next_child.
 open_link_blockers() {
     gh api "repos/{owner}/{repo}/issues/$1/dependencies/blocked_by?per_page=100" --paginate 2>/dev/null |
         jq -cs --arg repo "$repo_url" '[add[] | select(.state == "open")
-            | if (.repository_url // $repo) == $repo then .number
-              else "\(.repository_url | sub("^.*/repos/"; ""))#\(.number)" end]' 2>/dev/null
+            | if (.repository_url // $repo | ascii_downcase) == ($repo | ascii_downcase) then .number
+              else "\(.repository_url | sub("^.*/repos/"; "") | ascii_downcase)#\(.number)" end]' 2>/dev/null
 }
 
 # git_state <dir>: <dir>'s branch, default branch, sync with its upstream,
@@ -339,11 +343,13 @@ gather() {
         # next heading, the form tickets split from a spec use. Lines in a code
         # fence, closed only by its own marker, are examples, not blockers.
         # A blocker in another repo (other/lib#26) is "other/lib#26", never the
-        # local #26; one naming this repo ($repo, any case) is local.
+        # local #26; one naming this repo ($repo, any case) is local. Owner
+        # and repo are lower case, as open_link_blockers names them, so one
+        # ticket written in two cases is one blocker.
         body_blockers="$body_blockers"'
             def refs: [scan("(?<![\\w./-])(?:([\\w.-]+/[\\w.-]+))?#([0-9]+)(?!\\w)")
                 | if .[0] == null or (.[0] | ascii_downcase) == $repo then .[1] | tonumber
-                  else "\(.[0])#\(.[1])" end];
+                  else "\(.[0] | ascii_downcase)#\(.[1])" end];
             def body_blockers: reduce ((.body // "") | splits("\r?\n")) as $line
             ({fence: null, under: false, nums: []};
              ($line | capture("^\\s*(?<m>```|~~~)").m // null) as $m
@@ -380,9 +386,12 @@ gather() {
         open_nums=$(printf '%s' "$rows" | jq -c '[.[].n]')
         # Open blockers a body can name: this repo's open tickets, then each
         # other repo's ticket a body names that is open there, read once. One
-        # whose state cannot be read counts as open, as an unknown blocker.
+        # whose state cannot be read counts as open, as an unknown blocker,
+        # and is kept in $unread_refs for next_child to name as unread.
+        unread_refs=
         for r in $(printf '%s' "$rows" | jq -r '[.[].line[] | strings] | unique | .[]'); do
             st=$(gh api "repos/${r%%#*}/issues/${r##*#}" 2>/dev/null | jq -r '.state // empty' 2>/dev/null)
+            [ -n "$st" ] || unread_refs="$unread_refs $r"
             [ "$st" = closed ] ||
                 open_nums=$(printf '%s' "$open_nums" | jq -c --arg r "$r" '. + [$r]')
         done

@@ -389,7 +389,25 @@ kid66=$(issue 66 ready-for-agent 0 'Blocked by: other/lib#26, #26')
 list "$kid61" "$kid66" >"$FAKE_GH/sub-24.json"
 issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 26 needs-triage)" "$kid61" "$kid66")"
 check "other-repo body blockers: named with their repo" "1 work in flight: in motion #24 t24; every open child blocked: #61 by other/lib#26, #66 by #26 other/lib#26" "$(next "$(run)")"
-command rm -f "$FAKE_GH/sub-24.json" "$FAKE_GH"/ext-*.json
+# One whose read fails still blocks, and is named as unread (#163).
+kid65=$(issue 65 ready-for-agent 0 'Blocked by: gone/away#5')
+list "$kid61" "$kid65" >"$FAKE_GH/sub-24.json"
+issues "$(list "$(issue 24 ready-for-human,in-motion)" "$kid61" "$kid65")"
+out=$(run)
+check "other-repo body blockers: an unread one is named unread" "1 work in flight: in motion #24 t24; every open child blocked: #61 by other/lib#26, #65 by gone/away#5 (unread)" "$(next "$out")"
+check "other-repo body blockers: an unread one still blocks" "none" "$(line_of "$out" 'ready, blockers closed')"
+# Repo names compare without case (#163): a body's Other/Lib#26 and a link's
+# other/lib#26 are one blocker, read once, named once.
+kid68=$(issue 68 ready-for-agent 1 'Blocked by: Other/Lib#26')
+kid69=$(issue 69 ready-for-agent 0 'Blocked by: other/lib#26')
+list "$kid68" "$kid69" >"$FAKE_GH/sub-24.json"
+issues "$(list "$(issue 24 ready-for-human,in-motion)" "$kid68" "$kid69")"
+printf '[{"number":26,"state":"open","repository_url":"https://api.github.com/repos/OTHER/lib"}]' >"$FAKE_GH/deps-68.json"
+: >"$work/gh.log"
+out=$(FAKE_GH_LOG="$work/gh.log" run)
+check "other-repo blockers: one blocker whatever the case" "1 work in flight: in motion #24 t24; every open child blocked: #68 by other/lib#26, #69 by other/lib#26" "$(next "$out")"
+check "other-repo blockers: read once whatever the case" "1" "$(grep -ci '^api repos/other/lib/issues/26$' "$work/gh.log")"
+command rm -f "$FAKE_GH/sub-24.json" "$FAKE_GH"/ext-*.json "$FAKE_GH/deps-68.json"
 
 issues "$(list "$(issue 31 needs-triage)" "$(issue 50 ready-for-agent 1)" \
     "$(issue 51 ready-for-agent 0 'Blocked by: #31')" "$(issue 52 ready-for-agent 0 'Blocked by: #9')" \
