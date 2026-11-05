@@ -96,8 +96,8 @@ frontier_def='
 # "parked", when none qualifies; nothing when #n has no open sub-issues.
 # Reads $open_nums, $unread_refs, $repo_slug, $body_blockers and the label
 # strings. The weigh step reads the child's number back from "; next child
-# #N", so keep that wording. Writes the open children to $tmp/kids-<n>.json, which the
-# /supervise queue reads.
+# #N", so keep that wording. Writes the open children to
+# $tmp/kids-<n>.json, which the /supervise queue reads.
 # Reads every page: gh prints one array per page, merged here into one, and
 # the first page can hold only closed children.
 next_child() {
@@ -135,15 +135,22 @@ next_child() {
             continue
         fi
         by=$(printf '%s' "$kids" | jq -r --argjson k "$k" '.[] | select(.n == $k) | .line[]')
+        linked=
         if [ "$(printf '%s' "$kids" | jq --argjson k "$k" '.[] | select(.n == $k) | .dep')" -gt 0 ]; then
+            linked=$(open_link_blockers "$k" | jq -r '.[]')
             by="$by
-$(open_link_blockers "$k" | jq -r '.[]')"
+$linked"
         fi
         # This repo's blockers by number, then any in other repos, each one
-        # whose state could not be read marked "(unread)".
+        # whose state could not be read marked "(unread)": a body's ref whose
+        # read failed, unless this child's links just read it as open.
+        linked=$(printf '%s' "$linked" | tr '\n' ' ')
         by=$({ printf '%s\n' "$by" | grep -E '^[0-9]+$' | sort -un | sed 's/^/#/'
                printf '%s\n' "$by" | grep -v -E '^([0-9]+)?$' | sort -u | while read -r r; do
-                   case " $unread_refs " in (*" $r "*) printf '%s (unread)\n' "$r" ;; (*) printf '%s\n' "$r" ;; esac
+                   case " $linked " in
+                       (*" $r "*) printf '%s\n' "$r" ;;
+                       (*) case " $unread_refs " in (*" $r "*) printf '%s (unread)\n' "$r" ;; (*) printf '%s\n' "$r" ;; esac ;;
+                   esac
                done; } | tr '\n' ' ')
         blocked="$blocked, #$k by ${by:-an unread blocker}"
     done
