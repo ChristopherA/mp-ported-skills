@@ -150,6 +150,10 @@ A jq regex that must match at the start of any line of a multi-line string, such
 
 To check that a path a file names is a repo of its own, compare `git -C <path> rev-parse --show-toplevel` with the path, resolved. `rev-parse --git-dir` succeeds in any folder inside a repo, so a plain folder there passes and the checks after it read the repo around it: `launch.sh` and `push.sh` accepted such a folder as a Distribution repo until #167, and `state.sh` read the Project's own git as its Distribution repo's until #142's review. In `supervise`'s scripts, call `own_repo_top` from `own-repo.sh` rather than writing the comparison again; for a Distribution repo path, call `distribution_check` from `distribution-repo.sh`, which builds on it and also refuses a linked worktree and the Project's own repo, so `launch.sh`, `push.sh` and `resuming`'s `state.sh` cannot disagree on it (#209).
 
+## Records in a git folder
+
+A script that reads a record another `supervise` script writes under `git rev-parse --git-path <name>`, such as `mp-supervise-pushed` or `mp-supervise-watched`, resolves the path from the same folder the writer used, which is the Project folder (`record.sh`'s `PROJECT`), never the worker's cwd. `--git-path` gives a linked worktree a git folder of its own, so a read from a worktree cwd finds no record and reports its absence as a fact: in #182, the first build of the watch delay would have read every worktree run's watch time as unknown, and only the review caught it. Test the read with `--dir` a linked worktree.
+
 ## gh api lists
 
 A `gh api` read of a list (sub-issues, comments, labels) passes `--paginate` with `per_page=100`. GitHub returns one page, 30 items by default, with no sign that more exist: #40's first page of sub-issues held only closed children, so a read for its open ones came back empty with exit 0.
