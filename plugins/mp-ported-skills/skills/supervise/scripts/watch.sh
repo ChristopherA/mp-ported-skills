@@ -127,6 +127,15 @@
 # supervisor passes on, every state prints the message. Without --detail,
 # the output is as above, whole, and --capture changes nothing.
 #
+# With --dir, each time the polling loop returns a state (exit 0; not a
+# timeout, and not --file), it appends `ID <time> <state>` to the checkout's
+# `git rev-parse --git-path mp-supervise-watched`, beside push.sh's
+# mp-supervise-pushed: the worker's short id, the UTC time as
+# 2026-09-29T06:15:24Z, and the first line it printed, such as `done` or
+# `blocked input needed`. record.sh reads it for how long after the turn end
+# the watch returned (#182). The write changes neither the output nor the
+# exit status; when it fails, a `note` line on stderr says so.
+#
 # Exits 1 when the list cannot be read, which is never reported as gone.
 # Each read goes through agents.sh, which ends a call that runs past its
 # limit (MP_AGENTS_TIMEOUT, default 60 seconds) (#240): a hung read is one
@@ -647,6 +656,21 @@ verdict() {
         if (.text | length) > 3000 then "(cut at 3000 characters; the whole message is in the detail file)" else empty end'
 }
 
+# returned <report lines>: with --dir, append `ID <time> <state>` to the
+# checkout's mp-supervise-watched, as the header says. It prints nothing on
+# stdout and never fails the watch: an unwritten record is a note on stderr.
+returned() {
+    [ -n "$DIR" ] || return 0
+    if ! watched=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-watched 2>/dev/null); then
+        printf "note the watch's return was not recorded: %s is not in a git checkout\n" "$DIR" >&2
+        return 0
+    fi
+    if ! printf '%s %s %s\n' "$ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(printf '%s\n' "$1" | sed -n 1p)" 2>/dev/null >>"$watched"; then
+        printf "note the watch's return was not recorded in %s, so record.sh will read the watch time as unknown\n" "$watched" >&2
+    fi
+    return 0
+}
+
 if [ -n "$FILE" ]; then
     [ -f "$FILE" ] || { printf 'Error: no such file: %s\n' "$FILE" >&2; exit 1; }
     list=$(command cat "$FILE")
@@ -700,16 +724,16 @@ while :; do
             # With --wait-blocked, a block mid-turn is waited on while its
             # transcript grows; report() added the note to one whose turn
             # ended.
-            [ -n "$WAIT_BLOCKED" ] || { verdict "$out" "$list"; exit 0; }
+            [ -n "$WAIT_BLOCKED" ] || { returned "$out"; verdict "$out" "$list"; exit 0; }
             sid=$(session_id_of "$list")
-            turn_ended "$sid" && { verdict "$out" "$list"; exit 0; }
+            turn_ended "$sid" && { returned "$out"; verdict "$out" "$list"; exit 0; }
             size=$(transcript_size "$sid")
             if [ -n "$block_seen" ] && [ "$size" = "$block_size" ]; then
                 out=$(printf '%s\nnote still blocked; its transcript has not grown in %ss' "$out" "$((now - block_since))")
-                verdict "$out" "$list"; exit 0
+                returned "$out"; verdict "$out" "$list"; exit 0
             fi
             block_seen=1 block_size=$size block_since=$now ;;
-        *) verdict "$out" "$list"; exit 0 ;;
+        *) returned "$out"; verdict "$out" "$list"; exit 0 ;;
     esac
     if [ $((now - start)) -ge "$TIMEOUT" ]; then
         verdict "$out" "$list"

@@ -734,6 +734,40 @@ cwd $project/.claude/worktrees/issue-66" \
     "$(PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id c2a368ee --dir "$project" --interval 0 --timeout 30 </dev/null)"
 check "poll --dir: stopped at the round it moved" "2" "$(command cat "$fake/count")"
 
+# Each return with --dir appends `ID <time> <state>` to the checkout's
+# mp-supervise-watched, for record.sh's watch delay (#182); the output is
+# unchanged. A poll still working, and a timeout, append nothing.
+watched=$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-watched)
+command rm -f "$watched"
+reset_fake
+printf '%s\n' "$(in_project working-idle)" "$(in_project done)" >"$fake/seq"
+check "poll --dir: a return's output is unchanged by its record" "done
+cwd $project" \
+    "$(PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id 9121ff49 --dir "$project" --interval 0 --timeout 30 </dev/null)"
+check "poll --dir: a return appends one line, id, time and state" "1" \
+    "$(grep -cE '^9121ff49 [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z done$' "$watched" 2>/dev/null)"
+check "poll --dir: only the return is recorded" "1" "$(wc -l <"$watched" 2>/dev/null | tr -d ' ')"
+reset_fake
+in_project blocked-input-needed >"$fake/seq"
+PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id c2a368ee --dir "$project" --interval 0 --timeout 30 </dev/null >/dev/null
+check "poll --dir: a blocked return records its whole state" "c2a368ee blocked input needed" \
+    "$(sed -n '2s/ [^ ]*Z / /p' "$watched" 2>/dev/null)"
+reset_fake
+in_project working-busy >"$fake/seq"
+PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id c2a368ee --dir "$project" --interval 1 --timeout 1 </dev/null >/dev/null
+check "poll --dir: a timeout records nothing" "2" "$(wc -l <"$watched" 2>/dev/null | tr -d ' ')"
+# A record that cannot be written is a note on stderr; the output and exit
+# status stay as they are.
+command rm -f "$watched"; mkdir "$watched"
+reset_fake
+in_project done >"$fake/seq"
+out=$(PATH="$work/bin:$PATH" sh "$scripts/watch.sh" --id 9121ff49 --dir "$project" --interval 0 --timeout 30 </dev/null 2>"$work/watched-err"); rc=$?
+check "poll --dir: an unwritten record keeps the output" "done
+cwd $project" "$out"
+check "poll --dir: an unwritten record keeps the exit status" "0" "$rc"
+check "poll --dir: an unwritten record is a note on stderr" "1" "$(grep -c "^note the watch's return was not recorded in $watched" "$work/watched-err")"
+rmdir "$watched"
+
 # The kept worktree's branch has a commit since the snapshot (above).
 reset_fake
 in_project working-busy >"$fake/seq"
