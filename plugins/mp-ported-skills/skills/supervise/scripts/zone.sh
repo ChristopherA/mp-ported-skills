@@ -25,7 +25,8 @@
 # every tool call on the main chain has its result (a Bash command still
 # running, a `git commit` included, or a foreground subagent, holds it), and
 # every background command or async agent it started has reported back, by a
-# <task-notification> naming its task id, as a prompt or queued. A worker's
+# <task-notification> naming its task id, as a prompt or queued, or been
+# ended by a TaskStop whose result reads "Successfully stopped task". A worker's
 # review agents can run for minutes, and workers crossed 100% of zone during
 # review, so from the force point a background task no longer holds the capture:
 # the stop ends it, and the continuation runs it again. A running tool call
@@ -200,7 +201,10 @@ row=$(jq -Rrn --argjson z "$zone_k" '
                  elif .type == "user" and .origin.kind? == "task-notification" then .message.content
                  else empty end
        | if type == "array" then map(.text? // empty) | join("\n") else . end
-       | strings | scan("<task-id>([^<]*)</task-id>") | .[0]] as $ended
+       | strings | scan("<task-id>([^<]*)</task-id>") | .[0]]
+      + [$main[] | select(.type == "user") | .toolUseResult? | objects
+         | select((.message? // "") | strings | startswith("Successfully stopped task"))
+         | .task_id // empty] as $ended
     | ($started - $ended) as $running
     | [$pct, (if ($calls - $results) != [] or $calling then "call" else "" end),
        ($running[0] // "")] | @tsv' "$FILE" 2>/dev/null) || fail "transcript $FILE could not be read"

@@ -549,7 +549,8 @@ report() {
 # FACTS_JQ: the session's last message, built as last-message.sh builds it
 # (with --after, from text stamped at or after it), and the background
 # commands and async agents it started that have not reported back, as
-# zone.sh reads them, as {text, running}.
+# zone.sh reads them (a task ended by a TaskStop that succeeded has
+# finished), as {text, running}.
 FACTS_JQ="$AFTER_JQ"'
     [.[] | select((.isSidechain // false) | not)] as $main
     | {text: ([$main | to_entries[] | select(.value.type == "assistant" and (.value | not_before))
@@ -564,7 +565,10 @@ FACTS_JQ="$AFTER_JQ"'
                           elif .type == "user" and .origin.kind? == "task-notification" then .message.content
                           else empty end
                     | if type == "array" then map(.text? // empty) | join("\n") else . end
-                    | strings | scan("<task-id>([^<]*)</task-id>") | .[0]] | unique)}'
+                    | strings | scan("<task-id>([^<]*)</task-id>") | .[0]]
+                 - [$main[] | select(.type == "user") | .toolUseResult? | objects
+                    | select((.message? // "") | strings | startswith("Successfully stopped task"))
+                    | .task_id // empty] | unique)}'
 
 # unsettled <report lines> <facts json>: why a done is not settled, or
 # empty when it is.

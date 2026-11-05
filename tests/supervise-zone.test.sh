@@ -239,6 +239,17 @@ not due: background task bbij1 is running" "$(due)"
 notified bbij1 >>"$work/t.jsonl"
 check "due: a background command that ended" "68% of zone
 due" "$(due)"
+# A background command the worker ended itself with TaskStop (#247); a
+# failed stop, whose result is an error string, leaves it running.
+{ call 60000 a; result a '{"backgroundTaskId":"bbij1","stdout":""}'; call 60000 s
+  result s '"Error: No task found with ID: bbij1"'; call 102000 b; result b; } >"$work/t.jsonl"
+check "due: a failed TaskStop leaves the command running" "68% of zone
+not due: background task bbij1 is running" "$(due)"
+{ call 60000 a; result a '{"backgroundTaskId":"bbij1","stdout":""}'; call 60000 s
+  result s '{"message":"Successfully stopped task: bbij1 (sh x.sh)","task_id":"bbij1","task_type":"local_bash"}'
+  call 102000 b; result b; } >"$work/t.jsonl"
+check "due: a background command ended by TaskStop" "68% of zone
+due" "$(due)"
 
 { call 60000 a; result a '{"isAsync":true,"status":"async_launched","agentId":"aa30"}'; call 102000 b; result b; } >"$work/t.jsonl"
 check "due: an async agent still running" "68% of zone

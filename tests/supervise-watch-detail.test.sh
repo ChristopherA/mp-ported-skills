@@ -117,6 +117,43 @@ transcript "Committed; the signing runs in the background." "$started"'
 check "ended: settled again" "done
 cwd $repo
 detail $detail" "$(watch)"
+# A task the worker ended itself with TaskStop no longer runs (#247). The
+# stop's result row comes before the turn's last text, as a worker's does.
+stopped() { # <task id> -- a jq filter adding a TaskStop result row for it
+    printf '%s' 'if .type == "assistant" and .message.content[0].type? == "thinking"
+        then ., {"type": "user", "isSidechain": false,
+                 "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "stop1",
+                    "content": "{\"message\":\"Successfully stopped task: '"$1"' (sh tests/x.test.sh)\",\"task_id\":\"'"$1"'\"}"}]},
+                 "toolUseResult": {"message": "Successfully stopped task: '"$1"' (sh tests/x.test.sh)",
+                    "task_id": "'"$1"'", "task_type": "local_bash", "command": "sh tests/x.test.sh"}}
+        else . end'
+}
+transcript "Committed; the suite ran in the background." "$started | $(stopped bash-7)"
+check "stopped: a task ended by TaskStop is settled" "done
+cwd $repo
+detail $detail" "$(watch)"
+# A stop of another task leaves this one running.
+transcript "Committed; the suite ran in the background." "$started | $(stopped bash-8)"
+check "stopped: a stop of another task leaves it running" "done
+cwd $repo
+unsettled: background task bash-7 still running at the turn end
+detail $detail
+message:
+Committed; the suite ran in the background." "$(watch)"
+# A TaskStop that failed returns an error string, not the stop's result.
+failed='if .type == "assistant" and .message.content[0].type? == "thinking"
+    then ., {"type": "user", "isSidechain": false,
+             "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "stop1", "is_error": true,
+                "content": "<tool_use_error>No task found with ID: bash-7</tool_use_error>"}]},
+             "toolUseResult": "Error: No task found with ID: bash-7"}
+    else . end'
+transcript "Committed; the suite ran in the background." "$started | $failed"
+check "stopped: a failed TaskStop leaves it running" "done
+cwd $repo
+unsettled: background task bash-7 still running at the turn end
+detail $detail
+message:
+Committed; the suite ran in the background." "$(watch)"
 
 # --- a turn that ended on a question -----------------------------------------
 transcript "Built it. Should the flag default to on?"
