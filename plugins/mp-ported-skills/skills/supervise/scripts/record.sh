@@ -12,6 +12,12 @@
 #                            turn ended: how late the supervisor saw it, and
 #                            after the last approval below, when one came
 #                            after the turn end
+# * watch                    the first time watch.sh returned a state for
+#                            the worker at or after the turn end, from its
+#                            mp-supervise-watched record (#182), how long
+#                            after the turn end that was, and how long
+#                            after it the report came; unknown when no
+#                            return was recorded then
 # * approval waits           for each post.sh post and push.sh push for this
 #                            worker on the maintainer's approval, how long
 #                            it came after the worker's last turn end before
@@ -446,6 +452,16 @@ if [ -n "$ID" ]; then
     } | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z (post|push|checked-push)$')
 fi
 approvals_json=$(jq -cn --arg t "$approvals" '[$t | splits("\n") | select(. != "") | split(" ") | {at: .[0], kind: .[1]}]')
+# The times watch.sh returned a state for this worker, `ID <time> <state>`
+# in the checkout's mp-supervise-watched (#182). A line with no time it can
+# read is skipped.
+watches=""
+watched=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-watched 2>/dev/null)
+if [ -n "$ID" ] && [ -f "$watched" ]; then
+    watches=$(awk -v id="$ID" '$1 == id { $1 = ""; print substr($0, 2) }' "$watched" |
+        grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z ')
+fi
+watches_json=$(jq -cn --arg t "$watches" '[$t | splits("\n") | select(. != "") | capture("^(?<at>[^ ]+) (?<state>.*)$")]')
 waits=""
 if [ -n "$SESSION" ]; then
     :
@@ -570,7 +586,7 @@ fi
 jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launched "$launched" --arg now "$NOW" \
     --argjson w "$worker" --arg sub "$subcalls" --arg sup "$supervisor" --arg supctx "$sup_context" --arg waits "$waits" \
     --arg actions "$actions" --arg short "$short" --arg count "$count" --arg children "$children" \
-    --arg ticket "$ticket" --arg n "$TICKET" --argjson ap "$approvals_json" --arg pb "$parked_branch" \
+    --arg ticket "$ticket" --arg n "$TICKET" --argjson ap "$approvals_json" --argjson wr "$watches_json" --arg pb "$parked_branch" \
     --arg dist "$dist_outcome" --arg dcount "$dist_count" --arg dshort "$dist_short" "$defs"'
     def plural($k; $word): "\($k) \($word)\(if $k == 1 then "" else "s" end)";
     def after($k; $s): if $k == "" then "commits unknown"
@@ -587,6 +603,9 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
        | ([$w.marks // [] | .[] | select(.end and (.pending | not)) | .at | epoch | select(. <= $pe)] | max) as $te
        | . + {epoch: $pe, span: (if $te == null then null else $pe - $te end)}] | sort_by(.epoch) as $ap
     | ($ap | last) as $lastap
+    # The first watch return at or after the last turn end.
+    | (if $e == null then null
+       else [$wr[] | . + {epoch: (.at | epoch)} | select(.epoch >= $e)] | sort_by(.epoch) | first end) as $wret
     | (if $hand then "## Hand run of #\($n)" else "## Supervised run of #\($n)" end),
       "",
       (if $hand then "- session: \($session), \($w.model // "unknown")",
@@ -600,6 +619,9 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
        | "- reported: \($now | stamp)\(if $e == null then "" else ", \(($now | epoch) - $e | span) after the turn ended" end)"
          + (if $e == null or $lastap == null or $lastap.epoch < $e then ""
             else ", \(($now | epoch) - $lastap.epoch | span) after the last approval" end)),
+      (select($hand | not)
+       | "- watch: \(if $wret == null then "unknown, no watch return recorded at or after the turn ended"
+                     else "returned \($wret.epoch - $e | span) after the turn ended, at \($wret.at) (\($wret.state)); reported \(($now | epoch) - $wret.epoch | span) after the watch returned" end)"),
       (select($hand | not)
        | "- approval waits: \(if $w.calls == null then "unknown"
                               elif ($ap | length) == 0 then "none"

@@ -173,6 +173,7 @@ check "record: the whole record" "## Supervised run of #56
 - launched: 2026-09-29T06:01:24Z
 - turn ended: 2026-09-29T06:14:24Z, 13 min after launch
 - reported: 2026-09-29T06:15:24Z, 1 min after the turn ended
+- watch: unknown, no watch return recorded at or after the turn ended
 - approval waits: none
 - API calls: 5, 3 by the worker and 2 by its subagents
 - tokens and cost: claude-haiku-4-5-20251001 20k tokens \$0.02; claude-sonnet-5 28.0M tokens \$8.43; \$8.45 in all
@@ -186,6 +187,31 @@ check "record: the whole record" "## Supervised run of #56
   - pr 72 ungranted: https://github.com/ChristopherA/mp-ported-skills/pull/72
   - branch origin/56-topic pushed by someone else: holds the worker's commits
 - outcome: 2 commits after $short, PR #72, ticket #56 CLOSED" "$out"
+
+# watch.sh's return record, `ID <time> <state>` (#182): the record reads the
+# first return for this worker at or after its last turn end (06:14:24, the
+# turn before it ended at 06:09 with agents pending), not the first or last
+# line, nor another worker's, and gives the watch delay and the report delay
+# apart.
+watched=$(git -C "$repo" rev-parse --path-format=absolute --git-path mp-supervise-watched)
+printf '%s\n' "c2a368ee 2026-09-29T06:09:10Z done" "c2a368ee 2026-09-29T06:13:00Z blocked permission prompt" \
+    "0ther000 2026-09-29T06:15:00Z done" "c2a368ee 2026-09-29T06:16:24Z blocked input needed" \
+    "c2a368ee 2026-09-29T06:25:00Z done" >"$watched"
+check "watched: the return for the last turn end" \
+    "returned 2 min after the turn ended, at 2026-09-29T06:16:24Z (blocked input needed); reported 14 min after the watch returned" \
+    "$(field watch "$(record --now 2026-09-29T06:30:24Z)")"
+check "watched: a return in the turn end's second counts" \
+    "returned under a minute after the turn ended, at 2026-09-29T06:14:24Z (done); reported 1 min after the watch returned" \
+    "$(printf '%s\n' "c2a368ee 2026-09-29T06:14:24Z done" >"$watched"; field watch "$(record)")"
+check "watched: only returns before the turn end are unknown" \
+    "unknown, no watch return recorded at or after the turn ended" \
+    "$(printf '%s\n' "c2a368ee 2026-09-29T06:09:10Z done" "c2a368ee 2026-09-29T06:14:23Z done" >"$watched"; field watch "$(record)")"
+check "watched: a malformed line is skipped" \
+    "returned 1 min after the turn ended, at 2026-09-29T06:15:24Z (done); reported under a minute after the watch returned" \
+    "$(printf '%s\n' "c2a368ee yesterday done" "c2a368ee 2026-09-29T06:15:24Z done" >"$watched"; field watch "$(record)")"
+command rm -f "$watched"
+check "watched: no record is unknown" "unknown, no watch return recorded at or after the turn ended" \
+    "$(field watch "$(record)")"
 
 # The zone follows MP_SMART_ZONE_K, as the status line does.
 check "record: the smart zone's size" "87%" \
@@ -389,6 +415,7 @@ check "record: a recorded job" "## Supervised run of #56
 - launched: 2026-09-30T05:46:16Z
 - turn ended: 2026-09-30T05:46:26Z, under a minute after launch
 - reported: 2026-09-30T05:47:26Z, 1 min after the turn ended
+- watch: unknown, no watch return recorded at or after the turn ended
 - approval waits: none
 - API calls: 2, 2 by the worker and 0 by its subagents
 - tokens and cost: claude-sonnet-5 147k tokens \$0.31; \$0.31 in all
