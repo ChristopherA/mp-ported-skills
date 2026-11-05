@@ -140,12 +140,13 @@ unsettled: background task bash-7 still running at the turn end
 detail $detail
 message:
 Committed; the suite ran in the background." "$(watch)"
-# A TaskStop that failed returns an error string, not the stop's result.
+# A TaskStop that failed returns an error string, not the stop's result,
+# as a recorded one did ("Error: Task <id> is not running (status: ...)").
 failed='if .type == "assistant" and .message.content[0].type? == "thinking"
     then ., {"type": "user", "isSidechain": false,
              "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "stop1", "is_error": true,
-                "content": "<tool_use_error>No task found with ID: bash-7</tool_use_error>"}]},
-             "toolUseResult": "Error: No task found with ID: bash-7"}
+                "content": "<tool_use_error>Task bash-7 is not running (status: failed)</tool_use_error>"}]},
+             "toolUseResult": "Error: Task bash-7 is not running (status: failed)"}
     else . end'
 transcript "Committed; the suite ran in the background." "$started | $failed"
 check "stopped: a failed TaskStop leaves it running" "done

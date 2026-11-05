@@ -242,7 +242,7 @@ due" "$(due)"
 # A background command the worker ended itself with TaskStop (#247); a
 # failed stop, whose result is an error string, leaves it running.
 { call 60000 a; result a '{"backgroundTaskId":"bbij1","stdout":""}'; call 60000 s
-  result s '"Error: No task found with ID: bbij1"'; call 102000 b; result b; } >"$work/t.jsonl"
+  result s '"Error: Task bbij1 is not running (status: failed)"'; call 102000 b; result b; } >"$work/t.jsonl"
 check "due: a failed TaskStop leaves the command running" "68% of zone
 not due: background task bbij1 is running" "$(due)"
 { call 60000 a; result a '{"backgroundTaskId":"bbij1","stdout":""}'; call 60000 s

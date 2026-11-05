@@ -561,14 +561,14 @@ FACTS_JQ="$AFTER_JQ"'
               | [.[] | select(.text | length > 0) | .text | join("\n\n")] | last // ""),
        running: ([$main[] | select(.type == "user") | .toolUseResult? | objects
                   | .backgroundTaskId // (select(.isAsync == true) | .agentId) // empty]
-                 - [.[] | if .type == "queue-operation" then .content
+                 - ([.[] | if .type == "queue-operation" then .content
                           elif .type == "user" and .origin.kind? == "task-notification" then .message.content
                           else empty end
                     | if type == "array" then map(.text? // empty) | join("\n") else . end
                     | strings | scan("<task-id>([^<]*)</task-id>") | .[0]]
-                 - [$main[] | select(.type == "user") | .toolUseResult? | objects
+                 + [$main[] | select(.type == "user") | .toolUseResult? | objects
                     | select((.message? // "") | strings | startswith("Successfully stopped task"))
-                    | .task_id // empty] | unique)}'
+                    | .task_id // empty]) | unique)}'
 
 # unsettled <report lines> <facts json>: why a done is not settled, or
 # empty when it is.
