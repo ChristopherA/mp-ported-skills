@@ -453,10 +453,12 @@ if [ -n "$ID" ]; then
 fi
 approvals_json=$(jq -cn --arg t "$approvals" '[$t | splits("\n") | select(. != "") | split(" ") | {at: .[0], kind: .[1]}]')
 # The times watch.sh returned a state for this worker, `ID <time> <state>`
-# in the checkout's mp-supervise-watched (#182). A line with no time it can
-# read is skipped.
+# in mp-supervise-watched (#182). watch.sh writes it with --dir the Project
+# folder, so it is read in PROJECT, not in DIR, which may be a linked
+# worktree with a git folder of its own. A line with no time it can read is
+# skipped.
 watches=""
-watched=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-watched 2>/dev/null)
+watched=$(git -C "$PROJECT" rev-parse --path-format=absolute --git-path mp-supervise-watched 2>/dev/null)
 if [ -n "$ID" ] && [ -f "$watched" ]; then
     watches=$(awk -v id="$ID" '$1 == id { $1 = ""; print substr($0, 2) }' "$watched" |
         grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z ')

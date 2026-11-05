@@ -209,6 +209,14 @@ check "watched: only returns before the turn end are unknown" \
 check "watched: a malformed line is skipped" \
     "returned 1 min after the turn ended, at 2026-09-29T06:15:24Z (done); reported under a minute after the watch returned" \
     "$(printf '%s\n' "c2a368ee yesterday done" "c2a368ee 2026-09-29T06:15:24Z done" >"$watched"; field watch "$(record)")"
+# watch.sh writes it in the Project folder; a worker cwd in a linked
+# worktree, which has a git folder of its own, still reads it there.
+printf '%s\n' "c2a368ee 2026-09-29T06:15:24Z done" >"$watched"
+git -C "$repo" worktree add -q --detach "$work/watched-wt" "$start" 2>/dev/null
+check "watched: read in the Project folder for a worktree cwd" \
+    "returned 1 min after the turn ended, at 2026-09-29T06:15:24Z (done); reported under a minute after the watch returned" \
+    "$(field watch "$(record --dir "$work/watched-wt" --project "$repo")")"
+git -C "$repo" worktree remove --force "$work/watched-wt"
 command rm -f "$watched"
 check "watched: no record is unknown" "unknown, no watch return recorded at or after the turn ended" \
     "$(field watch "$(record)")"
