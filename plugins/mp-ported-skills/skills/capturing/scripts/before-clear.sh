@@ -87,7 +87,8 @@ if cited=$(sh "$grant_sh" --dir "$DIR" --action "$ACTION" 2>"$errs"); then
     command rm -f "$errs"
     # A granted close waits while the Project's Distribution repo is ahead
     # of its upstream (#186): the hook and the wrappers refuse it, so the
-    # capture lists it with the push rather than trying it.
+    # capture lists a finished ticket's close with the push rather than
+    # trying it, and an unfinished ticket's close not at all (#217).
     if [ "$ACTION" = issue-close ]; then
         . "$SCRIPT_DIR/../../../scripts/shared-action-classify.sh"
         classify_distribution_sh="$SCRIPT_DIR/../../supervise/scripts/distribution.sh"

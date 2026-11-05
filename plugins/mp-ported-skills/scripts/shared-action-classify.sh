@@ -146,7 +146,7 @@ $(sed -n 's/^distribution //p' "$_cpm" | head -n 1)"
 # wrappers give for a held close, from classify_close_held's
 # classify_held and classify_held_repo.
 classify_close_held_reason() {
-    printf '%s' "A background session in auto mode cannot run 'gh issue close' yet (#186): $1, and the issue-close grant covers the ticket only after its work is pushed. List the close with the push, as \`Waiting on: git -C $2 push origin <branch>; gh issue close <N>\`: /supervise closes the ticket after the push lands."
+    printf '%s' "A background session in auto mode cannot run 'gh issue close' yet (#186): $1, and the issue-close grant covers the ticket only after its work is pushed. When the ticket's work is done, list the close with the push, as \`Waiting on: git -C $2 push origin <branch>; gh issue close <N>\`, and /supervise closes the ticket after the push lands; when work is left on it, list the push alone (#217)."
 }
 
 # gh_words <args after "gh">: sets gh_sub and gh_act to the subcommand and

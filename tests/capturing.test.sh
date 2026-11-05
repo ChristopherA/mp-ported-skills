@@ -105,7 +105,7 @@ check "a granted live check applies the relabel and the move" yes \
 check "a ticket close is a job only when nothing is left on it (#217)" yes \
     "$(contains "$capturing" "A ticket close is a before-clear job only when this capture's report says nothing is left on the ticket for an agent (#217)")"
 check "an unfinished ticket's close is neither run, offered nor listed, attended or not" yes \
-    "$(contains "$capturing" "attended or not, neither run, offer nor list its close")"
+    "$(contains "$capturing" "do not run, offer or list its close, attended or not, under any grant")"
 check "the push of the work so far stays a job" yes \
     "$(contains "$capturing" "a push of the work so far stays a job as before")"
 supervise="$skills/supervise/SKILL.md"

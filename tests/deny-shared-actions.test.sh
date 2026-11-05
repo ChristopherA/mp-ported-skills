@@ -329,7 +329,7 @@ dgit_in "$hdist" commit -q --allow-empty -m 'the ticket code'
 check "issue-close grant, Distribution commit unpushed: the close is refused" "deny" \
     "$(decision 0 auto 'gh issue close 186 --comment done' "$hproj")"
 check "issue-close grant, Distribution commit unpushed: the reason names the repo and the wait" \
-    "A background session in auto mode cannot run 'gh issue close' yet (#186): Distribution repo $hdist_real holds 1 commit its upstream lacks, and the issue-close grant covers the ticket only after its work is pushed. List the close with the push, as \`Waiting on: git -C $hdist_real push origin <branch>; gh issue close <N>\`: /supervise closes the ticket after the push lands." \
+    "A background session in auto mode cannot run 'gh issue close' yet (#186): Distribution repo $hdist_real holds 1 commit its upstream lacks, and the issue-close grant covers the ticket only after its work is pushed. When the ticket's work is done, list the close with the push, as \`Waiting on: git -C $hdist_real push origin <branch>; gh issue close <N>\`, and /supervise closes the ticket after the push lands; when work is left on it, list the push alone (#217)." \
     "$(reason 0 auto 'gh issue close 186' "$hproj")"
 check "issue-close grant, Distribution commit unpushed: refused from a session in the Distribution repo too" "deny" \
     "$(decision 0 auto 'gh issue close 186' "$hdist")"
