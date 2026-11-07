@@ -11,7 +11,8 @@
 # which records its arguments, working directory and CLAUDE_CONFIG_DIR, and
 # writes the job's state.json the daemon would. resume.sh runs against it
 # too: the fake logs each stop, rm and resume in order, and answers each
-# resume with a wake or a copy, as the resume-out list says. actions.sh
+# resume with a wake or a copy, as the resume-out list says; the settle-time
+# cases run on a fake `date` and `sleep`, so they count whole seconds. actions.sh
 # reads a job's state.json and the shared-actions transcript fixture,
 # against a scratch repo with a bare remote. Touches nothing outside its own mktemp directory.
 #
@@ -672,6 +673,14 @@ chmod +x "$work/bin/claude"
 # claude, so stop before any of them runs.
 if [ "$(PATH="$work/bin:$PATH" command -v claude)" != "$work/bin/claude" ]; then
     echo "FAIL fake claude is not first on PATH; not running the rest" >&2
+    exit 1
+fi
+# The settle-time cases run on a fake clock (#92), behind the fake claude
+# as resume() and stop_worker() put it.
+. "$root/tests/fake-clock.sh"
+fake_clock_install "$work/clock"
+if [ "$(PATH="$work/bin:$work/clock:$PATH" command -v date) $(PATH="$work/bin:$work/clock:$PATH" command -v sleep)" != "$work/clock/date $work/clock/sleep" ]; then
+    echo "FAIL the fake clock is not first on PATH; not running the rest" >&2
     exit 1
 fi
 # launch.sh reads the ticket's title with `gh issue view` in the Project
@@ -1492,13 +1501,16 @@ check "resume: a released worker's record is taken again" 1 "$(cmp -s "$precord"
 command rm -f "$cfg/rules/resume-probe.md" "$marker"
 
 # stopped may never show: a row with no pid for the settle time is enough,
-# and a pid showing again starts the settle time over.
-resume woke pid nopid -- --settle 2 --interval 1 >/dev/null 2>&1
+# and a pid showing again starts the settle time over. On the fake clock the
+# reads land at 0, 1, 2 and 3 seconds: the no-pid row first read at 1 has
+# lasted 2 seconds at 3, and the one read again at 2, after the pid, has
+# lasted 1 second at 3.
+on_clock resume woke pid nopid -- --settle 2 --interval 1 >/dev/null 2>&1
 check "resume: no pid for the settle time" "stop c2a368ee
-resume after 4 reads" "$(calls)"
-resume woke nopid pid nopid -- --settle 1 --interval 1 >/dev/null 2>&1
+resume after 4 reads 3s" "$(calls) $(clock_slept)s"
+on_clock resume woke nopid pid nopid -- --settle 1 --interval 1 >/dev/null 2>&1
 check "resume: a pid starts the settle time over" "stop c2a368ee
-resume after 4 reads" "$(calls)"
+resume after 4 reads 3s" "$(calls) $(clock_slept)s"
 
 out=$(resume woke pid -- --timeout 1 2>&1)
 rc=$?
@@ -1689,16 +1701,15 @@ check "stop: the marker is gone" "no" "$([ -f "$marker" ] && echo yes || echo no
 # enough, and a pid showing again starts the settle time over, as in
 # resume.sh.
 printf 'c2a368ee\ndistribution\n' >"$marker"
-out=$(stop_worker pid nopid -- --settle 2 --interval 1 2>&1); rc=$?
+# On the fake clock, reads at 0 (pid), 1, 2 and 3 seconds (no pid): two
+# reads would mean no wait at all, three a settle time a read short (#92).
+out=$(on_clock stop_worker pid nopid -- --settle 2 --interval 1 2>&1); rc=$?
 check "stop: no pid for the settle time is stopped" "0 stopped c2a368ee
 released c2a368ee" "$rc $out"
-# Two reads would mean no wait at all; a slow read can land a second late
-# and end the settle time a read early, so three or four are both right.
-n=$(command cat "$fake/count")
-check "stop: waits out the settle time" "yes" "$([ "$n" -ge 3 ] && [ "$n" -le 4 ] && echo yes || echo "no ($n reads)")"
+check "stop: waits out the settle time" "4 reads 3s" "$(command cat "$fake/count") reads $(clock_slept)s"
 printf 'c2a368ee\ndistribution\n' >"$marker"
-stop_worker nopid pid nopid -- --settle 1 --interval 1 >/dev/null 2>&1
-check "stop: a pid starts the settle time over" "4" "$(command cat "$fake/count")"
+on_clock stop_worker nopid pid nopid -- --settle 1 --interval 1 >/dev/null 2>&1
+check "stop: a pid starts the settle time over" "4 reads 3s" "$(command cat "$fake/count") reads $(clock_slept)s"
 
 # stop.sh waits too until the daemon's roster drops the job (#185), so a
 # resume after it wakes the worker.

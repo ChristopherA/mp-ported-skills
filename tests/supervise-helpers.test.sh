@@ -15,7 +15,8 @@
 # in its folder, staying on the last, and fails when FAKE_AGENTS_FAIL is
 # set. With FAKE_AGENTS_HANG=N, its first N such calls print part of a
 # list, ignore TERM, ALRM, HUP and INT, and sleep for 601 seconds. With each list N it writes roster.N, when there is one, as the
-# daemon's roster file, so the roster changes with the list. Touches
+# daemon's roster file, so the roster changes with the list. The
+# settle-time case runs on a fake `date` and `sleep` (#92). Touches
 # nothing outside its own mktemp directory.
 #
 # Usage: sh tests/supervise-helpers.test.sh
@@ -71,6 +72,15 @@ chmod +x "$work/bin/claude"
 PATH="$work/bin:$PATH"
 [ "$(command -v claude)" = "$work/bin/claude" ] || {
     echo "FAIL the fake claude is not the one found; not running the rest"
+    exit 1
+}
+
+# The settle-time case runs on a fake clock (#92). It is on PATH only
+# inside on_clock, since the hung-read fake sleeps for real.
+. "$root/tests/fake-clock.sh"
+fake_clock_install "$work/clock"
+[ "$(PATH="$work/clock:$PATH" command -v date) $(PATH="$work/clock:$PATH" command -v sleep)" = "$work/clock/date $work/clock/sleep" ] || {
+    echo "FAIL the fake clock is not first on PATH; not running the rest"
     exit 1
 }
 
@@ -209,12 +219,13 @@ out=$(stop_and_settle c2a368ee 0 0 300 settle_row); rc=$?
 check "no pid for the settle time reads as stopped" "0 stopped" "$rc $out"
 
 # A pid showing again starts the settle time over: with a 1-second settle,
-# nopid, pid, nopid, nopid... ends only after the pid, so at least two reads
-# follow it.
+# nopid, pid, nopid, nopid ends only after the pid. On the fake clock the
+# reads land at 0, 1, 2 and 3 seconds, and the no-pid row read again at 2
+# has lasted 1 second at 3.
 lists "$(row done null)" "$(row running 101)" "$(row done null)"
-out=$(stop_and_settle c2a368ee 1 1 300 settle_row); rc=$?
+out=$(on_clock stop_and_settle c2a368ee 1 1 300 settle_row); rc=$?
 reads=$(grep -c '^agents' "$work/claude-calls")
-check "a pid showing again restarts the settle time" "0 stopped yes" "$rc $out $([ "$reads" -ge 4 ] && echo yes)"
+check "a pid showing again restarts the settle time" "0 stopped 4 reads 3s" "$rc $out $reads reads $(clock_slept)s"
 
 lists "$(row running 101)"
 out=$(stop_and_settle c2a368ee 60 0 0 settle_row); rc=$?
