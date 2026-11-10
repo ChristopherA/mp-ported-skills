@@ -45,8 +45,10 @@
 #                            end, its calls and tokens, the worker's and its
 #                            subagents' (a subagent call by its time), and
 #                            its cost: the cost-state row that closes it less
-#                            the one closing the turn before, or unknown,
-#                            with a note, when either is missing
+#                            the last row before it; a turn no row closes
+#                            reads unknown, with a note, and the next turn a
+#                            row closes shows its cost as covering it too
+#                            ("$0.55 for turns 1 to 2")
 # * supervisor since launch  the supervisor transcript's calls and tokens
 #                            after launch, and its cost-state total less the
 #                            last one written before launch
@@ -235,6 +237,7 @@ note() { notes="${notes}- note: $1
 defs='
 def asks: [splits("\n") | sub("[\\s`*_\")]+$"; "") | select(. != "")] | last // "" | endswith("?");
 def epoch: sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601;
+def epoch_or_null: if . == null then null else try epoch catch null end;
 def stamp: sub("\\.[0-9]+Z$"; "Z");
 def span: (. / 60 | round) as $m
     | if . < 60 then "under a minute" elif $m < 60 then "\($m) min" else "\($m / 60 | floor) h \($m % 60) min" end;
@@ -437,11 +440,13 @@ if [ -n "$sid" ]; then
             | def names: if length == 1 then "turn \(.[0])"
                          else "turns " + (.[:-1] | map(tostring) | join(", ")) + " and \(last)" end;
             [range(length) | select($t[.].cost == null) | . + 1] as $open
-            | [range(length) | select($t[.].cost == null or (. > 0 and $t[. - 1].cost == null)) | . + 1] as $unk
+            | [range(length) as $i | select($t[$i].cost != null and $i > 0 and $t[$i - 1].cost == null)
+               | (([range($i) | select($t[.].cost != null)] | last) // -1) as $j
+               | "turn \($i + 1)'"'"'s cost covers turns \($j + 2) to \($i + 1)"] as $cover
             | select($open | length > 0)
             | "no cost-state row closes \($open | names), so "
-              + (if $unk != $open then "the cost of \($unk | names) was"
-                 elif ($open | length) == 1 then "its cost was" else "their costs were" end) + " not read"')
+              + (if ($open | length) == 1 then "its cost was" else "their costs were" end) + " not read"
+              + ($cover | map("; " + .) | add // "")')
         [ -z "$turn_note" ] || note "$turn_note"
     fi
 fi
@@ -456,7 +461,7 @@ if [ "$(printf '%s' "$worker" | jq -r '.calls != null')" = true ]; then
     for t in "$(transcript_subagents_dir "$wt")"/*.jsonl; do
         [ -f "$t" ] || continue
         if s=$(jq -cs "$defs"'[.[] | objects] | calls
-                | map({at: (.timestamp // null | if . == null then null else try epoch catch null end), tokens: tokens})' \
+                | map({at: (.timestamp // null | epoch_or_null), tokens: tokens})' \
                 "$t" 2>/dev/null); then
             subs_json=$(jq -cn --argjson a "$subs_json" --argjson b "$s" '$a + $b')
             subcalls=$((subcalls + $(printf '%s' "$s" | jq length)))
@@ -712,7 +717,7 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
       # subagent call is in the turn whose start is the last at or before it.
       (($w.turns // null) as $t
        | if $t == null then "- turns: unknown"
-         else ($t | map(.at | if . == null then null else try epoch catch null end)) as $s
+         else ($t | map(.at | epoch_or_null)) as $s
          | ($t | length) as $k
          | (if $subs == null or ($s | any(. == null)) or ($subs | any(.at == null)) then null
             else [range($k) as $i | [$subs[] | select(($i == 0 or .at >= $s[$i]) and ($i == $k - 1 or .at < $s[$i + 1]))]] end) as $by
@@ -721,14 +726,16 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
             | "  - turn \($i + 1), \($u.prompt): "
               + (if $s[$i] == null then "start unknown" else $u.at | stamp end)
               + (if $u.end == null then ", not ended"
-                 else ($u.end | try epoch catch null) as $ue
+                 else ($u.end | epoch_or_null) as $ue
                       | if $ue == null then ", end unknown"
                         else " to \($u.end | stamp)" + (if $s[$i] == null then "" else " (\($ue - $s[$i] | span))" end) end end)
               + (if $by == null then ", \(plural($u.calls; "API call")) by the \($who), its subagents unknown, \($u.tokens | size) tokens by the \($who)"
                  else ($by[$i] | length) as $n
                       | ", \(plural($u.calls + $n; "API call")), \($u.calls) by the \($who) and \($n) by its subagents, \($u.tokens + ($by[$i] | map(.tokens) | add // 0) | size) tokens" end)
-              + (if $u.cost == null or ($i > 0 and $t[$i - 1].cost == null) then ", cost unknown"
-                 else ", \($u.cost - (if $i == 0 then 0 else $t[$i - 1].cost end) | money)" end))
+              + (if $u.cost == null then ", cost unknown"
+                 else (([range($i) | select($t[.].cost != null)] | last) // -1) as $j
+                      | ", \($u.cost - (if $j < 0 then 0 else $t[$j].cost end) | money)"
+                        + (if $j == $i - 1 then "" else " for turns \($j + 2) to \($i + 1)" end) end))
          end),
       (select($hand | not) | "- supervisor since launch: \(if $sup == "" then "unknown" else $sup end)"),
       (select($hand | not) | "- supervisor context: \(if $supctx == "" then "unknown" else $supctx end)"),

@@ -792,12 +792,12 @@ check "record: a hand run leaves out the job fields" "## Hand run of #56
   - turn 5, \"typed text\": 2026-09-25T20:32:01Z to 2026-09-25T20:32:04Z (under a minute), 1 API call, 1 by the session and 0 by its subagents, 79k tokens, cost unknown
   - turn 6, /mp-ported-skills:install-statusline: 2026-09-25T20:32:16Z to 2026-09-25T20:32:39Z (under a minute), 5 API calls, 5 by the session and 0 by its subagents, 404k tokens, cost unknown
   - turn 7, \"typed text\": 2026-09-25T20:33:03Z to 2026-09-25T20:33:44Z (under a minute), 6 API calls, 6 by the session and 0 by its subagents, 519k tokens, cost unknown
-  - turn 8, \"typed text\": 2026-09-25T20:51:37Z to 2026-09-25T20:52:06Z (under a minute), 4 API calls, 4 by the session and 0 by its subagents, 364k tokens, cost unknown
+  - turn 8, \"typed text\": 2026-09-25T20:51:37Z to 2026-09-25T20:52:06Z (under a minute), 4 API calls, 4 by the session and 0 by its subagents, 364k tokens, \$2.19 for turns 1 to 8
 - peak zone: 61%
 - captures and clears: 1 capture, 1 clear
 - human interventions: 5 messages typed into the session
 - outcome: 2 commits after $short, ticket #56 CLOSED
-- note: no cost-state row closes turns 1, 2, 3, 4, 5, 6 and 7, so the cost of turns 1, 2, 3, 4, 5, 6, 7 and 8 was not read" "$out"
+- note: no cost-state row closes turns 1, 2, 3, 4, 5, 6 and 7, so their costs were not read; turn 8's cost covers turns 1 to 8" "$out"
 
 # The peak matches glance's reading of the same call: the status line
 # records input plus cache read and written as the zone's tokens.
@@ -982,15 +982,16 @@ check "turns: the run's calls stay the total" "7, 4 by the worker and 3 by its s
 check "turns: the run's turn end is the last" "2026-09-29T06:30:40Z, 29 min after launch" "$(field 'turn ended' "$out")"
 check "turns: the run's cost stays the total" "\$9.00 in all" "$(field 'tokens and cost' "$out" | sed 's/.*; //')"
 check "turns: no turn note when every turn is closed" "" "$(printf '%s\n' "$out" | grep '^- note: no cost-state row closes')"
-# No row between the turns: neither turn's cost is known, and a note says why.
+# No row between the turns: turn 1's cost is unknown, and the row closing
+# turn 2 shows as covering both.
 two_turns
 jq -c 'select(.type != "cost-state" or .totalCostUSD == 9)' "$cfg/projects/-work-project/$sid.jsonl" >"$work/t"
 command mv "$work/t" "$cfg/projects/-work-project/$sid.jsonl"
 out=$(record --now 2026-09-29T06:31:00Z)
-check "turns: no row between, neither cost known" "- turns:
+check "turns: no row between, the later row covers both" "- turns:
 $turn1, cost unknown
-$turn2, cost unknown" "$(turns "$out")"
-check "turns: no row between, named" "- note: no cost-state row closes turn 1, so the cost of turns 1 and 2 was not read" \
+$turn2, \$9.00 for turns 1 to 2" "$(turns "$out")"
+check "turns: no row between, named" "- note: no cost-state row closes turn 1, so its cost was not read; turn 2's cost covers turns 1 to 2" \
     "$(printf '%s\n' "$out" | grep '^- note: no cost-state row closes')"
 # No row after the last turn: that turn's cost is unknown, never zero.
 two_turns 'select(.type != "cost-state")'
@@ -1002,20 +1003,32 @@ check "turns: no closing row, named" "- note: no cost-state row closes turn 2, s
     "$(printf '%s\n' "$out" | grep '^- note: no cost-state row closes')"
 # A worker's record waits for the row claude stop writes to close its last
 # turn, though an earlier turn's row is already there: without the wait,
-# turn 1's row would read as the run's total.
+# turn 1's row would read as the run's total. On the fake clock, a sleep
+# that brings the clock to two seconds also writes the row.
+. "$root/tests/fake-clock.sh"
+fake_clock_install "$work/late-clock"
+command mv "$work/late-clock/sleep" "$work/late-clock/sleep.base"
+cost 9.00 '{"claude-sonnet-5": {"inputTokens": 6, "outputTokens": 700, "cacheReadInputTokens": 421000,
+    "cacheCreationInputTokens": 27805000, "costUSD": 8.98}}' >"$work/late-row"
+cat >"$work/late-clock/sleep" <<EOF
+#!/bin/sh
+"$work/late-clock/sleep.base" "\$@" || exit
+[ \$((\$(cat "$work/late-clock/now") - $fake_clock_start)) = 2 ] || exit 0
+cat "$work/late-row" >>"$cfg/projects/-work-project/$sid.jsonl"
+EOF
+chmod +x "$work/late-clock/sleep"
 two_turns 'select(.type != "cost-state")'
-(sleep 2; cost 9.00 '{"claude-sonnet-5": {"inputTokens": 6, "outputTokens": 700, "cacheReadInputTokens": 421000,
-    "cacheCreationInputTokens": 27805000, "costUSD": 8.98}}' >>"$cfg/projects/-work-project/$sid.jsonl") &
-out=$( (export MP_RECORD_COST_WAIT=10; record --now 2026-09-29T06:31:00Z) )
-wait
-check "turns: a worker waits for the row closing its last turn" "- turns:
+out=$(on_clock sh -c 'export MP_RECORD_COST_WAIT=10; PATH="$1:$PATH" sh "$2/record.sh" --id c2a368ee --dir "$3" \
+    --start "$4" --ticket 56 --supervisor "$5" --now 2026-09-29T06:31:00Z </dev/null' \
+    sh "$work/bin" "$scripts" "$repo" "$start" "$sup")
+check "turns: a worker waits for the row closing its last turn" "2" "$(clock_slept)"
+check "turns: the row written in the wait splits the cost" "- turns:
 $turn1, \$8.45
 $turn2, \$0.55" "$(turns "$out")"
+fake_clock_install "$work/clock"
 # A --session record is of a session that may be live, whose current turn
 # has no closing row yet, so it does not wait for one once a row is there.
 two_turns 'select(.type != "cost-state")'
-. "$root/tests/fake-clock.sh"
-fake_clock_install "$work/clock"
 out=$(on_clock sh -c 'export MP_RECORD_COST_WAIT=5; PATH="$1:$PATH" sh "$2/record.sh" --session "$3" --dir "$4" \
     --start "$5" --ticket 56 --now 2026-09-29T06:31:00Z </dev/null' sh "$work/bin" "$scripts" "$sid" "$repo" "$start")
 check "turns: a --session record does not wait for its last turn's row" "0" "$(clock_slept)"
