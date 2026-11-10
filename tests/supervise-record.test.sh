@@ -177,6 +177,8 @@ check "record: the whole record" "## Supervised run of #56
 - approval waits: none
 - API calls: 5, 3 by the worker and 2 by its subagents
 - tokens and cost: claude-haiku-4-5-20251001 20k tokens \$0.02; claude-sonnet-5 28.0M tokens \$8.43; \$8.45 in all
+- turns:
+  - turn 1, /mattpocock-skills:implement: 2026-09-29T06:01:25Z to 2026-09-29T06:14:24Z (13 min), 5 API calls, 3 by the worker and 2 by its subagents, 502k tokens, \$8.45
 - supervisor since launch: 2 API calls, 183k tokens, \$0.54
 - supervisor context: 90k (60% of zone) at launch, 92k (61%) at report
 - peak zone: 174%, past 100% from worker call 2
@@ -402,7 +404,7 @@ check "settled: the record counts the capture" "1 capture" "$(field 'captures an
 check "settled: no wait on a human, no typed message" "none" "$(field 'human interventions' "$out")"
 check "settled: the record shows the one push" \
     "  - branch origin/main pushed by the supervisor on the maintainer's approval: holds the worker's commits" \
-    "$(printf '%s\n' "$out" | grep '^  - ')"
+    "$(printf '%s\n' "$out" | grep '^  - ' | grep -v '^  - turn ')"
 check "settled: the outcome holds both commits" "2 commits after $(git -C "$settled" rev-parse --short "$settled_start"), ticket #56 CLOSED" \
     "$(field outcome "$out")"
 
@@ -427,6 +429,8 @@ check "record: a recorded job" "## Supervised run of #56
 - approval waits: none
 - API calls: 2, 2 by the worker and 0 by its subagents
 - tokens and cost: claude-sonnet-5 147k tokens \$0.31; \$0.31 in all
+- turns:
+  - turn 1, \"typed text\": 2026-09-30T05:46:18Z to 2026-09-30T05:46:26Z (under a minute), 2 API calls, 2 by the worker and 0 by its subagents, 147k tokens, \$0.31
 - supervisor since launch: 0 API calls, 0 tokens, \$0.00
 - supervisor context: 92k (61% of zone) at launch, 92k (61%) at report
 - peak zone: 49%
@@ -780,10 +784,20 @@ check "record: a hand run leaves out the job fields" "## Hand run of #56
 - turn ended: 2026-09-25T20:52:06Z, 44 min after the start
 - API calls: 55, 44 by the session and 11 by its subagents
 - tokens and cost: claude-haiku-4-5-20251001 904 tokens \$0.00; claude-opus-5-5 4.2M tokens \$2.19; \$2.19 in all
+- turns:
+  - turn 1, /mp-ported-skills:next: 2026-09-25T20:07:54Z to 2026-09-25T20:08:03Z (under a minute), 2 API calls, 2 by the session and 0 by its subagents, 98k tokens, cost unknown
+  - turn 2, /mattpocock-skills:implement: 2026-09-25T20:08:34Z to 2026-09-25T20:13:30Z (5 min), 28 API calls, 17 by the session and 11 by its subagents, 1.4M tokens, cost unknown
+  - turn 3, \"typed text\": 2026-09-25T20:20:34Z to 2026-09-25T20:21:08Z (under a minute), 5 API calls, 5 by the session and 0 by its subagents, 348k tokens, cost unknown
+  - turn 4, \"typed text\": 2026-09-25T20:31:28Z to 2026-09-25T20:31:44Z (under a minute), 4 API calls, 4 by the session and 0 by its subagents, 289k tokens, cost unknown
+  - turn 5, \"typed text\": 2026-09-25T20:32:01Z to 2026-09-25T20:32:04Z (under a minute), 1 API call, 1 by the session and 0 by its subagents, 79k tokens, cost unknown
+  - turn 6, /mp-ported-skills:install-statusline: 2026-09-25T20:32:16Z to 2026-09-25T20:32:39Z (under a minute), 5 API calls, 5 by the session and 0 by its subagents, 404k tokens, cost unknown
+  - turn 7, \"typed text\": 2026-09-25T20:33:03Z to 2026-09-25T20:33:44Z (under a minute), 6 API calls, 6 by the session and 0 by its subagents, 519k tokens, cost unknown
+  - turn 8, \"typed text\": 2026-09-25T20:51:37Z to 2026-09-25T20:52:06Z (under a minute), 4 API calls, 4 by the session and 0 by its subagents, 364k tokens, cost unknown
 - peak zone: 61%
 - captures and clears: 1 capture, 1 clear
 - human interventions: 5 messages typed into the session
-- outcome: 2 commits after $short, ticket #56 CLOSED" "$out"
+- outcome: 2 commits after $short, ticket #56 CLOSED
+- note: no cost-state row closes turns 1, 2, 3, 4, 5, 6 and 7, so the cost of turns 1, 2, 3, 4, 5, 6, 7 and 8 was not read" "$out"
 
 # The peak matches glance's reading of the same call: the status line
 # records input plus cache read and written as the zone's tokens.
@@ -934,6 +948,67 @@ check "dist: --session counts the Distribution repo" \
 # --dist-start for a Project with no Distribution repo is a usage error.
 record --dist-start "$start" >/dev/null 2>&1
 check "dist: --dist-start with no Distribution repo exits 1" "1" "$?"
+
+# A run of two turns (#99): the build, the cost-state row claude stop wrote
+# when resume.sh stopped the worker, a /clear that opens no turn, then the
+# capture follow-up the resume sent, with a subagent call of its own, and
+# the row the last stop wrote. Each turn gets its own calls, tokens, times
+# and cost, and the run's totals stay the whole session's.
+two_turns() { # [jq filter for the second turn's rows]
+    setup
+    {
+        said 2026-09-29T06:29:00.000Z '<command-name>/clear</command-name>'
+        said 2026-09-29T06:30:00.000Z '<command-message>mp-ported-skills:capturing</command-message>
+<command-name>/mp-ported-skills:capturing</command-name>'
+        call 2026-09-29T06:30:10.000Z r4 claude-sonnet-5 1 200000 5000 100
+        ended 2026-09-29T06:30:40.000Z
+        cost 9.00 '{"claude-sonnet-5": {"inputTokens": 6, "outputTokens": 700, "cacheReadInputTokens": 421000,
+            "cacheCreationInputTokens": 27805000, "costUSD": 8.98},
+            "claude-haiku-4-5-20251001": {"inputTokens": 15, "outputTokens": 100, "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 21000, "costUSD": 0.0222}}'
+    } | jq -c "${1:-.}" >>"$cfg/projects/-work-project/$sid.jsonl"
+    call 2026-09-29T06:30:20.000Z b1 claude-haiku-4-5-20251001 5 0 1000 10 \
+        >"$cfg/projects/-work-project/$sid/subagents/agent-b1.jsonl"
+}
+turn1="  - turn 1, /mattpocock-skills:implement: 2026-09-29T06:01:25Z to 2026-09-29T06:14:24Z (13 min), 5 API calls, 3 by the worker and 2 by its subagents, 502k tokens"
+turn2="  - turn 2, /mp-ported-skills:capturing: 2026-09-29T06:30:00Z to 2026-09-29T06:30:40Z (under a minute), 2 API calls, 1 by the worker and 1 by its subagents, 206k tokens"
+turns() { printf '%s\n' "$1" | sed -n '/^- turns:/,/^- [a-z]/p' | sed '$d'; }
+two_turns
+out=$(record --now 2026-09-29T06:31:00Z)
+check "turns: two turns, cost split at the row between them" "- turns:
+$turn1, \$8.45
+$turn2, \$0.55" "$(turns "$out")"
+check "turns: the run's calls stay the total" "7, 4 by the worker and 3 by its subagents" "$(field 'API calls' "$out")"
+check "turns: the run's turn end is the last" "2026-09-29T06:30:40Z, 29 min after launch" "$(field 'turn ended' "$out")"
+check "turns: the run's cost stays the total" "\$9.00 in all" "$(field 'tokens and cost' "$out" | sed 's/.*; //')"
+check "turns: no turn note when every turn is closed" "" "$(printf '%s\n' "$out" | grep '^- note: no cost-state row closes')"
+# No row between the turns: neither turn's cost is known, and a note says why.
+two_turns
+jq -c 'select(.type != "cost-state" or .totalCostUSD == 9)' "$cfg/projects/-work-project/$sid.jsonl" >"$work/t"
+command mv "$work/t" "$cfg/projects/-work-project/$sid.jsonl"
+out=$(record --now 2026-09-29T06:31:00Z)
+check "turns: no row between, neither cost known" "- turns:
+$turn1, cost unknown
+$turn2, cost unknown" "$(turns "$out")"
+check "turns: no row between, named" "- note: no cost-state row closes turn 1, so the cost of turns 1 and 2 was not read" \
+    "$(printf '%s\n' "$out" | grep '^- note: no cost-state row closes')"
+# No row after the last turn: that turn's cost is unknown, never zero.
+two_turns 'select(.type != "cost-state")'
+out=$(record --now 2026-09-29T06:31:00Z)
+check "turns: no closing row, cost unknown" "- turns:
+$turn1, \$8.45
+$turn2, cost unknown" "$(turns "$out")"
+check "turns: no closing row, named" "- note: no cost-state row closes turn 2, so its cost was not read" \
+    "$(printf '%s\n' "$out" | grep '^- note: no cost-state row closes')"
+# A single-turn run has one turn line and no turn note.
+setup
+out=$(record)
+check "turns: one turn" "- turns:
+$turn1, \$8.45" "$(turns "$out")"
+check "turns: one turn, no note" "" "$(printf '%s\n' "$out" | grep '^- note: no cost-state row closes')"
+# An unread transcript has unknown turns.
+command rm -rf "$cfg/projects/-work-project"
+check "turns: no worker transcript" "unknown" "$(field turns "$(record)")"
 
 # A worker that made no API calls has no zone reading, and says why.
 setup

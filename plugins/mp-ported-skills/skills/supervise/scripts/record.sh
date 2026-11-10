@@ -32,7 +32,19 @@
 #                            transcript holds none yet, the record waits up
 #                            to MP_RECORD_COST_WAIT seconds (default 10) for
 #                            the one `claude stop` writes a moment after the
-#                            stop (#86)
+#                            stop (#86), and for the one that closes the
+#                            last turn
+#   turns                    one line per turn (#99): the launch prompt and
+#                            each follow-up, opened by the first prompt after
+#                            a turn end with no agents pending (a prompt
+#                            that opens no API call, such as /clear, gives
+#                            way to the next). Each names its prompt (a
+#                            slash command by its name), its start and turn
+#                            end, its calls and tokens, the worker's and its
+#                            subagents' (a subagent call by its time), and
+#                            its cost: the cost-state row that closes it less
+#                            the one closing the turn before, or unknown,
+#                            with a note, when either is missing
 # * supervisor since launch  the supervisor transcript's calls and tokens
 #                            after launch, and its cost-state total less the
 #                            last one written before launch
@@ -269,6 +281,12 @@ read_worker() {
         # The text of the last line starting `Waiting on:`, less markdown.
         def waiting: [splits("\n") | select(test("^[`* ]*Waiting on:"))] | last
             | if . == null then null else gsub("[`*]"; "") | sub("^\\s+"; "") | sub("\\s+$"; "") end;
+        # A prompt as a turn line names it: a slash command by its name,
+        # plain text by its first line, quoted, cut to 60 characters.
+        def prompt_label: (capture("<command-name>(?<c>[^<]*)</command-name>") | .c)
+            // (capture("<command-message>(?<c>[^<]*)</command-message>") | "/" + .c)
+            // (split("\n") | map(select(test("\\S"))) | first // ""
+                | if length > 60 then .[0:57] + "..." else . end | "\"\(.)\"");
         [.[] | objects] as $rows
         # AskUserQuestion calls answered through claude attach: the answer
         # comes back as a tool_result, the answers in the row'"'"'s
@@ -339,6 +357,34 @@ read_worker() {
                else . end) | .list),
            answers: [$rows[] | select(.type == "user" and (.isMeta // false | not)) | text // empty
                      | capture("^\\[supervisor answer to \"(?<q>.*)\"\\] (?<a>[^.!?]*[.!?]?)")],
+           # Turns in file order (#99): a turn opens at the first prompt
+           # after the last turn end with no agents pending, and holds the
+           # calls and cost-state rows up to the next such prompt. A turn
+           # with no calls yet gives way to the next prompt, so a /clear or
+           # /plugin before a prompt opens no turn of its own.
+           turns: (reduce $rows[] as $r ({closed: true, seen: {}, list: []};
+               (.list | length - 1) as $n
+               | ($r | text) as $t
+               | if $r.type == "user" and ($r.isMeta // false | not) and ($r.origin.kind? != "task-notification")
+                    and $t != null then
+                   {at: ($r.timestamp // null), prompt: ($t | prompt_label), end: null, calls: 0, tokens: 0, cost: null} as $new
+                   | if $n >= 0 and .list[$n].calls == 0 and (.closed | not) then .list[$n] = $new
+                     elif .closed then .list += [$new] | .closed = false
+                     else . end
+                 elif $n < 0 then .
+                 elif $r.type == "assistant" and $r.message.usage != null then
+                   ($r.requestId // $r.message.id // "") as $k
+                   | if $k != "" and .seen[$k] then .
+                     else .seen[$k] = true | .list[$n].calls += 1 | .list[$n].tokens += ($r | tokens) end
+                 elif $r.type == "system" and $r.subtype == "turn_duration"
+                      and ($r.pendingBackgroundAgentCount // 0) == 0 then
+                   .list[$n].end = ($r.timestamp // null) | .closed = true
+                 elif $r.type == "cost-state" then
+                   # A prompt that opened no work since does not take the row
+                   # claude stop writes: the turn before it does.
+                   (if .list[$n].calls == 0 and $n > 0 then $n - 1 else $n end) as $i
+                   | .list[$i].cost = ($r.totalCostUSD // 0)
+                 else . end) | .list | map(select(.calls > 0))),
            usage: ([$rows[] | select(.type == "cost-state")] | last
                    | if . == null then null
                      else {total: (.totalCostUSD // 0),
@@ -361,9 +407,11 @@ if [ -n "$sid" ]; then
         note "transcript $wt could not be read, so its calls, cost, zone, captures and typed messages were not read"
         worker='{}'
     else
-        # claude stop writes the cost-state row a moment after the stop.
+        # claude stop writes the cost-state row a moment after the stop, and
+        # that row closes the last turn.
         waited=0
-        while [ "$(printf '%s' "$worker" | jq -r '.usage == null')" = true ] && [ "$waited" -lt "$cost_wait" ]; do
+        while [ "$(printf '%s' "$worker" | jq -r '.usage == null or ((.turns // []) | length > 0 and (last.cost == null))')" = true ] &&
+            [ "$waited" -lt "$cost_wait" ]; do
             sleep 1
             waited=$((waited + 1))
             read_worker || break
@@ -377,20 +425,40 @@ if [ -n "$sid" ]; then
         fi
         [ "$(printf '%s' "$worker" | jq -r '.turnEnd == null')" = false ] ||
             note "the transcript holds no turn end, so its turn had not ended when this was recorded"
+        # A turn's cost is its closing cost-state row less the one closing
+        # the turn before it, so it needs both. One note names every turn
+        # with no closing row, and every turn whose cost is unknown for it.
+        turn_note=$(printf '%s' "$worker" | jq -r '.turns // [] | . as $t
+            | def names: if length == 1 then "turn \(.[0])"
+                         else "turns " + (.[:-1] | map(tostring) | join(", ")) + " and \(last)" end;
+            [range(length) | select($t[.].cost == null) | . + 1] as $open
+            | [range(length) | select($t[.].cost == null or (. > 0 and $t[. - 1].cost == null)) | . + 1] as $unk
+            | select($open | length > 0)
+            | "no cost-state row closes \($open | names), so "
+              + (if $unk != $open then "the cost of \($unk | names) was"
+                 elif ($open | length) == 1 then "its cost was" else "their costs were" end) + " not read"')
+        [ -z "$turn_note" ] || note "$turn_note"
     fi
 fi
 
-# Subagents' calls, only when the worker's own transcript was read.
+# Subagents' calls, only when the worker's own transcript was read, and each
+# call's time and tokens, which put it in a turn; null when unread.
 subcalls=""
+subs_json=null
 if [ "$(printf '%s' "$worker" | jq -r '.calls != null')" = true ]; then
     subcalls=0
+    subs_json='[]'
     for t in "$(transcript_subagents_dir "$wt")"/*.jsonl; do
         [ -f "$t" ] || continue
-        if n=$(jq -s "$defs"'[.[] | objects] | calls | length' "$t" 2>/dev/null); then
-            subcalls=$((subcalls + n))
+        if s=$(jq -cs "$defs"'[.[] | objects] | calls
+                | map({at: (.timestamp // null | if . == null then null else try epoch catch null end), tokens: tokens})' \
+                "$t" 2>/dev/null); then
+            subs_json=$(jq -cn --argjson a "$subs_json" --argjson b "$s" '$a + $b')
+            subcalls=$((subcalls + $(printf '%s' "$s" | jq length)))
         else
             note "subagent transcript $t could not be read, so its calls were not counted"
             subcalls=""
+            subs_json=null
             break
         fi
     done
@@ -586,7 +654,7 @@ fi
 
 # --- print -----------------------------------------------------------------
 jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launched "$launched" --arg now "$NOW" \
-    --argjson w "$worker" --arg sub "$subcalls" --arg sup "$supervisor" --arg supctx "$sup_context" --arg waits "$waits" \
+    --argjson w "$worker" --arg sub "$subcalls" --argjson subs "$subs_json" --arg sup "$supervisor" --arg supctx "$sup_context" --arg waits "$waits" \
     --arg actions "$actions" --arg short "$short" --arg count "$count" --arg children "$children" \
     --arg ticket "$ticket" --arg n "$TICKET" --argjson ap "$approvals_json" --argjson wr "$watches_json" --arg pb "$parked_branch" \
     --arg dist "$dist_outcome" --arg dcount "$dist_count" --arg dshort "$dist_short" "$defs"'
@@ -635,6 +703,26 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
       "- tokens and cost: \(if $w.usage == null then "unknown"
                             else ([$w.usage.models | sort_by(.model)[] | "\(.model) \(.tokens | size) tokens \(.cost | money)"]
                                   + ["\($w.usage.total | money) in all"]) | join("; ") end)",
+      # Each turn with its own calls, tokens, times and cost (#99). A
+      # subagent call is in the turn whose start is the last at or before it.
+      (($w.turns // null) as $t
+       | if $t == null then "- turns: unknown"
+         else ($t | map(.at | if . == null then null else epoch end)) as $s
+         | ($t | length) as $k
+         | (if $subs == null or ($s | any(. == null)) or ($subs | any(.at == null)) then null
+            else [range($k) as $i | [$subs[] | select(($i == 0 or .at >= $s[$i]) and ($i == $k - 1 or .at < $s[$i + 1]))]] end) as $by
+         | "- turns:\(if $k == 0 then " none" else "" end)",
+           (range($k) as $i | $t[$i] as $u
+            | "  - turn \($i + 1), \($u.prompt): "
+              + (if $u.at == null then "start unknown" else $u.at | stamp end)
+              + (if $u.end == null then ", not ended"
+                 else " to \($u.end | stamp)" + (if $u.at == null then "" else " (\(($u.end | epoch) - $s[$i] | span))" end) end)
+              + (if $by == null then ", \(plural($u.calls; "API call")) by the \($who), its subagents unknown, \($u.tokens | size) tokens by the \($who)"
+                 else ($by[$i] | length) as $n
+                      | ", \(plural($u.calls + $n; "API call")), \($u.calls) by the \($who) and \($n) by its subagents, \($u.tokens + ($by[$i] | map(.tokens) | add // 0) | size) tokens" end)
+              + (if $u.cost == null or ($i > 0 and $t[$i - 1].cost == null) then ", cost unknown"
+                 else ", \($u.cost - (if $i == 0 then 0 else $t[$i - 1].cost end) | money)" end))
+         end),
       (select($hand | not) | "- supervisor since launch: \(if $sup == "" then "unknown" else $sup end)"),
       (select($hand | not) | "- supervisor context: \(if $supctx == "" then "unknown" else $supctx end)"),
       "- peak zone: \(if $w.calls == null then "unknown"
