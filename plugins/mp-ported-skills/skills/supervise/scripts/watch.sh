@@ -12,6 +12,23 @@
 #   blocked <what>     waiting on a human: `permission prompt`, `input needed`,
 #                      or `question` when claude agents names no waitingFor:
 #                      the worker asked in plain text (#85)
+#   blocked signing approval
+#                      its turn ended (done, or blocked on a question or a
+#                      `Waiting on:` line) while a commit signing helper it
+#                      started, `ssh-sk-helper` or `ssh-keygen -Y sign`,
+#                      still runs: a Secure Enclave or Touch ID approval
+#                      waits at the Mac, which only the maintainer can give
+#                      (#196). Its `needs biometric approval at the Mac: ...`
+#                      line names the helper, its pid and how long it has
+#                      waited; a `Waiting on:` action or the job's needs
+#                      becomes `note after the approval it waits on <text>`;
+#                      and an `after <epoch>` line gives the time the watch
+#                      returned. Once the maintainer approves, watch again
+#                      with `--after <epoch>`, which reads only the turn end
+#                      the worker writes after the signing finishes. The
+#                      helper is found among the descendants of the pid
+#                      claude agents lists, from `ps`; with no pid, or ps
+#                      failing, the state is as before.
 #   parked             its turn ended on a line starting `Parked:`: an
 #                      unattended worker parked its ticket on a question
 #                      only the maintainer can answer (#158)
@@ -177,7 +194,7 @@ while [ $# -gt 0 ]; do
         --stall)    need_value "$@"; STALL="$2"; shift 2 ;;
         --help)
             printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--wait-blocked] [--detail PATH [--capture]] [--interval S] [--timeout S] [--stall S] | watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--wait-blocked] [--detail PATH [--capture]] --file PATH | watch.sh --dir DIR --snapshot\n'
-            printf 'Prints: working, moved, done, parked, capture-due, hang, blocked <what>, stopped, gone or unknown <state>; then cwd, reading, needs, question, worktree, branch and commit lines.\n'
+            printf 'Prints: working, moved, done, blocked signing approval, parked, capture-due, hang, blocked <what>, stopped, gone or unknown <state>; then cwd, reading, needs, after, question, worktree, branch and commit lines.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
@@ -358,6 +375,41 @@ ends_unasked() {
     jq -en --arg t "$text" "$QUESTION_JQ"'$t | asks | not' >/dev/null 2>&1
 }
 
+# signing_wait <agents json>: `<program> (pid <pid>) has waited <etime>` for
+# a commit signing helper among the worker's descendants, read from `ps`, or
+# empty when there is none, the list names no pid, or ps fails (#196).
+# ssh-sk-helper, which waits at the sensor, is named before the ssh-keygen
+# -Y sign that started it.
+signing_wait() {
+    pid=$(printf '%s' "$1" | jq -r --arg id "$ID" '
+        [.[] | select(.kind == "background" and .id == $id)] | first
+        | .pid // empty' 2>/dev/null)
+    case $pid in '' | *[!0-9]*) return 0 ;; esac
+    procs=$(ps -axo pid=,ppid=,etime=,command= </dev/null 2>/dev/null) || return 0
+    printf '%s\n' "$procs" | awk -v root="$pid" '
+        NF >= 4 {
+            parent[$1] = $2; etime[$1] = $3
+            c = $0; sub(/^[ \t]*[0-9]+[ \t]+[0-9]+[ \t]+[^ \t]+[ \t]+/, "", c)
+            n++; order[n] = $1; cmd[$1] = c
+        }
+        function mine(p,   a, d) {
+            for (a = parent[p]; a != "" && a != "0" && d < 64; a = parent[a]) {
+                if (a == root) return 1
+                d++
+            }
+            return 0
+        }
+        END {
+            for (i = 1; i <= n; i++) {
+                p = order[i]; split(cmd[p], w, " "); prog = w[1]; sub(/.*\//, "", prog)
+                if (prog == "ssh-sk-helper" && sk == "" && mine(p)) sk = p
+                if (prog == "ssh-keygen" && cmd[p] ~ / -Y sign( |$)/ && kg == "" && mine(p)) kg = p
+            }
+            if (sk != "") printf "ssh-sk-helper (pid %s) has waited %s\n", sk, etime[sk]
+            else if (kg != "") printf "ssh-keygen -Y sign (pid %s) has waited %s\n", kg, etime[kg]
+        }'
+}
+
 # session_id_of <agents json>: the job's sessionId, or empty when the list
 # cannot be read or names none. classify() only reads this for an idle
 # session (to call turn_ended); the stall check below needs it whatever the
@@ -526,6 +578,16 @@ report() {
                 fi ;;
         esac
     fi
+    case $out in
+        done* | "blocked question"* | "blocked input needed"*)
+            signing=$(signing_wait "$1")
+            if [ -n "$signing" ]; then
+                out=$(printf '%s\nneeds biometric approval at the Mac: %s\nafter %s' \
+                    "$(printf '%s\n' "$out" | sed -e '1s/.*/blocked signing approval/' \
+                        -e 's/^needs /note after the approval it waits on /')" \
+                    "$signing" "$(date +%s)")
+            fi ;;
+    esac
     if [ -n "$WAIT_BLOCKED" ]; then
         case $out in
             blocked*)
@@ -720,6 +782,7 @@ while :; do
     esac
     case $out in
         working*) ;;
+        "blocked signing approval"*) returned "$out"; verdict "$out" "$list"; exit 0 ;;
         blocked*)
             # With --wait-blocked, a block mid-turn is waited on while its
             # transcript grows; report() added the note to one whose turn
