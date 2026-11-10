@@ -444,8 +444,33 @@ check "distribution state: a detached HEAD" "0 (detached) main 0 1" "$(dstate "$
 check "distribution state: git status failing exits 1, dirty 0" "1 (detached) main 0 0" "$(dstate "$work/drepo/gone" 2>/dev/null)"
 
 # --- signing.sh ----------------------------------------------------------------
-# The ps reading itself is checked in tests/supervise-watch-signing.test.sh
-# and tests/supervise-zone.test.sh, through the scripts that source it.
+# signing_wait on a fake ps first on PATH. The worker is 85224; its shell
+# 900 runs git 901, ssh-keygen 902 and ssh-sk-helper 903. Session 700's
+# ssh-keygen 702 is another worker's. With FAKE_PS_FAIL the fake prints the
+# list and still exits 1, so only the status check keeps it from being read.
+mkdir -p "$work/psbin"
+cat >"$work/psbin/ps" <<'EOF'
+#!/bin/sh
+cat "$FAKE_PS"
+[ -z "${FAKE_PS_FAIL:-}" ]
+EOF
+chmod +x "$work/psbin/ps"
+[ "$(PATH="$work/psbin:$PATH" command -v ps)" = "$work/psbin/ps" ] || { echo "FAIL the fake ps is not first on PATH"; exit 1; }
+printf '%s\n' "  85224     1    1:02:03 claude --bg" \
+    "  900 85224      05:20 /bin/zsh -c git commit -S -s -m x" \
+    "  901   900      05:19 git commit -S -s -m x" \
+    "  902   901      05:19 ssh-keygen -Y sign -n git -f /k /b" \
+    "  903   902      05:18 /usr/libexec/ssh-sk-helper" \
+    "  700     1      02:00 claude --bg" \
+    "  702   700      01:58 ssh-keygen -Y sign -n git -f /k2 /b2" >"$work/ps.full"
+grep -v ssh-sk-helper "$work/ps.full" >"$work/ps.keygen"
+sw() { ( FAKE_PS="$work/$1"; export FAKE_PS; [ -z "${2:-}" ] || { FAKE_PS_FAIL=1; export FAKE_PS_FAIL; }
+    PATH="$work/psbin:$PATH"; . "$scripts/signing.sh"; signing_wait "$3" ); }
+check "signing: the worker's ssh-sk-helper is named first" "ssh-sk-helper (pid 903) has waited 05:18" "$(sw ps.full '' 85224)"
+check "signing: ssh-keygen -Y sign alone" "ssh-keygen -Y sign (pid 902) has waited 05:19" "$(sw ps.keygen '' 85224)"
+check "signing: another session's helper is not the worker's" "ssh-keygen -Y sign (pid 702) has waited 01:58" "$(sw ps.full '' 700)"
+check "signing: no helper under the pid" "" "$(sw ps.full '' 901000)"
+check "signing: ps failing reads as no helper" "" "$(sw ps.full fail 85224)"
 # The check lives only in signing.sh: no script carries its own copy (#206).
 skills="$root/plugins/mp-ported-skills/skills"
 copies=$(grep -l 'ssh-sk-helper (pid %s)' "$skills"/*/scripts/*.sh | sed "s|$skills/||")

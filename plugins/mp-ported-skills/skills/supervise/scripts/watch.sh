@@ -40,9 +40,12 @@
 #                      cut the commit mid-sign. A watch with --held <pid>,
 #                      the pid on the first watch's `helper` line, goes on
 #                      while that same helper waits, returns for any other,
-#                      and returns capture-due once it is gone. Below the
-#                      capture point a working worker's helper returns
-#                      nothing: only the turn end above reports it.
+#                      and returns capture-due once it is gone. --held holds
+#                      only the zone check: a turn that ends while the held
+#                      helper still waits returns it again, from the turn
+#                      end. Below the capture point a working worker's
+#                      helper returns nothing: only the turn end above
+#                      reports it.
 #   parked             its turn ended on a line starting `Parked:`: an
 #                      unattended worker parked its ticket on a question
 #                      only the maintainer can answer (#158)
