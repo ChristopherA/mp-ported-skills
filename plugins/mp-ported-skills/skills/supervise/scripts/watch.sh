@@ -25,10 +25,13 @@
 #                      and an `after <epoch>` line gives the time the watch
 #                      returned. Once the maintainer approves, watch again
 #                      with `--after <epoch>`, which reads only the turn end
-#                      the worker writes after the signing finishes. The
-#                      helper is found among the descendants of the pid
-#                      claude agents lists, from `ps`; with no pid, or ps
-#                      failing, the state is as before.
+#                      the worker writes after the signing finishes; while
+#                      the helper still waits, that watch goes on working
+#                      and never reports hang. The helper is found among the
+#                      descendants of the pid claude agents lists, from
+#                      `ps`; with no pid, or ps failing, the state is as
+#                      before. A `blocked input needed` that claude agents
+#                      names itself is a prompt mid-turn, and is left as it is.
 #   parked             its turn ended on a line starting `Parked:`: an
 #                      unattended worker parked its ticket on a question
 #                      only the maintainer can answer (#158)
@@ -392,7 +395,7 @@ signing_wait() {
             c = $0; sub(/^[ \t]*[0-9]+[ \t]+[0-9]+[ \t]+[^ \t]+[ \t]+/, "", c)
             n++; order[n] = $1; cmd[$1] = c
         }
-        function mine(p,   a, d) {
+        function descends(p,   a, d) {
             for (a = parent[p]; a != "" && a != "0" && d < 64; a = parent[a]) {
                 if (a == root) return 1
                 d++
@@ -402,8 +405,8 @@ signing_wait() {
         END {
             for (i = 1; i <= n; i++) {
                 p = order[i]; split(cmd[p], w, " "); prog = w[1]; sub(/.*\//, "", prog)
-                if (prog == "ssh-sk-helper" && sk == "" && mine(p)) sk = p
-                if (prog == "ssh-keygen" && cmd[p] ~ / -Y sign( |$)/ && kg == "" && mine(p)) kg = p
+                if (prog == "ssh-sk-helper" && sk == "" && descends(p)) sk = p
+                if (prog == "ssh-keygen" && cmd[p] ~ / -Y sign( |$)/ && kg == "" && descends(p)) kg = p
             }
             if (sk != "") printf "ssh-sk-helper (pid %s) has waited %s\n", sk, etime[sk]
             else if (kg != "") printf "ssh-keygen -Y sign (pid %s) has waited %s\n", kg, etime[kg]
@@ -578,18 +581,22 @@ report() {
                 fi ;;
         esac
     fi
+    # A blocked input needed counts only when a `Waiting on:` line made it:
+    # one claude agents names is a prompt mid-turn, not a turn that ended.
+    signing=""
     case $out in
-        done* | "blocked question"* | "blocked input needed"*)
-            signing=$(signing_wait "$1")
-            if [ -n "$signing" ]; then
-                out=$(printf '%s\nneeds biometric approval at the Mac: %s\nafter %s' \
-                    "$(printf '%s\n' "$out" | sed -e '1s/.*/blocked signing approval/' \
-                        -e 's/^needs /note after the approval it waits on /')" \
-                    "$signing" "$(date +%s)")
-            fi ;;
+        done* | "blocked question"*) signing=$(signing_wait "$1") ;;
+        "blocked input needed"*) [ -z "$waits" ] || signing=$(signing_wait "$1") ;;
     esac
+    if [ -n "$signing" ]; then
+        out=$(printf '%s\nneeds biometric approval at the Mac: %s\nafter %s' \
+            "$(printf '%s\n' "$out" | sed -e '1s/.*/blocked signing approval/' \
+                -e 's/^needs /note after the approval it waits on /')" \
+            "$signing" "$(date +%s)")
+    fi
     if [ -n "$WAIT_BLOCKED" ]; then
         case $out in
+            "blocked signing approval"*) ;;
             blocked*)
                 sid=$(session_id_of "$1")
                 if turn_ended "$sid"; then
@@ -773,7 +780,10 @@ while :; do
             size=$(transcript_size "$(session_id_of "$list")")
             if [ -z "$size" ]; then
                 stall_size="" stall_since=$now
-            elif [ "$size" != "$stall_size" ]; then
+            elif [ "$size" != "$stall_size" ] || [ -n "$(signing_wait "$list")" ]; then
+                # A signing helper still waiting holds the transcript
+                # steady: the second watch after a blocked signing
+                # approval waits for it, not a hang (#196).
                 stall_size=$size stall_since=$now
             elif [ $((now - stall_since)) -ge "$STALL" ]; then
                 out=$(printf '%s\n' "$out" | sed '1s/.*/hang/')

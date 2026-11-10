@@ -136,6 +136,13 @@ needs biometric approval at the Mac: ssh-keygen -Y sign (pid 902) has waited 05:
 after EPOCH" "$(watch_file done)"
 
 # --- what is not a pending approval --------------------------------------------
+# A block claude agents names itself is a prompt mid-turn, not a turn that
+# ended on a signing wait.
+jq 'map(if .id == "9121ff49" then .state = "blocked" | .waitingFor = "input needed" else . end)' \
+    "$fixtures/done.json" >"$work/named.json"
+stub "$signing"
+check "a block claude agents names is left as it is" "blocked input needed
+cwd /work/project" "$(watch_file named)"
 stub "$other"
 check "another session's signing helper is not the worker's" "done
 cwd /work/project" "$(watch_file done)"
@@ -176,8 +183,27 @@ cwd /work/project
 note claude agents said blocked
 $approval
 after EPOCH" "$out"
-out=$(sh "$scripts/watch.sh" --id 9121ff49 --wait-blocked --interval 0 --timeout 5 </dev/null 2>&1 | sed 's/^after [0-9][0-9]*$/after EPOCH/' | sed -n 1p)
-check "loop with --wait-blocked: returns the pending approval" "blocked signing approval" "$out"
+# --wait-blocked adds no waited note after the after line.
+out=$(sh "$scripts/watch.sh" --id 9121ff49 --wait-blocked --interval 0 --timeout 5 </dev/null 2>&1 | sed 's/^after [0-9][0-9]*$/after EPOCH/')
+check "loop with --wait-blocked: returns the pending approval" "blocked signing approval
+cwd /work/project
+note claude agents said blocked
+$approval
+after EPOCH" "$out"
+# The second watch, with --after, while the approval still waits: the old
+# done reads as working, and the transcript holds steady because the
+# helper does. It waits on, to its timeout, and never reports hang.
+transcript "Committed in the background." "2026-10-20T10:00:00Z"
+FAKE_LIST="$work/done.json"
+after=$(jq -n '"2026-10-20T10:05:00Z" | fromdateiso8601')
+out=$(sh "$scripts/watch.sh" --id 9121ff49 --after "$after" --stall 0 --interval 0 --timeout 1 </dev/null 2>&1; echo "rc $?")
+check "second watch: a waiting helper is no hang" "working
+cwd /work/project
+rc 124" "$out"
+stub "$idle"
+out=$(sh "$scripts/watch.sh" --id 9121ff49 --after "$after" --stall 0 --interval 0 --timeout 1 </dev/null 2>&1 | sed -n 1p)
+check "second watch: with no helper, a steady transcript is still a hang" "hang" "$out"
+stub "$signing"
 # The after line is the time the watch returned, so a watch with it reads
 # only a turn end written later.
 before=$(date +%s)
