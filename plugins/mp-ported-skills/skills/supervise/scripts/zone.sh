@@ -155,7 +155,8 @@ capture_points() {
 }
 
 if [ -n "$HAS_COMPACT" ]; then
-    [ -z "$HAS_MODEL" ] && [ -z "$HAS_PID" ] || fail "--compact takes the model as its value; give it alone"
+    [ -z "$HAS_MODEL" ] || fail "--compact takes the model as its value; give it alone"
+    [ -z "$HAS_PID" ] || fail "--pid is read only with --due; give --compact alone"
     [ "$sources" -eq 0 ] && [ -z "$DUE" ] || fail "--compact reads no transcript; give it alone"
     if capture_points "$COMPACT"; then :
     elif [ -z "$COMPACT" ]; then

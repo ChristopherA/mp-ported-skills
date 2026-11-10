@@ -309,6 +309,8 @@ due" "$( (export MP_SMART_ZONE_K=550 CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=82; due_on 
 zone --transcript "$work/t.jsonl" --model >/dev/null; check "due: --model needs a value" "1" "$?"
 check "due: --model is not for --compact" "Error: --compact takes the model as its value; give it alone" \
     "$(zone --compact claude-opus-5-5 --model claude-opus-5-5)"
+check "due: --pid is not for --compact" "Error: --pid is read only with --due; give --compact alone" \
+    "$(zone --compact claude-opus-5-5 --pid 4100)"
 
 # --- a commit signature pending holds the capture (#206) ----------------------
 # A fake ps serves a stub process list from FAKE_PS, as
