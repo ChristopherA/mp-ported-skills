@@ -443,5 +443,24 @@ dg checkout --detach
 check "distribution state: a detached HEAD" "0 (detached) main 0 1" "$(dstate "$work/drepo/r")"
 check "distribution state: git status failing exits 1, dirty 0" "1 (detached) main 0 0" "$(dstate "$work/drepo/gone" 2>/dev/null)"
 
+# --- signing.sh ----------------------------------------------------------------
+# The ps reading itself is checked in tests/supervise-watch-signing.test.sh
+# and tests/supervise-zone.test.sh, through the scripts that source it.
+. "$scripts/signing.sh"
+check "signing: mm:ss in seconds" "318" "$(signing_seconds 05:18)"
+check "signing: hh:mm:ss in seconds" "3723" "$(signing_seconds 1:02:03)"
+check "signing: dd-hh:mm:ss in seconds" "781200" "$(signing_seconds 9-01:00:00)"
+check "signing: not an etime is empty" "" "$(signing_seconds 'has waited')"
+check "signing: no pid finds nothing, and reads no ps" "" "$(PATH=/nonexistent signing_wait '')"
+check "signing: a pid that is not a number finds nothing" "" "$(PATH=/nonexistent signing_wait 12x)"
+# The check lives only in signing.sh: no script carries its own copy (#206).
+skills="$root/plugins/mp-ported-skills/skills"
+copies=$(grep -l 'ssh-sk-helper (pid %s)' "$skills"/*/scripts/*.sh | sed "s|$skills/||")
+check "signing: the check is written only in signing.sh" "supervise/scripts/signing.sh" "$copies"
+for f in supervise/scripts/watch.sh supervise/scripts/zone.sh; do
+    grep -q 'signing\.sh"' "$skills/$f"; rc=$?
+    check "signing: $f sources signing.sh" 0 "$rc"
+done
+
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

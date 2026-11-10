@@ -219,5 +219,74 @@ $approval
 after EPOCH
 detail $work/detail.txt" "$(watch_file done --detail "$work/detail.txt")"
 
+# --- a zone capture held for the signature (#206) ------------------------------
+# working-busy's worker c2a368ee (pid 83582) is still working, on a 200k
+# window (capture 64%, force 72%), with a background `git commit -S` it
+# started still running. zone.sh --due, given the pid, holds the capture
+# while the helper waits; the watch returns it as a pending approval, with
+# the reading, once the reading is at or past the capture point.
+wsid=c2a368ee-c513-484c-83d3-581830e209a5
+mkdir -p "$cfg/jobs/c2a368ee"
+jq -cn --arg s "$wsid" '{sessionId: $s, respawnFlags: ["--model", "claude-sonnet-4-5"]}' \
+    >"$cfg/jobs/c2a368ee/state.json"
+zone_transcript() { # <tokens> -- a background commit still running, then a call
+    command rm -rf "$cfg/projects"; mkdir -p "$cfg/projects/-work-project"
+    jq -cn --argjson t "$1" '
+        def call($id; $n): {type: "assistant", isSidechain: false, message: {role: "assistant",
+            usage: {input_tokens: 2, cache_read_input_tokens: ($n - 2), cache_creation_input_tokens: 0, output_tokens: 10},
+            content: [{type: "tool_use", id: $id, name: "Bash"}]}};
+        def result($id): {type: "user", isSidechain: false,
+            message: {role: "user", content: [{type: "tool_result", tool_use_id: $id}]}};
+        call("a"; 60000), (result("a") + {toolUseResult: {backgroundTaskId: "bsig1", stdout: ""}}),
+        call("b"; $t), result("b")' >"$cfg/projects/-work-project/$wsid.jsonl"
+}
+zsigning=$(printf '%s\n' "$signing" | sed -e 's/^  85224 /  83582 /' -e 's/ 85224 / 83582 /')
+zwatch() { # [option]... -- watch.sh --zone --file on working-busy
+    sh "$scripts/watch.sh" --id c2a368ee --zone --file "$fixtures/working-busy.json" "$@" </dev/null 2>&1 |
+        grep -v '^note: ' | sed 's/^after [0-9][0-9]*$/after EPOCH/'
+}
+zone_transcript 162000
+stub "$zsigning"
+check "zone: past the force point, the pending signature is returned, not cut" "blocked signing approval
+cwd /work/project
+reading 108% of zone
+$approval
+after EPOCH" "$(zwatch)"
+zone_transcript 102000
+check "zone: between the points, the same" "blocked signing approval
+cwd /work/project
+reading 68% of zone
+$approval
+after EPOCH" "$(zwatch)"
+zone_transcript 90000
+check "zone: below the capture point, the watch goes on" "working
+cwd /work/project" "$(zwatch)"
+zone_transcript 162000
+stub "$(printf '%s\n' "$zsigning" | grep -v -e ssh-sk-helper -e ssh-keygen)"
+check "zone: once the helper is gone, the task is cut as before" "capture-due
+cwd /work/project
+reading 108% of zone
+due: background task bsig1 is cut" "$(zwatch)"
+stub "$zsigning"
+# The second watch, with --after from the first's after line: the helper the
+# maintainer was told of started before it, so the watch goes on.
+check "zone: the second watch goes on while the same helper waits" "working
+cwd /work/project" "$(zwatch --after "$(date +%s)")"
+check "zone: a helper started after --after is returned" "blocked signing approval
+cwd /work/project
+reading 108% of zone
+$approval
+after EPOCH" "$(zwatch --after "$(($(date +%s) - 3600))")"
+FAKE_LIST="$fixtures/working-busy.json"
+out=$( { sh "$scripts/watch.sh" --id c2a368ee --zone --after "$(date +%s)" --stall 0 --interval 0 --timeout 1 </dev/null 2>&1; echo "rc $?"; } | grep -v '^note: ')
+check "zone: the second watch's loop waits to its timeout, no hang" "working
+cwd /work/project
+rc 124" "$out"
+unset FAKE_PS
+check "zone: ps fails, the task is cut as before" "capture-due
+cwd /work/project
+reading 108% of zone
+due: background task bsig1 is cut" "$(zwatch)"
+
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

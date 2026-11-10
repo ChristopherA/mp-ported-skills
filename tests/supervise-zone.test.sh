@@ -310,6 +310,65 @@ zone --transcript "$work/t.jsonl" --model >/dev/null; check "due: --model needs 
 check "due: --model is not for --compact" "Error: --compact takes the model as its value; give it alone" \
     "$(zone --compact claude-opus-5-5 --model claude-opus-5-5)"
 
+# --- a commit signature pending holds the capture (#206) ----------------------
+# A fake ps serves a stub process list from FAKE_PS, as
+# tests/supervise-watch-signing.test.sh does. The worker is 4100; its Bash
+# shell runs a background `git commit -S`, whose ssh-keygen -Y sign started
+# ssh-sk-helper, which waits at the sensor.
+bin="$work/bin"
+mkdir -p "$bin"
+cat >"$bin/ps" <<'EOF'
+#!/bin/sh
+[ -n "${FAKE_PS:-}" ] && [ -f "$FAKE_PS" ] || { echo "ps: no stub" >&2; exit 1; }
+cat "$FAKE_PS"
+EOF
+chmod +x "$bin/ps"
+PATH="$bin:$PATH"
+export PATH
+[ "$(command -v ps)" = "$bin/ps" ] || { echo "FAIL the fake ps is not first on PATH"; exit 1; }
+printf '%s\n' "  4100     1    1:02:03 claude --bg
+  4200  4100      05:20 /bin/zsh -c git commit -S -s -m x
+  4201  4200      05:19 git commit -S -s -m x
+  4202  4201      05:19 ssh-keygen -Y sign -n git -f /var/folders/xx/key /var/folders/xx/buffer
+  4203  4202      05:18 /usr/libexec/ssh-sk-helper
+  1     0   9-00:00:00 /sbin/launchd" >"$work/ps-signing.txt"
+printf '%s\n' "  4100     1    1:02:03 claude --bg
+  4200  4100      05:20 /bin/zsh -c git commit -S -s -m x
+  1     0   9-00:00:00 /sbin/launchd" >"$work/ps-gone.txt"
+signed() { (FAKE_PS="$work/ps-$1.txt"; export FAKE_PS; shift
+    zone --transcript "$work/t.jsonl" --due --pid 4100 "$@"); } # <signing|gone> [option]...
+held="held for a commit signing approval at the Mac: ssh-sk-helper (pid 4203) has waited 05:18"
+bgcommit() { # <tokens> -- a background git commit -S still running, then a call
+    call 60000 a; result a '{"backgroundTaskId":"bsig1","stdout":""}'; call "$1" b; result b
+}
+bgcommit 90000 >"$work/t.jsonl"
+out=$(signed signing); rc=$?
+check "signing: below the capture point, the pending signature is named" "60% of zone
+not due: below 64% of zone, and $held" "$out"
+check "signing: not due exits 2" "2" "$rc"
+bgcommit 102000 >"$work/t.jsonl"
+check "signing: between the points, the signature holds it" "68% of zone
+not due: $held" "$(signed signing)"
+bgcommit "$((force * 1500))" >"$work/t.jsonl"
+out=$(signed signing); rc=$?
+check "signing: at the force point, the signature is not cut" "$force% of zone
+not due: $held" "$out"
+check "signing: held at the force point exits 2" "2" "$rc"
+bgcommit 162000 >"$work/t.jsonl"
+check "signing: a 1M model at 108% is held too" "108% of zone
+not due: $held" "$(signed signing --model claude-opus-5-5)"
+check "signing: once the helper is gone, past the force point it is cut" "108% of zone
+due: background task bsig1 is cut" "$(signed gone)"
+check "signing: once the helper is gone, a 1M model at 108% is cut" "108% of zone
+due: background task bsig1 is cut" "$(signed gone --model claude-opus-5-5)"
+check "signing: with no --pid, ps is not read and the task is cut" "108% of zone
+due: background task bsig1 is cut" "$( (FAKE_PS="$work/ps-signing.txt"; export FAKE_PS; due) )"
+{ call 60000 a; result a; call 102000 b; } >"$work/t.jsonl"
+check "signing: a foreground commit at the prompt names the signature" "68% of zone
+not due: $held" "$(signed signing)"
+zone --transcript "$work/t.jsonl" --pid 4100 >/dev/null; check "signing: --pid is read only with --due" "1" "$?"
+zone --transcript "$work/t.jsonl" --due --pid >/dev/null; check "signing: --pid needs a value" "1" "$?"
+
 # A last line still being written is skipped.
 { call 60000 a; result a; call 102000 b; result b; printf '{"type":"assistant","mess'; } >"$work/t.jsonl"
 check "due: a half-written last line is skipped" "68% of zone

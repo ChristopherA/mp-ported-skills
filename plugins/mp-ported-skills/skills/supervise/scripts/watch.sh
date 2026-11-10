@@ -32,6 +32,14 @@
 #                      `ps`; with no pid, or ps failing, the state is as
 #                      before. A `blocked input needed` that claude agents
 #                      names itself is a prompt mid-turn, and is left as it is.
+#                      With --zone, a working session whose zone capture
+#                      zone.sh holds for a waiting helper, at or past the
+#                      capture point, returns it too, with a `reading` line
+#                      before the needs line (#206): stopping it then would
+#                      cut the commit mid-sign. A watch with --after goes on
+#                      past a helper that started before that time, the one
+#                      already reported, and returns capture-due once it is
+#                      gone.
 #   parked             its turn ended on a line starting `Parked:`: an
 #                      unattended worker parked its ticket on a question
 #                      only the maintainer can answer (#158)
@@ -206,6 +214,7 @@ fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 . "$(dirname -- "$0")/agents.sh"
 . "$(dirname -- "$0")/park.sh"
 . "$(dirname -- "$0")/transcript.sh"
+. "$(dirname -- "$0")/signing.sh"
 if [ -n "$DIR" ]; then
     [ -d "$DIR" ] || fail "not a directory: $DIR"
     DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
@@ -378,39 +387,25 @@ ends_unasked() {
     jq -en --arg t "$text" "$QUESTION_JQ"'$t | asks | not' >/dev/null 2>&1
 }
 
-# signing_wait <agents json>: `<program> (pid <pid>) has waited <etime>` for
-# a commit signing helper among the worker's descendants, read from `ps`, or
-# empty when there is none, the list names no pid, or ps fails (#196).
-# ssh-sk-helper, which waits at the sensor, is named before the ssh-keygen
-# -Y sign that started it.
-signing_wait() {
-    pid=$(printf '%s' "$1" | jq -r --arg id "$ID" '
+# pid_of <agents json>: the job's pid, or empty when the list cannot be read
+# or names none. signing.sh's signing_wait looks for a commit signing helper
+# among its descendants (#196).
+pid_of() {
+    printf '%s' "$1" | jq -r --arg id "$ID" '
         [.[] | select(.kind == "background" and .id == $id)] | first
-        | .pid // empty' 2>/dev/null)
-    case $pid in '' | *[!0-9]*) return 0 ;; esac
-    procs=$(ps -axo pid=,ppid=,etime=,command= </dev/null 2>/dev/null) || return 0
-    printf '%s\n' "$procs" | awk -v root="$pid" '
-        NF >= 4 {
-            parent[$1] = $2; etime[$1] = $3
-            c = $0; sub(/^[ \t]*[0-9]+[ \t]+[0-9]+[ \t]+[^ \t]+[ \t]+/, "", c)
-            n++; order[n] = $1; cmd[$1] = c
-        }
-        function descends(p,   a, d) {
-            for (a = parent[p]; a != "" && a != "0" && d < 64; a = parent[a]) {
-                if (a == root) return 1
-                d++
-            }
-            return 0
-        }
-        END {
-            for (i = 1; i <= n; i++) {
-                p = order[i]; split(cmd[p], w, " "); prog = w[1]; sub(/.*\//, "", prog)
-                if (prog == "ssh-sk-helper" && sk == "" && descends(p)) sk = p
-                if (prog == "ssh-keygen" && cmd[p] ~ / -Y sign( |$)/ && kg == "" && descends(p)) kg = p
-            }
-            if (sk != "") printf "ssh-sk-helper (pid %s) has waited %s\n", sk, etime[sk]
-            else if (kg != "") printf "ssh-keygen -Y sign (pid %s) has waited %s\n", kg, etime[kg]
-        }'
+        | .pid // empty' 2>/dev/null
+}
+
+# signing_new <helper text>: true when the helper signing_wait names started
+# after --after, or there is no --after. The second watch after a held zone
+# capture passes the first's after line, and the helper it reported started
+# before it (#206). ps counts whole seconds, so a start one second past
+# --after is still read as the same helper.
+signing_new() {
+    [ -n "$AFTER" ] || return 0
+    secs=$(signing_seconds "${1##* }")
+    [ -n "$secs" ] || return 1
+    [ $(($(date +%s) - secs)) -gt $((AFTER + 1)) ]
 }
 
 # session_id_of <agents json>: the job's sessionId, or empty when the list
@@ -547,10 +542,21 @@ report() {
                     | select(.status == "idle") | .sessionId // empty')
                 if turn_ended "$session_id"; then
                     out=$(printf 'done%s\nnote claude agents still said working' "${out#working}")
-                elif [ -n "$ZONE" ] && t=$(transcript_of "$(session_id_of "$1")") && [ -n "$t" ] &&
-                    reading=$(sh "$(dirname -- "$0")/zone.sh" --transcript "$t" --due --model "$zone_model" </dev/null 2>/dev/null); then
-                    out=$(printf 'capture-due%s\nreading %s\n%s' "${out#working}" \
-                        "$(printf '%s\n' "$reading" | head -n 1)" "$(printf '%s\n' "$reading" | sed -n 2p)")
+                elif [ -n "$ZONE" ] && t=$(transcript_of "$(session_id_of "$1")") && [ -n "$t" ]; then
+                    zone_rc=0
+                    reading=$(sh "$(dirname -- "$0")/zone.sh" --transcript "$t" --due --model "$zone_model" \
+                        --pid "$(pid_of "$1")" </dev/null 2>/dev/null) || zone_rc=$?
+                    held=$(printf '%s\n' "$reading" | sed -n 's/^not due: held for a commit signing approval at the Mac: //p')
+                    if [ "$zone_rc" -eq 0 ]; then
+                        out=$(printf 'capture-due%s\nreading %s\n%s' "${out#working}" \
+                            "$(printf '%s\n' "$reading" | head -n 1)" "$(printf '%s\n' "$reading" | sed -n 2p)")
+                    elif [ -n "$held" ] && signing_new "$held"; then
+                        # The capture is held for a signature at or past the
+                        # capture point: only the maintainer at the Mac can
+                        # release it (#206).
+                        out=$(printf 'blocked signing approval%s\nreading %s\nneeds biometric approval at the Mac: %s\nafter %s' \
+                            "${out#working}" "$(printf '%s\n' "$reading" | head -n 1)" "$held" "$(date +%s)")
+                    fi
                 fi
             fi ;;
     esac
@@ -573,6 +579,7 @@ report() {
                 fi ;;
         esac
         case $out in
+            "blocked signing approval"*) ;;
             blocked*)
                 job="$CLAUDE_CONFIG_DIR/jobs/$ID/state.json"
                 if [ -f "$job" ]; then
@@ -585,8 +592,8 @@ report() {
     # one claude agents names is a prompt mid-turn, not a turn that ended.
     signing=""
     case $out in
-        done* | "blocked question"*) signing=$(signing_wait "$1") ;;
-        "blocked input needed"*) [ -z "$waits" ] || signing=$(signing_wait "$1") ;;
+        done* | "blocked question"*) signing=$(signing_wait "$(pid_of "$1")") ;;
+        "blocked input needed"*) [ -z "$waits" ] || signing=$(signing_wait "$(pid_of "$1")") ;;
     esac
     if [ -n "$signing" ]; then
         out=$(printf '%s\nneeds biometric approval at the Mac: %s\nafter %s' \
@@ -780,7 +787,7 @@ while :; do
             size=$(transcript_size "$(session_id_of "$list")")
             if [ -z "$size" ]; then
                 stall_size="" stall_since=$now
-            elif [ "$size" != "$stall_size" ] || [ -n "$(signing_wait "$list")" ]; then
+            elif [ "$size" != "$stall_size" ] || [ -n "$(signing_wait "$(pid_of "$list")")" ]; then
                 # A signing helper still waiting holds the transcript
                 # steady: the second watch after a blocked signing
                 # approval waits for it, not a hang (#196).

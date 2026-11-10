@@ -18,6 +18,15 @@
 #                       or past the force point with no tool call running,
 #                       when the line is `due: background task <id> is cut`
 #   not due: <why>      below it, or not at a safe point, or no reading
+# With --pid, the worker's pid as `claude agents` lists it, a commit signing
+# helper waiting among its descendants (signing.sh) holds the capture at any
+# reading (#206): stopping the worker would cut a `git commit -S` at its
+# Secure Enclave or Touch ID prompt, could leave .git/index.lock behind, and
+# the capture's own commit would raise the same prompt. The line reads
+#   not due: held for a commit signing approval at the Mac: <helper>
+# at or past the capture point, and below it
+#   not due: below <C>% of zone, and held for a commit signing approval ...
+# Once the helper is gone, the rules above apply again.
 # The capture point follows the worker's model, given with --model (#215):
 # see ZONE_CAPTURE_WIDE below. With no --model, or a model whose window is
 # not known, it is ZONE_CAPTURE.
@@ -47,7 +56,7 @@
 # `note:` line on stderr saying so.
 #
 # Usage:
-#   zone.sh (--id ID | --session SESSION | --transcript FILE) [--due [--model MODEL]]
+#   zone.sh (--id ID | --session SESSION | --transcript FILE) [--due [--model MODEL] [--pid PID]]
 #   zone.sh --compact MODEL
 #
 # --id reads the session from the job's state.json under $CLAUDE_CONFIG_DIR;
@@ -95,6 +104,8 @@ COMPACT=""
 HAS_COMPACT=""
 MODEL=""
 HAS_MODEL=""
+PID=""
+HAS_PID=""
 sources=0
 need_value() { [ $# -ge 2 ] || { printf 'Error: %s needs a value\n' "$1" >&2; exit 1; }; }
 while [ $# -gt 0 ]; do
@@ -105,8 +116,9 @@ while [ $# -gt 0 ]; do
         --due)        DUE=1; shift ;;
         --compact)    need_value "$@"; COMPACT="$2"; HAS_COMPACT=1; shift 2 ;;
         --model)      need_value "$@"; MODEL="$2"; HAS_MODEL=1; shift 2 ;;
+        --pid)        need_value "$@"; PID="$2"; HAS_PID=1; shift 2 ;;
         --help)
-            printf 'Usage: zone.sh (--id ID | --session SESSION | --transcript FILE) [--due [--model MODEL]]\n'
+            printf 'Usage: zone.sh (--id ID | --session SESSION | --transcript FILE) [--due [--model MODEL] [--pid PID]]\n'
             printf '       zone.sh --compact MODEL\n'
             printf 'Prints "N%% of zone", then with --due "due" or "not due: <why>";\n'
             printf 'with --compact, "compact point N%% of zone (P%% of a Wk window)"\n'
@@ -143,7 +155,7 @@ capture_points() {
 }
 
 if [ -n "$HAS_COMPACT" ]; then
-    [ -z "$HAS_MODEL" ] || fail "--compact takes the model as its value; give it alone"
+    [ -z "$HAS_MODEL" ] && [ -z "$HAS_PID" ] || fail "--compact takes the model as its value; give it alone"
     [ "$sources" -eq 0 ] && [ -z "$DUE" ] || fail "--compact reads no transcript; give it alone"
     if capture_points "$COMPACT"; then :
     elif [ -z "$COMPACT" ]; then
@@ -162,6 +174,7 @@ if [ -n "$HAS_COMPACT" ]; then
 fi
 [ "$sources" -eq 1 ] || fail "give one of --id, --session or --transcript"
 [ -z "$HAS_MODEL" ] || [ -n "$DUE" ] || fail "--model is read only with --due"
+[ -z "$HAS_PID" ] || [ -n "$DUE" ] || fail "--pid is read only with --due"
 capture_points "$MODEL" || :
 
 if [ -n "$ID" ]; then
@@ -220,7 +233,18 @@ if [ "$pct" -lt 0 ]; then
 fi
 echo "$pct% of zone"
 [ -n "$DUE" ] || exit 0
-if [ "$pct" -lt "$capture" ]; then
+signing=""
+if [ -n "$PID" ]; then
+    . "$(dirname -- "$0")/signing.sh"
+    signing=$(signing_wait "$PID")
+fi
+if [ -n "$signing" ] && [ "$pct" -lt "$capture" ]; then
+    echo "not due: below $capture% of zone, and held for a commit signing approval at the Mac: $signing"
+    exit 2
+elif [ -n "$signing" ]; then
+    echo "not due: held for a commit signing approval at the Mac: $signing"
+    exit 2
+elif [ "$pct" -lt "$capture" ]; then
     echo "not due: below $capture% of zone"
     exit 2
 elif [ -n "$calling" ]; then
