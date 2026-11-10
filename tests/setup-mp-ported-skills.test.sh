@@ -299,27 +299,30 @@ check "supervision-doc write: no project dir exits 2" "2" "$rc"
 # --- distribution-repo (#143) -----------------------------------------------
 p="$work/fresh"
 dist="$work/dist"; mkdir -p "$dist"
+# Each -dev folder name is built from this suffix: a literal one reads as a
+# private project to the public-artifact sweep (tests/fixture-names.test.sh).
+sfx=-dev
 mkrepo() { mkdir -p "$1" && git -C "$1" init -q; }
 dist_file() { printf '%s' "$1/docs/agents/distribution-repo.md"; }
 exists() { [ -e "$1" ] && echo yes || echo no; }
-mkrepo "$dist/app-dev"; mkrepo "$dist/app"
+mkrepo "$dist/app$sfx"; mkrepo "$dist/app"
 real_dist=$(cd "$dist" && pwd -P)
 
 setup "$v1" "$p" --project-dir "$proj" report
 check "distribution-repo: not a checkout reads absent" "absent" "$(feature distribution-repo)"
 
-setup "$v1" "$p" --project-dir "$dist/app-dev" report
+setup "$v1" "$p" --project-dir "$dist/app$sfx" report
 check "distribution-repo: absent in a -dev project" "absent" "$(feature distribution-repo)"
 has "distribution-repo: suggests the -dev folder's sibling" "suggested: ../app  (a git checkout beside this -dev folder)" "$out"
-check "distribution-repo: report writes nothing" "no" "$(exists "$(dist_file "$dist/app-dev")")"
+check "distribution-repo: report writes nothing" "no" "$(exists "$(dist_file "$dist/app$sfx")")"
 
 # A -dev folder whose sibling is a plain folder, not a checkout, gets no suggestion.
-mkrepo "$dist/plain-dev"; mkdir -p "$dist/plain"
-setup "$v1" "$p" --project-dir "$dist/plain-dev" report
+mkrepo "$dist/plain$sfx"; mkdir -p "$dist/plain"
+setup "$v1" "$p" --project-dir "$dist/plain$sfx" report
 check "distribution-repo: plain sibling, no suggestion" "" "$(printf '%s\n' "$out" | grep 'suggested:')"
 # Nor one that sits inside another repo: a folder in a checkout is not a repo of its own.
-mkrepo "$dist/outer"; mkrepo "$dist/outer/in-dev"; mkdir -p "$dist/outer/in"
-setup "$v1" "$p" --project-dir "$dist/outer/in-dev" report
+mkrepo "$dist/outer"; mkrepo "$dist/outer/in$sfx"; mkdir -p "$dist/outer/in"
+setup "$v1" "$p" --project-dir "$dist/outer/in$sfx" report
 check "distribution-repo: sibling inside another repo, no suggestion" "" "$(printf '%s\n' "$out" | grep 'suggested:')"
 
 # A Project not named -dev gets its suggestion from a CLAUDE.md line.
@@ -333,67 +336,67 @@ setup "$v1" "$p" --project-dir "$dist/planning" report
 check "distribution-repo: CLAUDE.md path not a checkout, no suggestion" "" "$(printf '%s\n' "$out" | grep 'suggested:')"
 
 # On yes: write the suggested sibling, relative to the Project.
-setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write ../app
+setup "$v1" "$p" --project-dir "$dist/app$sfx" distribution-repo write ../app
 check "distribution-repo write: exit 0" "0" "$rc"
 has "distribution-repo write: says what it wrote" "names ../app" "$out"
 has "distribution-repo write: says it needs a push" "committed and pushed" "$out"
 check "distribution-repo write: supervise reads the path" "$real_dist/app" \
-    "$(sh "$plugin/skills/supervise/scripts/distribution.sh" --dir "$dist/app-dev" --working-tree)"
+    "$(sh "$plugin/skills/supervise/scripts/distribution.sh" --dir "$dist/app$sfx" --working-tree)"
 has "distribution-repo write: path line is relative" "
-../app" "$(cat "$(dist_file "$dist/app-dev")")"
-setup "$v1" "$p" --project-dir "$dist/app-dev" report
+../app" "$(cat "$(dist_file "$dist/app$sfx")")"
+setup "$v1" "$p" --project-dir "$dist/app$sfx" report
 check "distribution-repo: present after writing" "present" "$(feature distribution-repo)"
 check "distribution-repo: report names the path" "    names ../app" "$(printf '%s\n' "$out" | grep '^    names ')"
 
 # Rerun with the same answer, absolute or relative: the file is left as it is.
-before=$(cat "$(dist_file "$dist/app-dev")")
-touch -t 202001010000 "$(dist_file "$dist/app-dev")"; touch -t 202001010001 "$work/stamp"
-setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write "$dist/app"
+before=$(cat "$(dist_file "$dist/app$sfx")")
+touch -t 202001010000 "$(dist_file "$dist/app$sfx")"; touch -t 202001010001 "$work/stamp"
+setup "$v1" "$p" --project-dir "$dist/app$sfx" distribution-repo write "$dist/app"
 check "distribution-repo write same: exit 0" "0" "$rc"
 check "distribution-repo write same: already" "distribution-repo: already names ../app" "$out"
-check "distribution-repo write same: untouched" "$before" "$(cat "$(dist_file "$dist/app-dev")")"
-check "distribution-repo write same: not rewritten" "no" "$([ "$(dist_file "$dist/app-dev")" -nt "$work/stamp" ] && echo yes || echo no)"
+check "distribution-repo write same: untouched" "$before" "$(cat "$(dist_file "$dist/app$sfx")")"
+check "distribution-repo write same: not rewritten" "no" "$([ "$(dist_file "$dist/app$sfx")" -nt "$work/stamp" ] && echo yes || echo no)"
 
 # A path that is not a git checkout is refused, and nothing is written.
-setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write ../plain
+setup "$v1" "$p" --project-dir "$dist/app$sfx" distribution-repo write ../plain
 check "distribution-repo write plain folder: exit 1" "1" "$rc"
 has "distribution-repo write plain folder: says why" "not a git checkout" "$out"
-check "distribution-repo write plain folder: file unchanged" "$before" "$(cat "$(dist_file "$dist/app-dev")")"
-setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write ../outer/in
+check "distribution-repo write plain folder: file unchanged" "$before" "$(cat "$(dist_file "$dist/app$sfx")")"
+setup "$v1" "$p" --project-dir "$dist/app$sfx" distribution-repo write ../outer/in
 check "distribution-repo write folder inside a repo: exit 1" "1" "$rc"
-setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write ../missing
+setup "$v1" "$p" --project-dir "$dist/app$sfx" distribution-repo write ../missing
 check "distribution-repo write missing: exit 1" "1" "$rc"
-setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write .
+setup "$v1" "$p" --project-dir "$dist/app$sfx" distribution-repo write .
 check "distribution-repo write the Project itself: exit 1" "1" "$rc"
 has "distribution-repo write the Project itself: says why" "this Project's own repo" "$out"
-check "distribution-repo refusals: file unchanged" "$before" "$(cat "$(dist_file "$dist/app-dev")")"
-mkrepo "$dist/fresh-dev"
-setup "$v1" "$p" --project-dir "$dist/fresh-dev" distribution-repo write ../plain
-check "distribution-repo write refused: no file written" "no" "$(exists "$(dist_file "$dist/fresh-dev")")"
+check "distribution-repo refusals: file unchanged" "$before" "$(cat "$(dist_file "$dist/app$sfx")")"
+mkrepo "$dist/fresh$sfx"
+setup "$v1" "$p" --project-dir "$dist/fresh$sfx" distribution-repo write ../plain
+check "distribution-repo write refused: no file written" "no" "$(exists "$(dist_file "$dist/fresh$sfx")")"
 
 # A changed answer rewrites it; a path outside the parent is kept absolute.
 mkrepo "$dist/elsewhere/other"
-setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write ../elsewhere/other
+setup "$v1" "$p" --project-dir "$dist/app$sfx" distribution-repo write ../elsewhere/other
 check "distribution-repo write changed: exit 0" "0" "$rc"
 check "distribution-repo write changed: supervise reads the new path" "$real_dist/elsewhere/other" \
-    "$(sh "$plugin/skills/supervise/scripts/distribution.sh" --dir "$dist/app-dev" --working-tree)"
+    "$(sh "$plugin/skills/supervise/scripts/distribution.sh" --dir "$dist/app$sfx" --working-tree)"
 
 # Changing the answer to no removes it; with no file, remove writes nothing.
-setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo remove
+setup "$v1" "$p" --project-dir "$dist/app$sfx" distribution-repo remove
 check "distribution-repo remove: exit 0" "0" "$rc"
-check "distribution-repo remove: file gone" "no" "$(exists "$(dist_file "$dist/app-dev")")"
+check "distribution-repo remove: file gone" "no" "$(exists "$(dist_file "$dist/app$sfx")")"
 has "distribution-repo remove: says the code lives here" "code lives in this repo" "$out"
-setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo remove
+setup "$v1" "$p" --project-dir "$dist/app$sfx" distribution-repo remove
 check "distribution-repo remove again: exit 0" "0" "$rc"
 has "distribution-repo remove again: already absent" "already absent" "$out"
 
 setup "$v1" "$p" --project-dir "$proj" distribution-repo write ../app
 check "distribution-repo write: project not a checkout exits 2" "2" "$rc"
-setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo write
+setup "$v1" "$p" --project-dir "$dist/app$sfx" distribution-repo write
 check "distribution-repo write with no path: exit 2" "2" "$rc"
-setup "$v1" "$p" --project-dir "$dist/app-dev" distribution-repo on
+setup "$v1" "$p" --project-dir "$dist/app$sfx" distribution-repo on
 check "distribution-repo on: exit 2" "2" "$rc"
-setup "$v1" "$p" --project-dir "$dist/app-dev" supervision-doc write ../app
+setup "$v1" "$p" --project-dir "$dist/app$sfx" supervision-doc write ../app
 check "supervision-doc write with a path: exit 2" "2" "$rc"
 
 # --- errors -------------------------------------------------------------------

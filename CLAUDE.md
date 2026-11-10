@@ -30,6 +30,8 @@ After a push that bumps the version, run `claude plugin marketplace update mp-po
 
 Tests are `tests/*.test.sh`, run with `sh`. Every `git commit` a test makes in a scratch repo passes `-c commit.gpgsign=false`: the maintainer's global git config signs commits, and a signing prompt hangs a test that has no terminal.
 
+A test that needs a name ending in `-dev`, `-private` or `-hub`, such as a folder for the `-dev` Distribution repo rule, builds it from a suffix variable (`sfx=-dev`, then `"$dist/app$sfx"`), never writes it literally. The maintainer's public-artifact sweep reads any such word as a private project's name, and Push on approval fails on a hit: #143's literal `-dev` folders in `tests/setup-mp-ported-skills.test.sh` failed `push.sh --check` with 57 hits and stopped a `/supervise --loop`. `tests/fixture-names.test.sh` fails on a literal one in any test script.
+
 Do not edit a test file while a run of it is still going, such as a run in the background. `sh` reads the script as it runs, so the run reads the edit partway through and fails on a syntax error that is not in the file: in #158, a backgrounded `tests/supervise.test.sh` died at `line 1331` after an edit higher up. Wait for the run to end, or run it again after the edit.
 
 Run the full suite before `/code-review` starts its reviewers or after they report, never while they run. A reviewer may check that a test fails on the old code by putting the base's script back in the working tree, as the Tests rule below asks, and a suite running then tests that old script: in #163, the standards reviewer swapped `state.sh` back and restored it partway through a background suite run, which had to be stopped and run again. A brief that says "do not edit files" did not stop it.
