@@ -972,7 +972,7 @@ two_turns() { # [jq filter for the second turn's rows]
 }
 turn1="  - turn 1, /mattpocock-skills:implement: 2026-09-29T06:01:25Z to 2026-09-29T06:14:24Z (13 min), 5 API calls, 3 by the worker and 2 by its subagents, 502k tokens"
 turn2="  - turn 2, /mp-ported-skills:capturing: 2026-09-29T06:30:00Z to 2026-09-29T06:30:40Z (under a minute), 2 API calls, 1 by the worker and 1 by its subagents, 206k tokens"
-turns() { printf '%s\n' "$1" | sed -n '/^- turns:/,/^- [a-z]/p' | sed '$d'; }
+turns() { printf '%s\n' "$1" | awk '/^- turns:/ {on = 1; print; next} on && /^  - turn / {print; next} {on = 0}'; }
 two_turns
 out=$(record --now 2026-09-29T06:31:00Z)
 check "turns: two turns, cost split at the row between them" "- turns:
@@ -1000,6 +1000,43 @@ $turn1, \$8.45
 $turn2, cost unknown" "$(turns "$out")"
 check "turns: no closing row, named" "- note: no cost-state row closes turn 2, so its cost was not read" \
     "$(printf '%s\n' "$out" | grep '^- note: no cost-state row closes')"
+# A worker's record waits for the row claude stop writes to close its last
+# turn, though an earlier turn's row is already there: without the wait,
+# turn 1's row would read as the run's total.
+two_turns 'select(.type != "cost-state")'
+(sleep 2; cost 9.00 '{"claude-sonnet-5": {"inputTokens": 6, "outputTokens": 700, "cacheReadInputTokens": 421000,
+    "cacheCreationInputTokens": 27805000, "costUSD": 8.98}}' >>"$cfg/projects/-work-project/$sid.jsonl") &
+out=$( (export MP_RECORD_COST_WAIT=10; record --now 2026-09-29T06:31:00Z) )
+wait
+check "turns: a worker waits for the row closing its last turn" "- turns:
+$turn1, \$8.45
+$turn2, \$0.55" "$(turns "$out")"
+# A --session record is of a session that may be live, whose current turn
+# has no closing row yet, so it does not wait for one once a row is there.
+two_turns 'select(.type != "cost-state")'
+. "$root/tests/fake-clock.sh"
+fake_clock_install "$work/clock"
+out=$(on_clock sh -c 'export MP_RECORD_COST_WAIT=5; PATH="$1:$PATH" sh "$2/record.sh" --session "$3" --dir "$4" \
+    --start "$5" --ticket 56 --now 2026-09-29T06:31:00Z </dev/null' sh "$work/bin" "$scripts" "$sid" "$repo" "$start")
+check "turns: a --session record does not wait for its last turn's row" "0" "$(clock_slept)"
+check "turns: a --session record names the open turn" "- note: no cost-state row closes turn 2, so its cost was not read" \
+    "$(printf '%s\n' "$out" | grep '^- note: no cost-state row closes')"
+# A --session record with no row at all still waits for a first one.
+two_turns 'select(.type != "cost-state")'
+jq -c 'select(.type != "cost-state")' "$cfg/projects/-work-project/$sid.jsonl" >"$work/t"
+command mv "$work/t" "$cfg/projects/-work-project/$sid.jsonl"
+on_clock sh -c 'export MP_RECORD_COST_WAIT=5; PATH="$1:$PATH" sh "$2/record.sh" --session "$3" --dir "$4" \
+    --start "$5" --ticket 56 --now 2026-09-29T06:31:00Z </dev/null >/dev/null' sh "$work/bin" "$scripts" "$sid" "$repo" "$start"
+check "turns: a --session record with no row waits for one" "5" "$(clock_slept)"
+# A malformed turn time reads as unknown, and the rest of the record prints.
+two_turns
+jq -c 'if .type == "user" and .timestamp == "2026-09-29T06:30:00.000Z" then .timestamp = "garbled" else . end' \
+    "$cfg/projects/-work-project/$sid.jsonl" >"$work/t"
+command mv "$work/t" "$cfg/projects/-work-project/$sid.jsonl"
+out=$(record --now 2026-09-29T06:31:00Z)
+check "turns: a malformed turn time reads as unknown" \
+    "  - turn 2, /mp-ported-skills:capturing: start unknown to 2026-09-29T06:30:40Z, 1 API call by the worker, its subagents unknown, 205k tokens by the worker, \$0.55" \
+    "$(turns "$out" | grep '^  - turn 2')"
 # A single-turn run has one turn line and no turn note.
 setup
 out=$(record)

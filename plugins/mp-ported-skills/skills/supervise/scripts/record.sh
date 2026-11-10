@@ -32,8 +32,10 @@
 #                            transcript holds none yet, the record waits up
 #                            to MP_RECORD_COST_WAIT seconds (default 10) for
 #                            the one `claude stop` writes a moment after the
-#                            stop (#86), and for the one that closes the
-#                            last turn
+#                            stop (#86), and for a worker (--id) also for
+#                            the one that closes the last turn; a --session
+#                            record does not wait for that one, since a live
+#                            session's current turn has no closing row yet
 #   turns                    one line per turn (#99): the launch prompt and
 #                            each follow-up, opened by the first prompt after
 #                            a turn end with no agents pending (a prompt
@@ -408,9 +410,12 @@ if [ -n "$sid" ]; then
         worker='{}'
     else
         # claude stop writes the cost-state row a moment after the stop, and
-        # that row closes the last turn.
+        # that row closes a worker's last turn. A --session record is of a
+        # session that may still be live, whose current turn has no closing
+        # row yet, so it waits only for a first row.
         waited=0
-        while [ "$(printf '%s' "$worker" | jq -r '.usage == null or ((.turns // []) | length > 0 and (last.cost == null))')" = true ] &&
+        while [ "$(printf '%s' "$worker" | jq -r --arg session "$SESSION" '.usage == null
+                or ($session == "" and ((.turns // []) | length > 0 and (last.cost == null)))')" = true ] &&
             [ "$waited" -lt "$cost_wait" ]; do
             sleep 1
             waited=$((waited + 1))
@@ -707,16 +712,18 @@ jq -rn --arg id "$ID" --arg session "$SESSION" --arg model "$model" --arg launch
       # subagent call is in the turn whose start is the last at or before it.
       (($w.turns // null) as $t
        | if $t == null then "- turns: unknown"
-         else ($t | map(.at | if . == null then null else epoch end)) as $s
+         else ($t | map(.at | if . == null then null else try epoch catch null end)) as $s
          | ($t | length) as $k
          | (if $subs == null or ($s | any(. == null)) or ($subs | any(.at == null)) then null
             else [range($k) as $i | [$subs[] | select(($i == 0 or .at >= $s[$i]) and ($i == $k - 1 or .at < $s[$i + 1]))]] end) as $by
          | "- turns:\(if $k == 0 then " none" else "" end)",
            (range($k) as $i | $t[$i] as $u
             | "  - turn \($i + 1), \($u.prompt): "
-              + (if $u.at == null then "start unknown" else $u.at | stamp end)
+              + (if $s[$i] == null then "start unknown" else $u.at | stamp end)
               + (if $u.end == null then ", not ended"
-                 else " to \($u.end | stamp)" + (if $u.at == null then "" else " (\(($u.end | epoch) - $s[$i] | span))" end) end)
+                 else ($u.end | try epoch catch null) as $ue
+                      | if $ue == null then ", end unknown"
+                        else " to \($u.end | stamp)" + (if $s[$i] == null then "" else " (\($ue - $s[$i] | span))" end) end end)
               + (if $by == null then ", \(plural($u.calls; "API call")) by the \($who), its subagents unknown, \($u.tokens | size) tokens by the \($who)"
                  else ($by[$i] | length) as $n
                       | ", \(plural($u.calls + $n; "API call")), \($u.calls) by the \($who) and \($n) by its subagents, \($u.tokens + ($by[$i] | map(.tokens) | add // 0) | size) tokens" end)
