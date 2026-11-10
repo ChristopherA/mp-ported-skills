@@ -98,7 +98,8 @@ watch_file() { # <list> [option]... -- watch.sh --file, its epoch digits masked
     sh "$scripts/watch.sh" --id 9121ff49 --file "$work/$l.json" "$@" </dev/null 2>&1 |
         sed 's/^after [0-9][0-9]*$/after EPOCH/'
 }
-approval="needs biometric approval at the Mac: ssh-sk-helper (pid 903) has waited 05:18"
+approval="needs biometric approval at the Mac: ssh-sk-helper (pid 903) has waited 05:18
+helper 903"
 
 # --- a done whose commit waits on the signing key ----------------------------
 transcript "Committed in the background; the signing may be waiting on a prompt."
@@ -133,6 +134,7 @@ stub "$(printf '%s\n' "$signing" | grep -v ssh-sk-helper)"
 check "ssh-keygen -Y sign alone is named" "blocked signing approval
 cwd /work/project
 needs biometric approval at the Mac: ssh-keygen -Y sign (pid 902) has waited 05:19
+helper 902
 after EPOCH" "$(watch_file done)"
 
 # --- what is not a pending approval --------------------------------------------
@@ -268,17 +270,34 @@ cwd /work/project
 reading 108% of zone
 due: background task bsig1 is cut" "$(zwatch)"
 stub "$zsigning"
-# The second watch, with --after from the first's after line: the helper the
-# maintainer was told of started before it, so the watch goes on.
+# The second watch, with --held from the first's helper line: the maintainer
+# was told of that helper, so the watch goes on while it waits. Any other
+# helper is returned, whatever --after says (a build watch after resume.sh
+# passes --after, and a helper already waiting then is still reported).
 check "zone: the second watch goes on while the same helper waits" "working
-cwd /work/project" "$(zwatch --after "$(date +%s)")"
-check "zone: a helper started after --after is returned" "blocked signing approval
+cwd /work/project" "$(zwatch --held 903)"
+check "zone: another helper than the held one is returned" "blocked signing approval
 cwd /work/project
 reading 108% of zone
 $approval
-after EPOCH" "$(zwatch --after "$(($(date +%s) - 3600))")"
+after EPOCH" "$(zwatch --held 777)"
+check "zone: with --after, a helper already waiting is returned" "blocked signing approval
+cwd /work/project
+reading 108% of zone
+$approval
+after EPOCH" "$(zwatch --after "$(date +%s)")"
+zone_transcript 162000
+stub "$(printf '%s\n' "$zsigning" | grep -v -e ssh-sk-helper -e ssh-keygen)"
+check "zone: with --held, once the helper is gone, the task is cut" "capture-due
+cwd /work/project
+reading 108% of zone
+due: background task bsig1 is cut" "$(zwatch --held 903)"
+stub "$zsigning"
+check "zone: --held needs a pid" "Error: --held needs the pid on a helper line, not 'x'" "$(zwatch --held x)"
+out=$(sh "$scripts/watch.sh" --id c2a368ee --held 903 --file "$fixtures/working-busy.json" </dev/null 2>&1)
+check "zone: --held without --zone is refused" "Error: --held is read only with --zone" "$out"
 FAKE_LIST="$fixtures/working-busy.json"
-out=$( { sh "$scripts/watch.sh" --id c2a368ee --zone --after "$(date +%s)" --stall 0 --interval 0 --timeout 1 </dev/null 2>&1; echo "rc $?"; } | grep -v '^note: ')
+out=$( { sh "$scripts/watch.sh" --id c2a368ee --zone --held 903 --stall 0 --interval 0 --timeout 1 </dev/null 2>&1; echo "rc $?"; } | grep -v '^note: ')
 check "zone: the second watch's loop waits to its timeout, no hang" "working
 cwd /work/project
 rc 124" "$out"

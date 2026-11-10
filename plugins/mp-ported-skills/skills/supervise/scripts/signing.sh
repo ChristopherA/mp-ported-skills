@@ -35,16 +35,3 @@ signing_wait() {
             else if (kg != "") printf "ssh-keygen -Y sign (pid %s) has waited %s\n", kg, etime[kg]
         }'
 }
-
-# signing_seconds <etime>: ps's elapsed time ([[dd-]hh:]mm:ss) in seconds,
-# or empty when it is not in that form.
-signing_seconds() {
-    printf '%s\n' "$1" | awk '
-        /^([0-9]+-)?([0-9]+:)?[0-9]+:[0-9]+$/ {
-            d = 0; t = $0
-            if (index(t, "-")) { d = substr(t, 1, index(t, "-") - 1); t = substr(t, index(t, "-") + 1) }
-            k = split(t, f, ":"); s = 0
-            for (i = 1; i <= k; i++) s = s * 60 + f[i]
-            print d * 86400 + s
-        }'
-}

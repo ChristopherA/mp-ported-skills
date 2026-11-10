@@ -20,7 +20,8 @@
 #                      waits at the Mac, which only the maintainer can give
 #                      (#196). Its `needs biometric approval at the Mac: ...`
 #                      line names the helper, its pid and how long it has
-#                      waited; a `Waiting on:` action or the job's needs
+#                      waited, and a `helper <pid>` line its pid; a
+#                      `Waiting on:` action or the job's needs
 #                      becomes `note after the approval it waits on <text>`;
 #                      and an `after <epoch>` line gives the time the watch
 #                      returned. Once the maintainer approves, watch again
@@ -36,10 +37,12 @@
 #                      zone.sh holds for a waiting helper, at or past the
 #                      capture point, returns it too, with a `reading` line
 #                      before the needs line (#206): stopping it then would
-#                      cut the commit mid-sign. A watch with --after goes on
-#                      past a helper that started before that time, the one
-#                      already reported, and returns capture-due once it is
-#                      gone.
+#                      cut the commit mid-sign. A watch with --held <pid>,
+#                      the pid on the first watch's `helper` line, goes on
+#                      while that same helper waits, returns for any other,
+#                      and returns capture-due once it is gone. Below the
+#                      capture point a working worker's helper returns
+#                      nothing: only the turn end above reports it.
 #   parked             its turn ended on a line starting `Parked:`: an
 #                      unattended worker parked its ticket on a question
 #                      only the maintainer can answer (#158)
@@ -110,11 +113,11 @@
 # so it adds only the first note.
 #
 # Usage:
-#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--wait-blocked] [--detail PATH [--capture]] [--interval SECONDS] [--timeout SECONDS] [--stall SECONDS]
+#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone [--held PID]] [--wait-blocked] [--detail PATH [--capture]] [--interval SECONDS] [--timeout SECONDS] [--stall SECONDS]
 #       poll while working (and, with --wait-blocked, while blocked as
 #       above); on timeout print the last
 #       one and exit 124
-#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--wait-blocked] [--detail PATH [--capture]] --file PATH
+#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone [--held PID]] [--wait-blocked] [--detail PATH [--capture]] --file PATH
 #       classify one saved `claude agents --json --all` output
 #   watch.sh --dir DIR --snapshot
 #       print DIR's repo state for --since: take it before the launch
@@ -183,6 +186,7 @@ ZONE=""
 WAIT_BLOCKED=""
 DETAIL=""
 CAPTURE=""
+HELD=""
 INTERVAL=30
 TIMEOUT=14400
 STALL=1800
@@ -197,6 +201,7 @@ while [ $# -gt 0 ]; do
         --snapshot) SNAPSHOT=1; shift ;;
         --after)    need_value "$@"; AFTER="$2"; shift 2 ;;
         --zone)     ZONE=1; shift ;;
+        --held)     need_value "$@"; HELD="$2"; shift 2 ;;
         --wait-blocked) WAIT_BLOCKED=1; shift ;;
         --detail)   need_value "$@"; DETAIL="$2"; shift 2 ;;
         --capture)  CAPTURE=1; shift ;;
@@ -204,8 +209,8 @@ while [ $# -gt 0 ]; do
         --timeout)  need_value "$@"; TIMEOUT="$2"; shift 2 ;;
         --stall)    need_value "$@"; STALL="$2"; shift 2 ;;
         --help)
-            printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--wait-blocked] [--detail PATH [--capture]] [--interval S] [--timeout S] [--stall S] | watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone] [--wait-blocked] [--detail PATH [--capture]] --file PATH | watch.sh --dir DIR --snapshot\n'
-            printf 'Prints: working, moved, done, blocked signing approval, parked, capture-due, hang, blocked <what>, stopped, gone or unknown <state>; then cwd, reading, needs, after, question, worktree, branch and commit lines.\n'
+            printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone [--held PID]] [--wait-blocked] [--detail PATH [--capture]] [--interval S] [--timeout S] [--stall S] | watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone [--held PID]] [--wait-blocked] [--detail PATH [--capture]] --file PATH | watch.sh --dir DIR --snapshot\n'
+            printf 'Prints: working, moved, done, blocked signing approval, parked, capture-due, hang, blocked <what>, stopped, gone or unknown <state>; then cwd, reading, needs, helper, after, question, worktree, branch and commit lines.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
@@ -251,6 +256,8 @@ case $INTERVAL in '' | *[!0-9]*) fail "--interval needs whole seconds, not '$INT
 case $TIMEOUT in '' | *[!0-9]*) fail "--timeout needs whole seconds, not '$TIMEOUT'" ;; esac
 case $STALL in '' | *[!0-9]*) fail "--stall needs whole seconds, not '$STALL'" ;; esac
 case $AFTER in *[!0-9]*) fail "--after needs epoch seconds, not '$AFTER'" ;; esac
+case $HELD in *[!0-9]*) fail "--held needs the pid on a helper line, not '$HELD'" ;; esac
+[ -z "$HELD" ] || [ -n "$ZONE" ] || fail "--held is read only with --zone"
 # claude agents and the job's state.json both follow the config dir, so an
 # unset one would read another profile's sessions.
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the profile being watched is unknown"
@@ -396,16 +403,9 @@ pid_of() {
         | .pid // empty' 2>/dev/null
 }
 
-# signing_new <helper text>: true when the helper signing_wait names started
-# after --after, or there is no --after. The second watch after a held zone
-# capture passes the first's after line, and the helper it reported started
-# before it (#206). ps counts whole seconds, so a start one second past
-# --after is still read as the same helper.
-signing_new() {
-    [ -n "$AFTER" ] || return 0
-    secs=$(signing_seconds "${1##* }")
-    [ -n "$secs" ] || return 1
-    [ $(($(date +%s) - secs)) -gt $((AFTER + 1)) ]
+# helper_pid <helper text>: the pid in signing_wait's `(pid N)`.
+helper_pid() {
+    printf '%s\n' "$1" | sed -n 's/.*(pid \([0-9][0-9]*\)).*/\1/p'
 }
 
 # session_id_of <agents json>: the job's sessionId, or empty when the list
@@ -550,12 +550,14 @@ report() {
                     if [ "$zone_rc" -eq 0 ]; then
                         out=$(printf 'capture-due%s\nreading %s\n%s' "${out#working}" \
                             "$(printf '%s\n' "$reading" | head -n 1)" "$(printf '%s\n' "$reading" | sed -n 2p)")
-                    elif [ -n "$held" ] && signing_new "$held"; then
+                    elif [ -n "$held" ] && [ "$(helper_pid "$held")" != "$HELD" ]; then
                         # The capture is held for a signature at or past the
                         # capture point: only the maintainer at the Mac can
-                        # release it (#206).
-                        out=$(printf 'blocked signing approval%s\nreading %s\nneeds biometric approval at the Mac: %s\nafter %s' \
-                            "${out#working}" "$(printf '%s\n' "$reading" | head -n 1)" "$held" "$(date +%s)")
+                        # release it (#206). The helper --held names was
+                        # reported already, so the watch goes on for it.
+                        out=$(printf 'blocked signing approval%s\nreading %s\nneeds biometric approval at the Mac: %s\nhelper %s\nafter %s' \
+                            "${out#working}" "$(printf '%s\n' "$reading" | head -n 1)" "$held" \
+                            "$(helper_pid "$held")" "$(date +%s)")
                     fi
                 fi
             fi ;;
@@ -596,10 +598,10 @@ report() {
         "blocked input needed"*) [ -z "$waits" ] || signing=$(signing_wait "$(pid_of "$1")") ;;
     esac
     if [ -n "$signing" ]; then
-        out=$(printf '%s\nneeds biometric approval at the Mac: %s\nafter %s' \
+        out=$(printf '%s\nneeds biometric approval at the Mac: %s\nhelper %s\nafter %s' \
             "$(printf '%s\n' "$out" | sed -e '1s/.*/blocked signing approval/' \
                 -e 's/^needs /note after the approval it waits on /')" \
-            "$signing" "$(date +%s)")
+            "$signing" "$(helper_pid "$signing")" "$(date +%s)")
     fi
     if [ -n "$WAIT_BLOCKED" ]; then
         case $out in
