@@ -293,6 +293,29 @@ issues "$(list "$(issue 80 ready-for-human 0 'No priority line here.' | jq -c '.
 out=$(run)
 check "case 6: no priority, title in parentheses" "6 by hand: #80 t80 (x)" "$(next "$out")"
 check "case 6: one hand ticket, runner-up falls to case 7" "$case7_later" "$(runner "$out")"
+# A plain priority line anywhere in the body counts too (#199): any case, an
+# optional bold and trailing period, the first match taken. A line that only
+# starts with the word, as prose, does not.
+issues "$(list "$(issue 80 ready-for-human 0 'No priority line here.' | jq -c '.title = "t80 (x)"')" \
+    "$(issue 81 ready-for-human 0 'Do it later.
+
+Priority: Low')" \
+    "$(issue 82 ready-for-human 0 'Some notes.
+priority: medium.
+Priority: High')" \
+    "$(issue 83 ready-for-human 0 'Notes.
+**Priority: High**
+Trailing note.')" \
+    "$(issue 86 ready-for-human 0 'Priority: High is what the reporter asked for.')")"
+out=$(run)
+check "case 6: plain priority lines ranked" "6 by hand (High): #83 t83" "$(next "$out")"
+check "case 6: plain priority, runner-up" "6 by hand (Medium): #82 t82" "$(runner "$out")"
+has "case 6: plain lines anywhere, prose left out" "by hand, blockers closed: #83 t83 (High); #82 t82 (Medium); #80 t80 (x); #86 t86; #81 t81 (Low)" "$out"
+issues "$(list "$(issue 81 ready-for-human 0 'Do it later.
+Priority: Low')" "$(issue 80 ready-for-human 0 'No priority line here.')")"
+out=$(run)
+check "case 6: end-of-body Low ranks after none" "6 by hand: #80 t80" "$(next "$out")"
+check "case 6: end-of-body Low is the runner-up" "6 by hand (Low): #81 t81" "$(runner "$out")"
 issues "$(list "$(issue 81 ready-for-human 0 '**Priority: Low.** Later.')" "$(issue 87 ready-for-agent)")"
 out=$(run)
 check "case 6: runner-up to case 2" "6 by hand (Low): #81 t81" "$(runner "$out")"

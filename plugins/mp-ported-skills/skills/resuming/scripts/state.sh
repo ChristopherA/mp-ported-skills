@@ -341,10 +341,14 @@ gather() {
             inflight="$inflight, open PR $own" inflight_rest="$inflight_rest, open PR $own"
         fi
 
-        # A body's priority line, its first non-blank line (**Priority: High.**),
-        # as high, medium or low; null when there is none.
-        body_blockers='def priority: [(.body // "") | splits("\r?\n") | select(test("\\S"))][0] // ""
-            | (capture("^\\s*\\*\\*Priority: *(?<p>high|medium|low)"; "i") | .p | ascii_downcase) // null;'
+        # A body's priority line, as high, medium or low; null when there is
+        # none. The first matching line anywhere in the body, in any case:
+        # the bold form with a reason after it (**Priority: High.** Why.), or
+        # a line that is only the rating (Priority: Low, bold and a trailing
+        # period optional). A line of prose that starts with the word is not one.
+        body_blockers='def priority: first((.body // "") | splits("\r?\n")
+            | capture("^\\s*(?:\\*\\*Priority: *(?<p>high|medium|low)|(?:\\*\\*)?Priority: *(?<q>high|medium|low)\\.?(?:\\*\\*)?\\.?\\s*$)"; "i")
+            | (.p // .q) | ascii_downcase) // null;'
         # Issue numbers a body names as blockers: on `Blocked by:` lines, and in
         # bullets under a `Blocked by` heading (any level or case) up to the
         # next heading, the form tickets split from a spec use. Lines in a code
