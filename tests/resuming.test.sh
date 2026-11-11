@@ -306,11 +306,15 @@ Priority: High')" \
     "$(issue 83 ready-for-human 0 'Notes.
 **Priority: High**
 Trailing note.')" \
-    "$(issue 86 ready-for-human 0 'Priority: High is what the reporter asked for.')")"
+    "$(issue 86 ready-for-human 0 'Priority: High is what the reporter asked for.
+```
+Priority: High
+```
+**Priority: Highly** a word, not a rating.')")"
 out=$(run)
 check "case 6: plain priority lines ranked" "6 by hand (High): #83 t83" "$(next "$out")"
 check "case 6: plain priority, runner-up" "6 by hand (Medium): #82 t82" "$(runner "$out")"
-has "case 6: plain lines anywhere, prose left out" "by hand, blockers closed: #83 t83 (High); #82 t82 (Medium); #80 t80 (x); #86 t86; #81 t81 (Low)" "$out"
+check "case 6: plain lines anywhere, prose and fences left out" "#83 t83 (High); #82 t82 (Medium); #80 t80 (x); #86 t86; #81 t81 (Low)" "$(line_of "$out" 'by hand, blockers closed')"
 issues "$(list "$(issue 81 ready-for-human 0 'Do it later.
 Priority: Low')" "$(issue 80 ready-for-human 0 'No priority line here.')")"
 out=$(run)
