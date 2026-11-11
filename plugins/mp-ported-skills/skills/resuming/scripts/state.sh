@@ -14,7 +14,9 @@
 # step is /implement #N, prints the queue a /supervise --loop would run
 # (`queue:`), a sub-issue reorder that would lengthen it (`reorder:`), and the
 # loop command, offered only for two or more tickets or a run to continue
-# (`supervise:`). Writes nothing.
+# (`supervise:`). When the next step is an in-motion parent's by-hand or
+# not-ready child and a ready child behind it could go ahead, prints the same
+# lines for that reorder (#207). Writes nothing.
 #
 # Usage: sh state.sh [dir]
 #   dir defaults to the current folder. Reports everything; an unreached
@@ -607,8 +609,18 @@ gather() {
         if [ -n "$inflight_rest" ]; then offer="1 work in flight: ${inflight_rest#, }"
         else offer=$(printf '%s' "$cases" | sed -n 2p); fi
     fi
-    impl=$(implement_of "$first")
-    [ -n "$impl" ] || [ -n "$(implement_of "$offer")" ] || return 0
+    # When the step is an in-motion parent's by-hand or not-ready child, with
+    # the parent the only work in flight (hand_n), the offer is the reorder
+    # moving a ready child ahead of it, and step_n is that child, set once the
+    # replay finds it; with none, nothing is printed, as before (#207). The
+    # match is on the step itself, so with git work in flight (unpushed
+    # commits included) nothing is printed either.
+    impl=$(implement_of "$first") hand_n=
+    if [ -z "$impl" ] && [ -z "$(implement_of "$offer")" ]; then
+        hand_n=$(hand_step "$first")
+        [ -n "$hand_n" ] || return 0
+        offer=$first
+    fi
     step_n=$(accept_step "$offer")
     # The queue (#129): the tickets a /supervise --loop would run in turn.
     # The loop runs no list: after each ticket step.sh re-reads next:, so the
@@ -620,7 +632,7 @@ gather() {
     # ready-for-agent child behind the one ending the queue, unblocked once
     # the queue is closed, is offered as a reorder ahead of it (reorder:).
     qlen=0 qout=
-    if [ -n "$step_n" ]; then
+    if [ -n "$step_n$hand_n" ]; then
         parent=$(printf '%s\n' "$offer" | sed -n 's/^1 work in flight: in motion #\([0-9][0-9]*\) .*/\1/p')
         if [ -n "$parent" ]; then cands=$(cat "$tmp/kids-$parent.json")
         # Parked rows are dropped here, though frontier skips them too, so
@@ -655,6 +667,12 @@ gather() {
                  end
                end) as $m
             | {q: $r.q, m: $m, len: (($m.after // $r.q) | length)}')
+        # A by-hand step's queue is empty, since the replay ends at that child:
+        # the offer is the reorder's, and with no reorder there is none.
+        if [ -n "$hand_n" ]; then
+            step_n=$(printf '%s' "$qr" | jq -r '.m.y // empty' 2>/dev/null)
+            [ -n "$step_n" ] || return 0
+        fi
         # Empty when the children or the replay could not be read: refused below.
         qlen=$(printf '%s' "$qr" | jq '.len' 2>/dev/null)
         qout=$(echo "queue: $(printf '%s' "$qr" | jq -r '.q | map("#\(.)") | join(" ")')"

@@ -947,11 +947,74 @@ check "supervise: not offered for a second in-motion ticket's child" \
     "$(sup "$(run)")"
 issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)")"
 
-# Any other step: no offer and no queue.
-list "$(issue 26 ready-for-human)" "$(issue 52 ready-for-agent)" >"$FAKE_GH/sub-24.json"
+# A by-hand next child with a ready child behind it (#207): the queue is
+# empty, the reorder moving the ready child ahead of it is offered, and the
+# loop over the queue after when it holds two or more. next: is unchanged, so
+# step.sh still stops on the by-hand child.
+. "$root/plugins/mp-ported-skills/skills/supervise/scripts/accept.sh"
+hand26="1 work in flight: in motion #24 t24; next child #26 (ready-for-human, by hand): t26"
+kids "$(issue 26 ready-for-human)" "$(issue 52 ready-for-agent)"
 out=$(run)
-check "supervise: no offer when the next child is by hand" "" "$(sup "$out")"
-check "queue: none when the next child is by hand" "" "$(queue "$out")"
+check "by hand: next line unchanged" "$hand26" "$(next "$out")"
+check "by hand: step.sh still stops on the by-hand child" "" "$(accept_step "$(next "$out")")"
+check "queue: empty when the next child is by hand" "" "$(queue "$out")"
+has "queue: the line is printed when the next child is by hand" "queue:" "$out"
+check "by hand: the reorder ahead of the by-hand child" \
+    "#52 (open child 2 of #24) ahead of #26 (open child 1): $(move 24 52 26); queue after: #52" "$(reorder "$out")"
+check "supervise: by hand, a queue of one after the move" "$(one 52)" "$(sup "$out")"
+# One move per reading: a second ready child behind the by-hand one stays
+# behind it after the move, and the loop stops there again.
+kids "$(issue 26 ready-for-human)" "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)"
+check "by hand: a ready child left behind it is not in the queue after" \
+    "#52 (open child 2 of #24) ahead of #26 (open child 1): $(move 24 52 26); queue after: #52" "$(reorder "$(run)")"
+# A second ready child waiting on the moved one joins the queue after.
+kids "$(issue 53 ready-for-agent 0 'Blocked by: #52')" "$(issue 26 ready-for-human)" "$(issue 52 ready-for-agent)"
+out=$(run)
+check "by hand: the queue after holds both ready children" \
+    "#52 (open child 3 of #24) ahead of #26 (open child 2): $(move 24 52 26); queue after: #52 #53" "$(reorder "$out")"
+check "supervise: by hand, the loop over the queue after" "$offer" "$(sup "$out")"
+check "by hand, two in the queue after: next line unchanged" "$hand26" "$(next "$out")"
+check "by hand, two in the queue after: queue empty" "" "$(queue "$out")"
+kids "$(issue 53 ready-for-agent 0 'Blocked by: #52')" "$(issue 26 enhancement)" "$(issue 52 ready-for-agent)"
+out=$(run)
+check "not ready: next line unchanged" "1 work in flight: in motion #24 t24; next child #26 (not ready): t26" "$(next "$out")"
+check "not ready: queue empty" "" "$(queue "$out")"
+has "not ready: the queue line is printed" "queue:" "$out"
+check "not ready: the reorder ahead of the not-ready child" \
+    "#52 (open child 3 of #24) ahead of #26 (open child 2): $(move 24 52 26); queue after: #52 #53" "$(reorder "$out")"
+check "not ready: the loop over the queue after" "$offer" "$(sup "$out")"
+# No ready child that could go ahead: nothing printed beyond next:, as before.
+for behind in "parked|$(issue 52 ready-for-agent,parked)" "blocked|$(issue 52 ready-for-agent 0 'Blocked by: #9')" \
+    "not ready-for-agent|$(issue 52 ready-for-human)"; do
+    kids "$(issue 26 ready-for-human)" "${behind#*|}"
+    out=$(run)
+    check "by hand, a ${behind%%|*} child behind: no reorder" "" "$(reorder "$out")"
+    check "by hand, a ${behind%%|*} child behind: no queue line" "" "$(printf '%s\n' "$out" | grep '^queue:')"
+    check "by hand, a ${behind%%|*} child behind: no supervise line" "" "$(sup "$out")"
+    check "by hand, a ${behind%%|*} child behind: next line unchanged" "$hand26" "$(next "$out")"
+done
+# A tree step.sh would refuse, or other work in flight: no queue or reorder.
+kids "$(issue 26 ready-for-human)" "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)"
+echo x >"$proj/scratch"
+out=$(run)
+check "by hand, dirty tree: no queue line" "" "$(printf '%s\n' "$out" | grep '^queue:')"
+check "by hand, dirty tree: no reorder" "" "$(reorder "$out")"
+command rm -f "$proj/scratch"
+# A queue of two after the move, which /implement's unpushed path would offer
+# with a push: line.
+kids "$(issue 53 ready-for-agent 0 'Blocked by: #52')" "$(issue 26 ready-for-human)" "$(issue 52 ready-for-agent)"
+g commit -q --allow-empty -m wip3
+out=$(run)
+check "by hand, unpushed commits: no queue line" "" "$(printf '%s\n' "$out" | grep '^queue:')"
+check "by hand, unpushed commits: no reorder" "" "$(reorder "$out")"
+check "by hand, unpushed commits: no supervise line" "" "$(sup "$out")"
+g reset -q --hard HEAD~1
+issues "$(list "$(issue 23 ready-for-human,in-motion)" "$(issue 24 ready-for-human,in-motion)" \
+    "$(issue 26 ready-for-human)" "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)")"
+out=$(run)
+check "by hand, other work in flight: no queue line" "" "$(printf '%s\n' "$out" | grep '^queue:')"
+check "by hand, other work in flight: no reorder" "" "$(reorder "$out")"
+issues "$(list "$(issue 24 ready-for-human,in-motion)" "$(issue 52 ready-for-agent)")"
 command rm -f "$FAKE_GH/sub-24.json"
 check "supervise: no offer for an in-motion ticket" "" "$(sup "$(run)")"
 issues "$(list "$(issue 31 needs-triage)" "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)")"

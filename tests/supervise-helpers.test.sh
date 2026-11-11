@@ -342,6 +342,16 @@ check "accept: a ready-for-human child is not taken" "" \
     "$(accept_step '1 work in flight: in motion #40 Supervise; next child #41 (ready-for-human, by hand)')"
 check "accept: case 3 is not taken" "" \
     "$(accept_step '3 /triage (you type it): 1 unlabelled')"
+check "hand: a ready-for-human child with only its parent in flight" 41 \
+    "$(hand_step '1 work in flight: in motion #40 Supervise; next child #41 (ready-for-human, by hand): t41')"
+check "hand: a not-ready child with only its parent in flight" 41 \
+    "$(hand_step '1 work in flight: in motion #40 Supervise; next child #41 (not ready): t41')"
+check "hand: git work before the parent" "" \
+    "$(hand_step '1 work in flight: 1 unpushed commits, in motion #40 Supervise; next child #41 (ready-for-human, by hand): t41')"
+check "hand: a second in-motion ticket" "" \
+    "$(hand_step '1 work in flight: in motion #39 a; #40 Supervise; next child #41 (ready-for-human, by hand): t41')"
+check "hand: a ready-for-agent child is accept_step's" "" \
+    "$(hand_step '1 work in flight: in motion #40 Supervise; next child #41 (ready-for-agent, /implement #41, you type it): t41')"
 
 # The patterns live only in accept.sh: step.sh and state.sh both use it.
 copies=$(grep -l 'in motion #\[0-9\]\[0-9\]\* \[^;\]\*; next child' "$skills"/*/scripts/*.sh | sed "s|$skills/||")
