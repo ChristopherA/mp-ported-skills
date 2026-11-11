@@ -273,8 +273,10 @@ fi
 # edit's own words: the command split at the separators outside quotes
 # (command_parts, in the classifier). A flag on another command beside it
 # (`&& git commit -m`) is that command's. The first gh issue edit part whose
-# name differs from the first scan's names the command; the first scan's
-# name stands only when every gh issue edit part reads the same.
+# name differs from the first scan's names the command, and when that is
+# the other granted name, a label edit beside a link, it reads as label and
+# other fields; the first scan's name stands only when every gh issue edit
+# part reads the same.
 case "$matched" in
 "gh issue edit (label)" | "gh issue edit (sub-issue link)")
     # Each part is read as the scan above reads a line, quotes dropped, and
@@ -297,7 +299,15 @@ case "$matched" in
         matched=""
         classify_gh "$@"
         case "$matched" in
-        "gh issue edit"*) [ "$matched" = "$first" ] || break ;;
+        "$first") ;;
+        # The other granted name: labels in one edit and a link in
+        # another are the label family beside another, which no one grant
+        # covers.
+        "gh issue edit (label)" | "gh issue edit (sub-issue link)")
+            matched="gh issue edit (label and other fields)"
+            break
+            ;;
+        "gh issue edit"*) break ;;
         esac
     done
     set +f

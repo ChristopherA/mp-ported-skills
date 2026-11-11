@@ -241,6 +241,8 @@ classify_gh() {
             -*) _cother=yes ;;
             esac
         done
+        # Each family set adds one "yes", so "$_cfams" = yes means exactly
+        # one family is present.
         _cfams=$_clabel$_clink$_cunlink$_cother
         [ -z "$_chelp" ] || [ -z "$_cfams" ] || { _cother=yes; _cfams=${_cfams}yes; }
         if [ -n "$_clabel" ] && [ "$_cfams" = yes ]; then

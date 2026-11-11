@@ -455,6 +455,16 @@ check "a title after a quoted semicolon names other fields" "yes" \
     "$(reason 0 auto 'gh issue edit 40 --add-sub-issue "5;6" --title t' "$granted" | grep -q "'gh issue edit (other fields)'" && echo yes)"
 check "an unlink in a second gh issue edit is not the sub-issue grant" "deny" \
     "$(decision 0 auto 'gh issue edit 23 --parent 40; gh issue edit 24 --remove-parent' "$granted")"
+# Two gh issue edits with different granted names are a label edit beside a
+# link, which no one grant covers, in either order.
+check "a label edit before a link is not the sub-issue grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label x; gh issue edit 6 --parent 40' "$granted")"
+check "a label edit beside a link names label and other fields" "yes" \
+    "$(reason 0 auto 'gh issue edit 5 --add-label x; gh issue edit 6 --parent 40' "$granted" | grep -q "'gh issue edit (label and other fields)'" && echo yes)"
+check "a link before a label edit is not the sub-issue grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 6 --parent 40; gh issue edit 5 --add-label x' "$granted")"
+check "a title after a label edit and a link is not the sub-issue grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label x; gh issue edit 6 --parent 40; gh issue edit 7 --title t' "$granted")"
 check "a title edit is not the sub-issue grant" "deny" \
     "$(decision 0 auto 'gh issue edit 23 --title t' "$granted")"
 check "a link piped into a shell is never granted" "deny" \
@@ -499,6 +509,10 @@ check "a joined -bX after a quoted semicolon is not the label grant" "deny" \
     "$(decision 0 auto 'gh issue edit 5 --add-label "a;b" -bX' "$granted")"
 check "a granted label edit with a quoted semicolon goes through" "" \
     "$(decision 0 auto 'gh issue edit 5 --add-label "a;b" -R o/r' "$granted")"
+check "a link before a label edit is not the label grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 6 --parent 40; gh issue edit 5 --add-label x' "$granted")"
+check "a label edit before a link is not the label grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label x; gh issue edit 6 --parent 40' "$granted")"
 # Only the gh issue edit's own words are read for another field: a flag on
 # another command beside it is that command's.
 check "a granted label edit beside a git commit -m goes through" "" \
