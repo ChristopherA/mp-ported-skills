@@ -958,15 +958,17 @@ out=$(run)
 check "by hand: next line unchanged" "$hand26" "$(next "$out")"
 check "by hand: step.sh still stops on the by-hand child" "" "$(accept_step "$(next "$out")")"
 check "queue: empty when the next child is by hand" "" "$(queue "$out")"
-has "queue: the line is printed when the next child is by hand" "queue:" "$out"
+check "queue: the line is printed when the next child is by hand" "queue: " "$(printf '%s\n' "$out" | grep '^queue:')"
 check "by hand: the reorder ahead of the by-hand child" \
     "#52 (open child 2 of #24) ahead of #26 (open child 1): $(move 24 52 26); queue after: #52" "$(reorder "$out")"
 check "supervise: by hand, a queue of one after the move" "$(one 52)" "$(sup "$out")"
 # One move per reading: a second ready child behind the by-hand one stays
 # behind it after the move, and the loop stops there again.
 kids "$(issue 26 ready-for-human)" "$(issue 52 ready-for-agent)" "$(issue 53 ready-for-agent)"
+out=$(run)
 check "by hand: a ready child left behind it is not in the queue after" \
-    "#52 (open child 2 of #24) ahead of #26 (open child 1): $(move 24 52 26); queue after: #52" "$(reorder "$(run)")"
+    "#52 (open child 2 of #24) ahead of #26 (open child 1): $(move 24 52 26); queue after: #52" "$(reorder "$out")"
+check "supervise: by hand, a ready child left behind, a queue of one" "$(one 52)" "$(sup "$out")"
 # A second ready child waiting on the moved one joins the queue after.
 kids "$(issue 53 ready-for-agent 0 'Blocked by: #52')" "$(issue 26 ready-for-human)" "$(issue 52 ready-for-agent)"
 out=$(run)
@@ -979,7 +981,7 @@ kids "$(issue 53 ready-for-agent 0 'Blocked by: #52')" "$(issue 26 enhancement)"
 out=$(run)
 check "not ready: next line unchanged" "1 work in flight: in motion #24 t24; next child #26 (not ready): t26" "$(next "$out")"
 check "not ready: queue empty" "" "$(queue "$out")"
-has "not ready: the queue line is printed" "queue:" "$out"
+check "not ready: the queue line is printed" "queue: " "$(printf '%s\n' "$out" | grep '^queue:')"
 check "not ready: the reorder ahead of the not-ready child" \
     "#52 (open child 3 of #24) ahead of #26 (open child 2): $(move 24 52 26); queue after: #52 #53" "$(reorder "$out")"
 check "not ready: the loop over the queue after" "$offer" "$(sup "$out")"

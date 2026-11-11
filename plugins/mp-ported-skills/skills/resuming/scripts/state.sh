@@ -610,15 +610,15 @@ gather() {
         else offer=$(printf '%s' "$cases" | sed -n 2p); fi
     fi
     # When the step is an in-motion parent's by-hand or not-ready child, with
-    # the parent the only work in flight (hand_n), the offer is the reorder
+    # the parent the only work in flight (hand_child), the offer is the reorder
     # moving a ready child ahead of it, and step_n is that child, set once the
     # replay finds it; with none, nothing is printed, as before (#207). The
     # match is on the step itself, so with git work in flight (unpushed
     # commits included) nothing is printed either.
-    impl=$(implement_of "$first") hand_n=
+    impl=$(implement_of "$first") hand_child=
     if [ -z "$impl" ] && [ -z "$(implement_of "$offer")" ]; then
-        hand_n=$(hand_step "$first")
-        [ -n "$hand_n" ] || return 0
+        hand_child=$(hand_step "$first")
+        [ -n "$hand_child" ] || return 0
         offer=$first
     fi
     step_n=$(accept_step "$offer")
@@ -632,7 +632,7 @@ gather() {
     # ready-for-agent child behind the one ending the queue, unblocked once
     # the queue is closed, is offered as a reorder ahead of it (reorder:).
     qlen=0 qout=
-    if [ -n "$step_n$hand_n" ]; then
+    if [ -n "$step_n$hand_child" ]; then
         parent=$(printf '%s\n' "$offer" | sed -n 's/^1 work in flight: in motion #\([0-9][0-9]*\) .*/\1/p')
         if [ -n "$parent" ]; then cands=$(cat "$tmp/kids-$parent.json")
         # Parked rows are dropped here, though frontier skips them too, so
@@ -669,7 +669,7 @@ gather() {
             | {q: $r.q, m: $m, len: (($m.after // $r.q) | length)}')
         # A by-hand step's queue is empty, since the replay ends at that child:
         # the offer is the reorder's, and with no reorder there is none.
-        if [ -n "$hand_n" ]; then
+        if [ -n "$hand_child" ]; then
             step_n=$(printf '%s' "$qr" | jq -r '.m.y // empty' 2>/dev/null)
             [ -n "$step_n" ] || return 0
         fi

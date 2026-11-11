@@ -1,7 +1,8 @@
 #!/bin/sh
 # accept.sh -- sourced by step.sh and resuming's state.sh: which next: step
-# /supervise takes (#115). One copy of the patterns, so state.sh's
-# supervise: offer and step.sh cannot disagree on it.
+# /supervise takes (#115), and which by-hand step state.sh offers a reorder
+# past (#207). One copy of the patterns, so state.sh's supervise: offer and
+# step.sh cannot disagree on them.
 
 # accept_step <line>: the ticket number when state.sh's next: line (without
 # `next: `) is /implement of a ready-for-agent ticket with nothing else in
