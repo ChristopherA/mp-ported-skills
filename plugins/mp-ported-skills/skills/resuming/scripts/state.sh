@@ -434,10 +434,12 @@ gather() {
         # A ticket awaiting a reply to its park question is parked (#158).
         rows=$(mark_parked "$rows")
         awaiting=$(printf '%s' "$rows" | jq -r 'map(select(.pk) | "#\(.n) \(.t)") | join("; ")')
-        count() { printf '%s' "$rows" | jq --arg r "$1" '[.[] | select(.role == $r)] | length'; }
+        # count <role> [rows]: the rows (all of them by default) with that role.
+        count() { printf '%s' "${2:-$rows}" | jq --arg r "$1" '[.[] | select(.role == $r)] | length'; }
         # Incoming work leaves out a parked ticket, as every other case does:
-        # the unlabelled, needs-triage and needs-info counts and case 3 (#145).
-        count_unparked() { printf '%s' "$rows" | jq --arg r "$1" '[.[] | select(.role == $r and (.l | index("parked") | not))] | length'; }
+        # the unlabelled, needs-triage and needs-info counts, the replied
+        # needs-info list and so case 3 read only these rows (#145).
+        unparked=$(printf '%s' "$rows" | jq -c 'map(select(.l | index("parked") | not))')
         # A parked ticket goes beside ready-for-agent or ready-for-human only;
         # one parked beside any other state, or none, has a label to fix.
         misparked=$(printf '%s' "$rows" | jq -r '
@@ -522,7 +524,7 @@ gather() {
 
         # needs-info with a reply: the last comment is not the tracker user's.
         replied=
-        infos=$(printf '%s' "$rows" | jq -r '.[] | select(.role == "info" and .c > 0 and (.l | index("parked") | not)) | .n')
+        infos=$(printf '%s' "$unparked" | jq -r '.[] | select(.role == "info" and .c > 0) | .n')
         if [ -n "$infos" ]; then
             me=$(gh api user 2>/dev/null | jq -r '.login // empty')
             for n in $infos; do
@@ -533,7 +535,7 @@ gather() {
         fi
         replied=${replied# }
 
-        n_triage=$(count_unparked triage) n_info=$(count_unparked info) n_unl=$(count_unparked unlabelled)
+        n_triage=$(count triage "$unparked") n_info=$(count info "$unparked") n_unl=$(count unlabelled "$unparked")
         n_agent=$(count agent) n_human=$(count human) n_map=$(count map)
         maps=$(printf '%s' "$rows" | jq -r '[.[] | select(.role == "map")] | map("#\(.n) \(.t)") | join("; ")')
         echo "issues: $n_unl unlabelled, $n_triage $t_triage, $n_info $t_info (replied: ${replied:-none}), $n_agent $t_agent, $n_human $t_human, $n_map wayfinder:map"

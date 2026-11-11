@@ -283,7 +283,7 @@ printf '[{"user":{"login":"me"}},{"user":{"login":"reporter"}}]' >"$FAKE_GH/comm
 issues "$(list "$(issue 42 needs-info,parked | jq -c '.comments = 2')" "$(issue 43 enhancement,needs-triage,parked)" \
     "$(issue 44 needs-triage,parked)" "$(issue 45 parked)")"
 out=$(run)
-has "case 3: parked tickets not counted" "issues: 0 unlabelled, 0 needs-triage, 0 needs-info (replied: none)," "$out"
+check "case 3: parked tickets not counted" "0 unlabelled, 0 needs-triage, 0 needs-info (replied: none), 0 ready-for-agent, 0 ready-for-human, 0 wayfinder:map" "$(line_of "$out" issues)"
 check "case 3: parked tickets alone are not the step" "7 nothing in motion" "$(next "$out")"
 check "parked without a state label: each one named" "#42, #43, #44, #45" "$(line_of "$out" "parked without a state label")"
 issues "$(list "$(issue 43 needs-triage,parked)" "$(issue 45 parked)" "$(issue 51 ready-for-agent)")"
