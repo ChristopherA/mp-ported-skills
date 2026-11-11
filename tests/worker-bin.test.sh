@@ -211,6 +211,44 @@ check "a --remove-sub-issue is refused under the grant" "exit=1" \
     "$(last "$(worker 0 granted 'gh issue edit 40 --remove-sub-issue 23')")"
 check "a link with a quoted semicolon and a title is refused under the grant" "exit=1" \
     "$(last "$(worker 0 granted 'sh -c "gh issue edit 40 --add-sub-issue \"5;6\" --title t"')")"
+# Eight more gh issue writes get no grant (#218); help, and develop's
+# --list, are reads.
+for form in 'delete 23 --yes' 'transfer 23 o/r' 'reopen 23' 'reopen 23 -c x' 'pin 23' 'unpin 23' 'lock 23' 'unlock 23' 'develop 23'; do
+    out=$(worker 0 granted "sh -c 'gh issue $form'")
+    check "gh issue $form is refused under the grants" "exit=1" "$(last "$out")"
+    check "gh issue $form never reaches the real gh" "0" "$(printf '%s\n' "$out" | grep -c 'real gh')"
+    sub=${form%% *}
+    check "gh issue $sub --help reaches the real gh" "real gh: issue $sub --help" \
+        "$(worker 0 plain "gh issue $sub --help" | head -n 1)"
+done
+check "gh issue develop 23 --list reaches the real gh" "real gh: issue develop 23 --list" \
+    "$(worker 0 plain 'gh issue develop 23 --list' | head -n 1)"
+# A create with --parent needs issue-create and sub-issue together; one
+# with --blocked-by or --blocking is never granted (#218).
+for g in issue-create sub-issue; do
+    repo "only-$g"
+    mkdir -p "only-$g/docs/agents"
+    printf '## Grants\n\n- %s\n' "$g" >"only-$g/docs/agents/supervision.md"
+    git -C "only-$g" add docs/agents/supervision.md
+    git -C "only-$g" -c commit.gpgsign=false commit -q -m grants
+    git -C "only-$g" push -q origin main 2>/dev/null
+    for form in '--title t --parent 40' '--title t --parent=40' '--title "a;b" --parent 40'; do
+        check "gh issue create $form is refused under $g alone" "exit=1" \
+            "$(last "$(worker 0 "only-$g" "gh issue create $form")")"
+    done
+    check "gh issue new --parent is refused under $g alone" "exit=1" \
+        "$(last "$(worker 0 "only-$g" 'gh issue new --title t --parent 40')")"
+done
+check "a plain create reaches the real gh under issue-create alone" "real gh: issue create --title t --label bug --milestone m" \
+    "$(worker 0 only-issue-create 'gh issue create --title t --label bug --milestone m' | head -n 1)"
+check "a create --parent reaches the real gh under both grants" "real gh: issue create --title a;b --parent 40" \
+    "$(worker 0 granted 'gh issue create --title "a;b" --parent 40' | head -n 1)"
+check "gh issue new --parent reaches the real gh under both grants" "real gh: issue new --title t --parent=40" \
+    "$(worker 0 granted 'gh issue new --title t --parent=40' | head -n 1)"
+for form in '--title t --blocked-by 5' '--title t --blocked-by=5' '--title t --blocking 5' '--title t --parent 40 --blocked-by 5'; do
+    check "gh issue create $form is refused under the grants" "exit=1" \
+        "$(last "$(worker 0 granted "gh issue create $form")")"
+done
 # The comment grant posts a new comment only (#113), and no grant covers
 # a GraphQL mutation.
 check "a granted repo's issue comment --edit-last is refused" "exit=1" \

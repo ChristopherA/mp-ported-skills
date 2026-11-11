@@ -314,6 +314,38 @@ last_says 'Waiting on: gh issue edit 118 --add-label in-motion --body x'
 run_as 'blocked input needed'
 not_routine "a relabel with a body under the grant" "it waits on an action no grant can cover"
 
+# A create with --parent needs issue-create and sub-issue (#218), a create
+# with --blocked-by or --blocking no grant covers, nor do the eight gh issue
+# writes such as delete.
+last_says 'Waiting on: gh issue create --title t --body-file b.md --parent 40'
+run_as 'blocked input needed'
+not_routine "a create --parent under sub-issue alone" "no standing grant covers issue-create"
+printf -- '- issue-create: findings\n' >>"$repo/docs/agents/supervision.md"
+repo_git "$repo" commit -q -am "Grant issue-create"
+repo_git "$repo" push -q origin main 2>/dev/null
+last_says 'Waiting on: gh issue create --title t --body-file b.md --parent 40'
+run_as 'blocked input needed'
+check "a granted create --parent cites both grants" "0 rule grant issue-create: findings; sub-issue: tickets a capture files, under the parent" \
+    "$(rc) $(sed -n 2p "$work/out")"
+check "a granted create --parent answer names both actions" "yes" \
+    "$(grep -q '^answer .*go ahead with the issue-create and sub-issue\.' "$work/out" && echo yes)"
+last_says 'Waiting on: gh issue new --title t --parent=40'
+run_as 'blocked input needed'
+check "a granted gh issue new --parent cites both grants" "0 rule grant issue-create: findings; sub-issue: tickets a capture files, under the parent" \
+    "$(rc) $(sed -n 2p "$work/out")"
+last_says 'Waiting on: gh issue create --title t --body-file b.md'
+run_as 'blocked input needed'
+check "a granted plain create" "0 rule grant issue-create: findings" "$(rc) $(sed -n 2p "$work/out")"
+last_says 'Waiting on: gh issue create --title t --blocked-by 5'
+run_as 'blocked input needed'
+not_routine "a create --blocked-by under both grants" "it waits on an action no grant can cover"
+last_says 'Waiting on: gh issue create --title t --parent 40 --blocking 5'
+run_as 'blocked input needed'
+not_routine "a create --parent --blocking under both grants" "it waits on an action no grant can cover"
+last_says 'Waiting on: gh issue delete 23 --yes'
+run_as 'blocked input needed'
+not_routine "a gh issue delete" "it waits on an action no grant can cover"
+
 # A granted close waits while the Distribution repo is ahead (#186).
 dist="$work/dist"
 git init -q --bare "$work/dist.git"

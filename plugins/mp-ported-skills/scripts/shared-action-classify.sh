@@ -217,7 +217,48 @@ classify_gh() {
             esac
         done
         ;;
-    issue/create | issue/new) matched="gh issue create" ;;
+    issue/create | issue/new)
+        # A create's link flags are named apart (#218): --blocked-by or
+        # --blocking as a blocked-by link, which no grant covers, and
+        # --parent as a sub-issue link, which needs issue-create and
+        # sub-issue together. Any word that is the flag counts, even one gh
+        # would read as another flag's value; every other word is ignored.
+        _cparent="" _cblocked=""
+        for _carg in "$@"; do
+            case "$_carg" in
+            --blocked-by | --blocked-by=* | --blocking | --blocking=*) _cblocked=yes ;;
+            --parent | --parent=*) _cparent=yes ;;
+            esac
+        done
+        if [ -n "$_cblocked" ]; then
+            matched="gh issue create (blocked-by link)"
+        elif [ -n "$_cparent" ]; then
+            matched="gh issue create (sub-issue link)"
+        else
+            matched="gh issue create"
+        fi
+        ;;
+    issue/delete | issue/transfer | issue/reopen | issue/pin | issue/unpin | issue/lock | issue/unlock | issue/develop)
+        # Writes no grant covers (#218). A help flag prints help and runs
+        # nothing when no other flag stands beside it (beside one it may be
+        # that flag's value: `reopen 23 -c --help`), and develop's --list
+        # or -l is a read on the same terms.
+        _chelp="" _clist="" _cother=""
+        for _carg in "$@"; do
+            case "$_carg" in
+            -R | --repo | --repo=* | -R?*) ;;
+            --help | -h) _chelp=yes ;;
+            --list | -l) _clist=yes ;;
+            -*) _cother=yes ;;
+            esac
+        done
+        [ "$gh_act" = develop ] || { [ -z "$_clist" ] || _cother=yes; }
+        if [ -z "$_cother" ] && { [ -n "$_chelp" ] || [ -n "$_clist" ]; }; then
+            :
+        else
+            matched="gh issue $gh_act"
+        fi
+        ;;
     issue/edit)
         # Every field a gh issue edit sets is named, by the families of its
         # flags: label (--add-label, --remove-label) for the label grant
@@ -335,7 +376,11 @@ classify_gh() {
 # new issue map to that action (#110), the sub-issue link and reorder map to
 # sub-issue (#162), as does a gh issue edit that only links (--parent,
 # --add-sub-issue; #202), and a label-only gh issue edit maps to label
-# (#184). No form maps
+# (#184). A gh issue create with --parent needs two actions, issue-create
+# and sub-issue (#218), printed space-separated: a caller lets it through
+# only when every action printed is granted. No grant covers a create with
+# --blocked-by or --blocking, nor gh issue delete, transfer, reopen, pin,
+# unpin, lock, unlock or develop (#218). No form maps
 # to checked-push (#188): it covers only the supervisor's own push.sh push,
 # so a worker's push under it alone is refused as with no grant.
 grant_action() { # <matched>
@@ -347,8 +392,21 @@ grant_action() { # <matched>
     "gh pr merge"*) echo pr-merge ;;
     "gh issue close"*) echo issue-close ;;
     "gh issue comment" | "gh api POST (issue comment)") echo issue-comment ;;
-    "gh issue create"* | "gh api POST (issue create)") echo issue-create ;;
+    "gh issue create" | "gh api POST (issue create)") echo issue-create ;;
+    "gh issue create (sub-issue link)") echo issue-create sub-issue ;;
     "gh api POST (sub-issue link)" | "gh api PATCH (sub-issue reorder)" | "gh issue edit (sub-issue link)") echo sub-issue ;;
     "gh issue edit (label)") echo label ;;
     esac
+}
+
+# classify_granted <grant.sh> <dir> <action>...: succeeds only when grant.sh
+# finds a standing grant in <dir> for every action given, as grant_action
+# prints them (#218). With no action, or no grant.sh, it fails.
+classify_granted() {
+    _cgsh=$1 _cgdir=$2
+    shift 2
+    [ $# -gt 0 ] && [ -f "$_cgsh" ] || return 1
+    for _cga in "$@"; do
+        sh "$_cgsh" --dir "$_cgdir" --action "$_cga" >/dev/null 2>&1 </dev/null || return 1
+    done
 }

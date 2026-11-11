@@ -244,7 +244,9 @@ if [ -z "$matched" ] && [ -n "$piped" ]; then
     has_field() { printf '%s\n' "$words" | grep -vx -e -R -e --repo -e --help -e -h | grep -q -- '^-'; }
     if has git && has push; then
         matched="git push (piped into a shell)"
-    elif has gh && { { has pr && { has create || has merge; }; } || { has issue && { has close || has comment || has create || has new || { has edit && has_field; }; }; }; }; then
+    # The eight gh issue writes no grant covers are named too (#218).
+    elif has gh && { { has pr && { has create || has merge; }; } || { has issue && { has close || has comment || has create || has new || { has edit && has_field; } ||
+        has delete || has transfer || has reopen || has pin || has unpin || has lock || has unlock || has develop; }; }; }; then
         matched="gh (piped into a shell)"
     fi
 fi
@@ -318,6 +320,39 @@ case "$matched" in
     esac
     ;;
 esac
+# A create's link flag can sit after a quoted separator too (`--title "a;b"
+# --parent 40`; #218), where the first scan did not read it. Read each gh
+# issue create part as above, and name the command by the part that needs
+# the most: a blocked-by link, which no grant covers, over a sub-issue link,
+# over a plain create.
+case "$matched" in
+"gh issue create" | "gh issue create (sub-issue link)")
+    first=$matched
+    parts=$(command_parts "$cmd")
+    IFS='
+'
+    set -f
+    for part in $parts; do
+        IFS=$oldIFS
+        # shellcheck disable=SC2046
+        set -- $(printf '%s' "$part" | tr -d "\"'\\\\")
+        IFS='
+'
+        while [ $# -gt 0 ] && [ "${1##*/}" != gh ]; do shift; done
+        [ $# -gt 0 ] || continue
+        shift
+        matched=""
+        classify_gh "$@"
+        case "$matched" in
+        "gh issue create (blocked-by link)") first=$matched; break ;;
+        "gh issue create (sub-issue link)") first=$matched ;;
+        esac
+    done
+    set +f
+    IFS=$oldIFS
+    matched=$first
+    ;;
+esac
 
 # A standing grant lets this exact form through. Only a form grant.sh can
 # name maps to an action; the other gh api forms and the piped-into-a-shell
@@ -326,6 +361,8 @@ esac
 # probe of whether a past command matches a refused form at all, skips this
 # so a grant added since cannot make that probe stop naming it -- the
 # variable can only ever make this hook refuse more, never less.
+# A name can need two actions (gh issue create --parent; #218): it goes
+# through only when every one is granted.
 action=""
 [ -n "${MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS:-}" ] || action=$(grant_action "$matched")
 # A grant is read from the repo the command acts on: `git -C <dir>`'s, the
@@ -335,7 +372,8 @@ grant_dir=$cwd
 case "$matched" in git*) grant_dir=$classify_dir ;; esac
 if [ -n "$action" ]; then
     grant_sh="${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}/skills/supervise/scripts/grant.sh"
-    if [ -f "$grant_sh" ] && sh "$grant_sh" --dir "$grant_dir" --action "$action" >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    if classify_granted "$grant_sh" "$grant_dir" $action; then
         # A granted close waits while the Project's Distribution repo holds
         # unpushed commits (#186): the grant covers the ticket after its
         # work is pushed, and that push is Push on approval's.

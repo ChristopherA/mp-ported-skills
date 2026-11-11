@@ -123,10 +123,12 @@ read_out=$(jq -s --arg n "$TICKET" '
         elif test("^gh pr merge\\b") then "pr-merge"
         elif test("^gh issue close\\b") then "issue-close"
         elif test("^gh issue comment\\b") then "issue-comment"
-        elif test("^gh issue (create|new)\\b") then "issue-create"
         elif test("^gh api ") then sub_issue_api
-        # A gh issue edit is named by the classifier the hook uses, below,
-        # so the two cannot drift: a label-only edit is the label action.
+        # A gh issue edit or create is named by the classifier the hook
+        # uses, below, so the two cannot drift: a label-only edit is the
+        # label action, and a create with --parent needs issue-create and
+        # sub-issue (#218).
+        elif test("^gh issue (create|new)\\b") then "classify"
         elif test("^gh ") and test("(^| )edit( |$)") then "classify"
         else null end;
     # The words a go-ahead question may open with, before its verb.
@@ -232,10 +234,17 @@ case $kind in
     grant)
         # grant.sh exits 1 both for no grant and for an error; only an
         # error writes an Error: line.
-        if ! citation=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$action" </dev/null 2>"$errors"); then
-            grep -q '^Error:' "$errors" && { printf 'not routine: grant.sh failed: %s\n' "$(grep '^Error:' "$errors" | head -n 1)"; exit 2; }
-            not_routine "no standing grant covers $action"
-        fi
+        # A command can need two actions (gh issue create --parent; #218):
+        # each must be granted, and the answer cites both.
+        citation=""
+        for want in $action; do
+            if ! cite=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$want" </dev/null 2>"$errors"); then
+                grep -q '^Error:' "$errors" && { printf 'not routine: grant.sh failed: %s\n' "$(grep '^Error:' "$errors" | head -n 1)"; exit 2; }
+                not_routine "no standing grant covers $want"
+            fi
+            citation="$citation${citation:+; }$cite"
+        done
+        action=$(printf '%s' "$action" | sed 's/ / and /g')
         # A granted close waits while the Project's Distribution repo is
         # ahead of its upstream (#186), and the hook would refuse it.
         if [ "$action" = issue-close ]; then

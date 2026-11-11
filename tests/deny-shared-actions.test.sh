@@ -141,6 +141,35 @@ check "gh issue edit -h is not refused" "" "$(decision 0 auto 'gh issue edit -h'
 check "gh -R o/r issue edit --help is not refused" "" "$(decision 0 auto 'gh -R o/r issue edit --help')"
 check "gh issue edit with no flag is not refused" "" "$(decision 0 auto 'gh issue edit 5')"
 check "gh issue edit attended is not the hook's" "" "$(decision 1 auto 'gh issue edit 5 --add-label in-motion')"
+# Eight more gh issue writes are named (#218), and no grant covers them.
+for form in 'delete 23 --yes' 'transfer 23 o/r' 'reopen 23' 'reopen 23 -c x' 'pin 23' 'unpin 23' 'lock 23' 'unlock 23' 'develop 23'; do
+    sub=${form%% *}
+    check "gh issue $form is refused" "deny" "$(decision 0 auto "gh issue $form")"
+    check "gh issue $form names gh issue $sub" "yes" \
+        "$(reason 0 auto "gh issue $form" | grep -q "'gh issue $sub'" && echo yes)"
+    check "gh issue $form piped into sh is refused" "deny" "$(decision 0 auto "echo 'gh issue $form' | sh")"
+    check "gh issue $sub --help is not refused" "" "$(decision 0 auto "gh issue $sub --help")"
+    check "gh issue $sub -h is not refused" "" "$(decision 0 auto "gh issue $sub -h")"
+done
+check "gh -R o/r issue delete 23 --yes is refused" "deny" "$(decision 0 auto 'gh -R o/r issue delete 23 --yes')"
+check "gh issue develop 23 --list is not refused" "" "$(decision 0 auto 'gh issue develop 23 --list')"
+check "gh issue develop -l 23 is not refused" "" "$(decision 0 auto 'gh issue develop -l 23')"
+check "gh issue develop 23 --name b is refused" "deny" "$(decision 0 auto 'gh issue develop 23 --name b')"
+check "gh issue reopen 23 -c --help is refused" "deny" "$(decision 0 auto 'gh issue reopen 23 -c --help')"
+# gh issue create's link flags are named apart (#218): --parent as a
+# sub-issue link, --blocked-by and --blocking as a blocked-by link.
+for form in '--title t --parent 40' '--title t --parent=40' '-t "a;b" --parent 40'; do
+    check "gh issue create $form names a sub-issue link" "yes" \
+        "$(reason 0 auto "gh issue create $form" | grep -q "'gh issue create (sub-issue link)'" && echo yes)"
+done
+check "gh issue new --parent names a sub-issue link" "yes" \
+    "$(reason 0 auto 'gh issue new --title t --parent 40' | grep -q "'gh issue create (sub-issue link)'" && echo yes)"
+for form in '--title t --blocked-by 5' '--title t --blocked-by=5' '--title t --blocking 5' '--title t --blocking=5' '--title t --parent 40 --blocked-by 5' '--title "a;b" --blocked-by 5' '--parent 40 --title "a|b" --blocking 5'; do
+    check "gh issue create $form names a blocked-by link" "yes" \
+        "$(reason 0 auto "gh issue create $form" | grep -q "'gh issue create (blocked-by link)'" && echo yes)"
+done
+check "a plain gh issue create names gh issue create" "yes" \
+    "$(reason 0 auto 'gh issue create --title t --label bug --milestone m' | grep -q "'gh issue create'" && echo yes)"
 
 # A repo flag is read wherever gh takes one: before the subcommand,
 # between it and its action, or after the action (#119), in each spelling.
@@ -574,6 +603,45 @@ check "a granted gh pr new goes through" "" \
     "$(decision 0 auto 'gh pr new --fill' "$granted")"
 check "a granted gh pr -R o/r new goes through" "" \
     "$(decision 0 auto 'gh pr -R o/r new --fill' "$granted")"
+# A gh issue create with --parent needs both issue-create and sub-issue
+# (#218); one alone refuses it.
+parent_forms='--title t --parent 40|--title t --parent=40|-t "a;b" --parent 40'
+grant_with() { # <grant>...: commit and push a supervision.md granting them
+    { printf '## Grants\n\n'; for g in "$@"; do printf -- '- %s\n' "$g"; done; } >"$granted/docs/agents/supervision.md"
+    git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "grants: $*"
+    git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+}
+for grants in issue-create sub-issue 'issue-create sub-issue'; do
+    # shellcheck disable=SC2086
+    grant_with $grants
+    expect=deny
+    [ "$grants" != 'issue-create sub-issue' ] || expect=""
+    oldIFS=$IFS IFS='|'
+    for form in $parent_forms; do
+        IFS=$oldIFS
+        check "gh issue create $form under $grants" "$expect" "$(decision 0 auto "gh issue create $form" "$granted")"
+    done
+    IFS=$oldIFS
+    check "gh issue new --parent under $grants" "$expect" "$(decision 0 auto 'gh issue new --title t --parent 40' "$granted")"
+done
+check "a plain create beside a quoted create --parent is the link" "deny" \
+    "$(grant_with issue-create; decision 0 auto 'gh issue create --title x; gh issue create -t "a;b" --parent 40' "$granted")"
+check "a plain create under issue-create goes through as before" "" \
+    "$(decision 0 auto 'gh issue create --title t --label bug --milestone m' "$granted")"
+check "a piped create --parent stays refused under issue-create" "deny" \
+    "$(decision 0 auto "echo 'gh issue create --title t --parent 40' | sh" "$granted")"
+grant_with push issue-close issue-comment issue-create pr-create pr-merge sub-issue label
+for form in '--title t --blocked-by 5' '--title t --blocked-by=5' '--title t --blocking 5' '--title t --parent 40 --blocked-by 5' '--title "a;b" --blocked-by 5'; do
+    check "gh issue create $form is refused under every grant" "deny" \
+        "$(decision 0 auto "gh issue create $form" "$granted")"
+done
+for form in 'delete 23 --yes' 'transfer 23 o/r' 'reopen 23' 'reopen 23 -c x' 'pin 23' 'unpin 23' 'lock 23' 'unlock 23' 'develop 23'; do
+    check "gh issue $form is refused under every grant" "deny" "$(decision 0 auto "gh issue $form" "$granted")"
+done
+check "a piped create --parent stays refused under every grant" "deny" \
+    "$(decision 0 auto "echo 'gh issue create --title t --parent 40' | sh" "$granted")"
+check "a create --parent goes through under every grant" "" \
+    "$(decision 0 auto 'gh issue create --title t --parent 40' "$granted")"
 command rm -rf "$granted" "$remote" "$ungranted"
 
 # A command that is not a shared action goes through.

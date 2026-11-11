@@ -2157,6 +2157,53 @@ command succeeded ungranted: gh issue edit 23 --remove-parent
 command succeeded ungranted: gh issue edit 40 --remove-sub-issue 23" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo5" --start "$gstart" </dev/null | grep '^command')"
 
+# A create with --parent needs issue-create and sub-issue together, and is
+# cited only when both are granted; a create with --blocked-by and the
+# eight gh issue writes no grant covers are never cited (#218).
+{
+    bash_call p1 'gh issue create --title t --parent 40'
+    bash_call p2 'gh issue create --title "a;b" --parent=40'
+    bash_call p3 'gh issue create --title t --blocked-by 5'
+    bash_call p4 'gh issue create --title t --parent 40 --blocking 5'
+    bash_call p5 'gh issue create --title t --label bug'
+    bash_call p6 'gh issue delete 23 --yes'
+    bash_call p7 'gh issue reopen 23 -c x'
+    bash_call p8 'gh issue develop 23'
+    bash_call p9 'gh issue develop 23 --list'
+    bash_call p10 'gh issue lock --help'
+} >"$cfg/projects/-work-project/$sid.jsonl"
+new_grant_repo grepo8 '## Grants
+
+- issue-create: findings
+- sub-issue: under the parent
+- issue-close
+- issue-comment
+- label
+'
+check "actions: a create --parent is cited with both grants, a blocked-by create and the eight writes are not" \
+    "command succeeded granted (issue-create: findings; sub-issue: under the parent): gh issue create --title t --parent 40
+command succeeded granted (issue-create: findings; sub-issue: under the parent): gh issue create --title \"a;b\" --parent=40
+command succeeded ungranted: gh issue create --title t --blocked-by 5
+command succeeded ungranted: gh issue create --title t --parent 40 --blocking 5
+command succeeded granted (issue-create: findings): gh issue create --title t --label bug
+command succeeded ungranted: gh issue delete 23 --yes
+command succeeded ungranted: gh issue reopen 23 -c x
+command succeeded ungranted: gh issue develop 23" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo8" --start "$gstart" </dev/null | grep '^command')"
+new_grant_repo grepo9 '## Grants
+
+- issue-create: findings
+'
+out=$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo9" --start "$gstart" </dev/null)
+check "actions: a create --parent under issue-create alone is ungranted" \
+    "command succeeded ungranted: gh issue create --title t --parent 40
+command succeeded ungranted: gh issue create --title \"a;b\" --parent=40" \
+    "$(printf '%s\n' "$out" | grep '^command' | grep -e '--parent' | grep -v -e '--blocking')"
+check "actions: the note says which grant a create --parent lacks" \
+    "note gh issue create --title t --parent 40 needs issue-create and sub-issue; no standing grant covers sub-issue
+note gh issue create --title \"a;b\" --parent=40 needs issue-create and sub-issue; no standing grant covers sub-issue" \
+    "$(printf '%s\n' "$out" | grep '^note .* needs ')"
+
 # A capture's in-motion and live-check relabels cite the label grant (#184);
 # an edit of another field beside a label, or with no label at all, and a
 # label write through gh api, do not. A help flag right after the action

@@ -189,6 +189,12 @@ gh_write_words() {
     case "$gh_act" in
         '' | -* | view | list | status | diff | checks | checkout) return 0 ;;
     esac
+    # gh issue develop --list lists an issue's branches (#218).
+    if [ "$gh_act" = develop ]; then
+        for _gw in "$@"; do
+            case "$_gw" in --list | -l) return 0 ;; esac
+        done
+    fi
     # A help flag right after the action prints help and runs nothing
     # (`gh issue edit --help`). Only there: a later --help can be a value.
     _gw_seen=""
@@ -390,9 +396,12 @@ push_words() {
     printf '%s' "$refs"
 }
 
-# grant_label <action>: sets GRANT_LABEL to "ungranted", or
-# "granted (<citation>)" when grant.sh finds a standing grant for it on the
-# committed default branch (#58). An empty action (action_for found none)
+# grant_label <actions> [<command>]: sets GRANT_LABEL to "ungranted", or
+# "granted (<citation>)" when grant.sh finds a standing grant for every
+# action, space-separated as grant_action prints them, on the committed
+# default branch (#58); a command that needs two cites both, joined by
+# `; `, and with only one of them granted gets a note naming <command>
+# and the action it lacks (#218). An empty action (action_for found none)
 # is always ungranted. grant.sh's own note of a grant it found only on the
 # working tree or an unpushed commit -- ignored, since a worker can reach
 # either without the maintainer seeing it -- is surfaced as a `note` line
@@ -403,15 +412,28 @@ push_words() {
 grant_label() {
     GRANT_LABEL=ungranted
     [ -n "$1" ] || return
-    err=$(mktemp)
-    if cite=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$1" 2>"$err") && [ -n "$cite" ]; then
-        GRANT_LABEL="granted ($cite)"
-    elif [ -s "$err" ]; then
-        # grant.sh's own message already starts "note: "; note() adds its
-        # own "note " prefix, so strip grant.sh's to avoid "note note: ".
-        note "$(command cat "$err" | sed 's/^note: //')"
+    cites="" missing="" needs=""
+    for want in $1; do
+        needs="$needs${needs:+ and }$want"
+        err=$(mktemp)
+        if cite=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$want" 2>"$err") && [ -n "$cite" ]; then
+            cites="$cites${cites:+; }$cite"
+        else
+            missing="$missing${missing:+ and }$want"
+            # grant.sh's own message already starts "note: "; note() adds
+            # its own "note " prefix, so strip grant.sh's to avoid "note
+            # note: ".
+            [ ! -s "$err" ] || note "$(command cat "$err" | sed 's/^note: //')"
+        fi
+        command rm -f "$err"
+    done
+    if [ -z "$missing" ]; then
+        GRANT_LABEL="granted ($cites)"
+    elif [ "$needs" != "$missing" ]; then
+        # A command that needs two actions (gh issue create --parent;
+        # #218) with one of them granted: say which one it lacks.
+        note "${2:-a command} needs $needs; no standing grant covers $missing"
     fi
-    command rm -f "$err"
 }
 
 sid=""
@@ -461,7 +483,7 @@ if [ -n "$sid" ]; then
                 status=$(printf '%s' "$row" | jq -r .status)
                 rest=$(printf '%s' "$row" | jq -r .rest)
                 action=$(action_for "$cmd" "$ops")
-                grant_label "$action"
+                grant_label "$action" "$rest"
                 commands="${commands}command $status $GRANT_LABEL: $rest
 "
                 if { [ "$status" = succeeded ] || [ "$status" = "no result" ]; } && [ "$action" = push ]; then

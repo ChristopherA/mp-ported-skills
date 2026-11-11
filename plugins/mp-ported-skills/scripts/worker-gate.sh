@@ -64,7 +64,10 @@ action=$(grant_action "$matched")
 # (#141).
 grant_dir=$PWD
 case "$matched" in git*) grant_dir=$classify_dir ;; esac
-if [ -n "$action" ] && sh "$here/../skills/supervise/scripts/grant.sh" --dir "$grant_dir" --action "$action" >/dev/null 2>&1; then
+# A name can need two actions (gh issue create --parent; #218): it goes
+# through only when every one is granted.
+# shellcheck disable=SC2086
+if classify_granted "$here/../skills/supervise/scripts/grant.sh" "$grant_dir" $action; then
     # A granted close waits while the Project's Distribution repo holds
     # unpushed commits (#186), as in deny-shared-actions.sh.
     [ "$action" = issue-close ] && classify_close_held "$grant_dir"
