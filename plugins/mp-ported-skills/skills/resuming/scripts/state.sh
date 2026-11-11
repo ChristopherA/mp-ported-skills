@@ -435,6 +435,13 @@ gather() {
         rows=$(mark_parked "$rows")
         awaiting=$(printf '%s' "$rows" | jq -r 'map(select(.pk) | "#\(.n) \(.t)") | join("; ")')
         count() { printf '%s' "$rows" | jq --arg r "$1" '[.[] | select(.role == $r)] | length'; }
+        # Incoming work leaves out a parked ticket, as every other case does:
+        # the unlabelled, needs-triage and needs-info counts and case 3 (#145).
+        count_unparked() { printf '%s' "$rows" | jq --arg r "$1" '[.[] | select(.role == $r and (.l | index("parked") | not))] | length'; }
+        # A parked ticket goes beside ready-for-agent or ready-for-human only;
+        # one parked beside any other state, or none, has a label to fix.
+        misparked=$(printf '%s' "$rows" | jq -r '
+            map(select((.l | index("parked")) and .role != "agent" and .role != "human") | "#\(.n)") | join(", ")')
 
         # Open tickets the default branch already closes.
         stale=$(printf '%s' "$rows" | jq -r --argjson fx "$fixed_nums" '
@@ -515,7 +522,7 @@ gather() {
 
         # needs-info with a reply: the last comment is not the tracker user's.
         replied=
-        infos=$(printf '%s' "$rows" | jq -r '.[] | select(.role == "info" and .c > 0) | .n')
+        infos=$(printf '%s' "$rows" | jq -r '.[] | select(.role == "info" and .c > 0 and (.l | index("parked") | not)) | .n')
         if [ -n "$infos" ]; then
             me=$(gh api user 2>/dev/null | jq -r '.login // empty')
             for n in $infos; do
@@ -526,13 +533,14 @@ gather() {
         fi
         replied=${replied# }
 
-        n_triage=$(count triage) n_info=$(count info) n_unl=$(count unlabelled)
+        n_triage=$(count_unparked triage) n_info=$(count_unparked info) n_unl=$(count_unparked unlabelled)
         n_agent=$(count agent) n_human=$(count human) n_map=$(count map)
         maps=$(printf '%s' "$rows" | jq -r '[.[] | select(.role == "map")] | map("#\(.n) \(.t)") | join("; ")')
         echo "issues: $n_unl unlabelled, $n_triage $t_triage, $n_info $t_info (replied: ${replied:-none}), $n_agent $t_agent, $n_human $t_human, $n_map wayfinder:map"
         echo "in motion: ${moving:-none}"
         echo "ready, blockers closed: ${ready:-none}"
         [ -n "$awaiting" ] && echo "parked, awaiting reply: $awaiting"
+        [ -n "$misparked" ] && echo "parked without a state label: $misparked"
         echo "unblocks: ${unblocks:-none}"
         echo "by hand, blockers closed: ${hand:-none}"
         echo "open but closed by a commit on $default: ${stale:-none}"

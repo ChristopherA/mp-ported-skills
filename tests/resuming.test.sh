@@ -276,6 +276,29 @@ printf 'not json' >"$FAKE_GH/comments-41.json"
 check "case 7: comments unreadable, not replied" "7 nothing in motion" "$(next "$(run)")"
 printf '[{"user":{"login":"reporter"}},{"user":{"login":"me"}}]' >"$FAKE_GH/comments-41.json"
 
+# A parked ticket is never incoming work (#145): not counted as unlabelled,
+# needs-triage or needs-info, not a replied needs-info, and never case 3. One
+# parked without a ready state label is named on a line of its own.
+printf '[{"user":{"login":"me"}},{"user":{"login":"reporter"}}]' >"$FAKE_GH/comments-42.json"
+issues "$(list "$(issue 42 needs-info,parked | jq -c '.comments = 2')" "$(issue 43 enhancement,needs-triage,parked)" \
+    "$(issue 44 needs-triage,parked)" "$(issue 45 parked)")"
+out=$(run)
+has "case 3: parked tickets not counted" "issues: 0 unlabelled, 0 needs-triage, 0 needs-info (replied: none)," "$out"
+check "case 3: parked tickets alone are not the step" "7 nothing in motion" "$(next "$out")"
+check "parked without a state label: each one named" "#42, #43, #44, #45" "$(line_of "$out" "parked without a state label")"
+issues "$(list "$(issue 43 needs-triage,parked)" "$(issue 45 parked)" "$(issue 51 ready-for-agent)")"
+check "case 3: parked tickets alone are not the runner-up" "$case7_later" "$(runner "$(run)")"
+issues "$(list "$(issue 43 needs-triage,parked)" "$(issue 46 needs-triage)" "$(issue 47 needs-triage)" "$(issue 48 parked)")"
+out=$(run)
+check "case 3: only the unparked tickets counted" "3 /triage (you type it; user-invoked): 0 unlabelled, 2 needs-triage, replied needs-info: none" "$(next "$out")"
+check "parked without a state label: beside unparked work" "#43, #48" "$(line_of "$out" "parked without a state label")"
+issues "$(list "$(issue 49 ready-for-agent,parked)" "$(issue 50 ready-for-human,parked)" "$(issue 43 wontfix,parked)")"
+check "parked without a state label: ready ones left out" "#43" "$(line_of "$(run)" "parked without a state label")"
+issues "$(list "$(issue 49 ready-for-agent,parked)" "$(issue 50 ready-for-human,parked)")"
+check "parked without a state label: no line when every parked one is ready" "" \
+    "$(run | grep '^parked without a state label')"
+command rm -f "$FAKE_GH/comments-42.json"
+
 # Hand work: unblocked, unparked ready-for-human tickets, by the body's
 # priority line (High, Medium, none, Low), lowest number first within one.
 issues "$(list "$(issue 80 ready-for-human 0 'No priority line here.' | jq -c '.title = "t80 (x)"')" \
