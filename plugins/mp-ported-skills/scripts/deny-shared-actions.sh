@@ -37,8 +37,10 @@
 # mode (it blocks on the first ordinary permission prompt instead, since it
 # has nobody to answer).
 #
-# The scan splits the command on separators, parens and backticks, drops
-# quotes and backslashes, and skips words that run what follows them:
+# The scan reads the command as the shell would (command_segments, #104):
+# one simple command at a time, quoted text kept as one word, a heredoc's
+# body and a comment left out, and each substitution a command of its own.
+# It skips words that run what follows them:
 # VAR=value, shell keywords, env, command, builtin, exec, time, nohup,
 # nice, timeout, xargs, eval and `sh -c` (bash, zsh and the rest too),
 # and checks the whole command when it pipes into a shell. It matches the
@@ -48,10 +50,14 @@
 # A `cd <dir>` before the git moves the repo the grant is read from. A push
 # in a Project's Distribution repo needs the Project's distribution-push
 # grant, not push (classify_distribution, #141).
-# It does not parse quoting, so a separator inside a quoted string splits
-# too: `git commit -m "a; git push"` is refused. In an unattended session
-# that false refusal costs a detour through the supervisor, where a miss
-# would publish.
+# So `git commit -m "a; git push"` and an edit script written by a quoted
+# heredoc that names a push both run. `sh -c`'s argument, a here-string
+# into a shell and eval's words are scanned again on their own; one built
+# from a substitution, or a shell reading a pipe or heredoc, takes the
+# whole-text check. Text the splitter cannot read (an unclosed quote,
+# arithmetic holding a substitution) falls back to the quote-blind split,
+# which refuses more: in an unattended session a false refusal costs a
+# detour through the supervisor, where a miss would publish.
 #
 # Known gaps: a command built from variables (`g=git; $g push`), a
 # wrapper not listed above (`sudo`, `find -exec`), and a GraphQL mutation
