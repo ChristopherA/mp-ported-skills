@@ -37,7 +37,10 @@ itself one by editing this file.
                       or deleting one (--edit-last, --delete-last, a
                       PATCH or DELETE), which no grant covers.
        issue-create   a new issue: gh issue create, or a gh api POST to
-                      repos/<o>/<r>/issues.
+                      repos/<o>/<r>/issues. A create with --parent
+                      needs sub-issue too, and no grant covers one
+                      with --blocked-by or --blocking: write a
+                      Blocked by: #N line in its body instead.
        sub-issue      linking an issue under a parent, a gh api POST to
                       repos/<o>/<r>/issues/<n>/sub_issues, or reordering
                       a parent's sub-issues, a gh api PATCH to
