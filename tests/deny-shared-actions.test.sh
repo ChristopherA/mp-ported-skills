@@ -290,6 +290,14 @@ check "cd into an ungranted repo, then push, is refused from a granted one" "den
     "$(decision 0 auto "cd $outside && git push" "$granted")"
 check "cd into a granted repo, then push, goes through from elsewhere" "" \
     "$(decision 0 auto "cd $granted && git push" "$outside")"
+# A cd inside sh -c moves only that shell (#104): a push after it runs where
+# the outer command stands, and a push inside it where its own cd went.
+check "a cd inside sh -c does not move a later push" "" \
+    "$(decision 0 auto "sh -c 'cd $outside'; git push" "$granted")"
+check "a push inside sh -c follows its own cd" "deny" \
+    "$(decision 0 auto "sh -c 'cd $outside && git push'" "$granted")"
+check "a heredoc naming a cd does not move a later push" "" \
+    "$(decision 0 auto "$(printf 'cat > notes.txt <<EOF\ncd %s\nEOF\ngit push' "$outside")" "$granted")"
 
 # A Project's Distribution repo (#141): a push there needs the Project's
 # distribution-push grant, never push, and never the Distribution repo's
