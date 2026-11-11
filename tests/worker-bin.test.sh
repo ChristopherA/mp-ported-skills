@@ -189,8 +189,28 @@ check "a granted label edit from a script reaches the real gh" "real gh: issue e
     "$(worker 0 granted 'sh -c "gh issue edit 118 --remove-label ready-for-agent --add-label ready-for-human"' | head -n 1)"
 check "a label edit with a title is refused under the grant" "exit=1" \
     "$(last "$(worker 0 granted 'sh -c "gh issue edit 5 --add-label \"a;b\" --title t"')")"
-check "a gh issue edit with no label flag reaches the real gh" "real gh: issue edit 5 --title t" \
-    "$(worker 0 plain 'sh -c "gh issue edit 5 --title t"' | head -n 1)"
+check "a gh issue edit of a title is refused" "exit=1" \
+    "$(last "$(worker 0 plain 'sh -c "gh issue edit 5 --title t"')")"
+check "a title edit is refused under every grant" "exit=1" \
+    "$(last "$(worker 0 granted 'sh -c "gh issue edit 5 --title t"')")"
+check "gh issue edit --help reaches the real gh" "real gh: issue edit --help" \
+    "$(worker 0 plain 'gh issue edit --help' | head -n 1)"
+# The sub-issue grant covers gh issue edit's link flags (#202), and no
+# unlink.
+check "an ungranted --parent link is refused" "exit=1" \
+    "$(last "$(worker 0 plain 'sh -c "gh issue edit 23 --parent 40"')")"
+check "a granted --parent link reaches the real gh" "real gh: issue edit 23 --parent 40" \
+    "$(worker 0 granted 'sh -c "gh issue edit 23 --parent 40"' | head -n 1)"
+check "an ungranted --add-sub-issue link is refused" "exit=1" \
+    "$(last "$(worker 0 plain 'gh issue edit 40 --add-sub-issue 23')")"
+check "a granted --add-sub-issue link reaches the real gh" "real gh: issue edit 40 --add-sub-issue 23" \
+    "$(worker 0 granted 'gh issue edit 40 --add-sub-issue 23' | head -n 1)"
+check "a --remove-parent is refused under the grant" "exit=1" \
+    "$(last "$(worker 0 granted 'gh issue edit 23 --remove-parent')")"
+check "a --remove-sub-issue is refused under the grant" "exit=1" \
+    "$(last "$(worker 0 granted 'gh issue edit 40 --remove-sub-issue 23')")"
+check "a link with a quoted semicolon and a title is refused under the grant" "exit=1" \
+    "$(last "$(worker 0 granted 'sh -c "gh issue edit 40 --add-sub-issue \"5;6\" --title t"')")"
 # The comment grant posts a new comment only (#113), and no grant covers
 # a GraphQL mutation.
 check "a granted repo's issue comment --edit-last is refused" "exit=1" \

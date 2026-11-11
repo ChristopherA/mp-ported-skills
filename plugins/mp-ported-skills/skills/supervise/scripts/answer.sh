@@ -16,8 +16,9 @@
 #           and close forms, naming no other ticket, as the whole sentence;
 #   grant   one shared action (push, pr-create, pr-merge, issue-close,
 #           issue-comment, issue-create, sub-issue for a `Waiting on:`
-#           gh api link or reorder, or label for a `Waiting on:` gh issue
-#           edit that only adds or removes labels) that grant.sh finds granted on the
+#           gh api link or reorder or a gh issue edit that only links
+#           (--parent, --add-sub-issue), or label for a `Waiting on:` gh
+#           issue edit that only adds or removes labels) that grant.sh finds granted on the
 #           default branch as committed on origin, asked about anyway.
 #           checked-push (#188) is never one: it covers only the
 #           supervisor's own push, so a worker's `Waiting on: git push`

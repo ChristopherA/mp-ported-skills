@@ -18,7 +18,8 @@
 # push in DIR's own
 # repo, and distribution-push one in the Distribution repo DIR names (#141);
 # sub-issue links an issue under a parent or reorders a parent's sub-issues
-# (#162); label adds or removes a label with gh issue edit, and changes no
+# (#162), through gh api or with gh issue edit's --parent or
+# --add-sub-issue alone (#202), and never unlinks one; label adds or removes a label with gh issue edit, and changes no
 # other field (#184). checked-push lets the supervisor's Push on approval
 # push a settled worker's commits with no question when every push.sh check
 # passes and no file changed is prose (#188); it covers no push of the

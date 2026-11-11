@@ -9,8 +9,9 @@
 # main has no branch protection, and the auto-mode classifier only makes a
 # judgment call, not a rule. This hook refuses a Bash command that runs
 # `git push`, `gh pr create`, `gh pr merge`, `gh issue close`,
-# `gh issue comment`, `gh issue create` (#110), a `gh issue edit` that adds
-# or removes a label (#184), or a `gh api` write that reaches the same
+# `gh issue comment`, `gh issue create` (#110), a `gh issue edit` that sets
+# any field (a label, #184; a sub-issue link or unlink, or any other field,
+# #202), or a `gh api` write that reaches the same
 # actions, and points the worker at the supervisor and
 # docs/agents/supervision.md (#58) as the route to a shared action -- unless
 # `grant.sh` finds a standing grant for that same action on the committed
@@ -19,8 +20,8 @@
 # commits its upstream lacks (classify_close_held, #186). A `git
 # push` or gh write whose action grant.sh cannot name (a gh api form other
 # than an issue comment, a new issue, or a sub-issue link or reorder (#162),
-# a label write through gh api, a `gh issue edit` that changes another field
-# beside its labels, or a command piped into a shell) is never granted: a grant covers a form
+# a label write through gh api, a `gh issue edit` that sets any field but
+# labels alone or a sub-issue link alone, or a command piped into a shell) is never granted: a grant covers a form
 # this hook can tell apart from the others, and those cannot be told apart
 # from each other, so they stay refused on purpose.
 #
@@ -238,9 +239,12 @@ IFS=$oldIFS
 if [ -z "$matched" ] && [ -n "$piped" ]; then
     words=$(printf '%s' "$cmd" | tr -c 'A-Za-z0-9_-' '\n')
     has() { printf '%s\n' "$words" | grep -qx -- "$1"; }
+    # A gh issue edit sets a field with any flag but a repo or help flag
+    # (#202), as classify_gh reads it.
+    has_field() { printf '%s\n' "$words" | grep -vx -e -R -e --repo -e --help -e -h | grep -q -- '^-'; }
     if has git && has push; then
         matched="git push (piped into a shell)"
-    elif has gh && { { has pr && { has create || has merge; }; } || { has issue && { has close || has comment || has create || has new || { has edit && { has --add-label || has --remove-label; }; }; }; }; }; then
+    elif has gh && { { has pr && { has create || has merge; }; } || { has issue && { has close || has comment || has create || has new || { has edit && has_field; }; }; }; }; then
         matched="gh (piped into a shell)"
     fi
 fi
@@ -263,35 +267,20 @@ if [ "$matched" = "gh issue comment" ]; then
         matched="gh issue comment (edit)"
     fi
 fi
-# A label value can hold a separator too (`--add-label "a;b" --title t`).
-# The label grant covers labels only (#184), so look for any other field
-# gh issue edit sets in each gh issue edit's own words: the command split at
-# the separators outside quotes, one part per line. A flag on another
-# command beside it (`&& git commit -m`) is that command's. With a quote
-# left open the split cannot be trusted, so the whole command is one part.
-# A newline inside quotes or after a backslash joins its part, as a space.
-command_parts() {
-    printf '%s' "$1" | awk '
-        { s = s (NR > 1 ? "\n" : "") $0 }
-        END {
-            sq = sprintf("%c", 39); q = ""; part = ""; n = length(s)
-            for (i = 1; i <= n; i++) {
-                c = substr(s, i, 1)
-                if (q != "" && c == "\n") c = " "
-                if (q == sq) { if (c == sq) q = ""; part = part c; continue }
-                if (c == "\\" && i < n) { d = substr(s, i + 1, 1); part = part c (d == "\n" ? " " : d); i++; continue }
-                if (q == "\"") { if (c == "\"") q = ""; part = part c; continue }
-                if (c == sq || c == "\"") { q = c; part = part c; continue }
-                if (index(";&|()`\n", c)) { print part; part = ""; continue }
-                part = part c
-            }
-            if (q != "") { gsub("\n", " ", s); print s } else print part
-        }'
-}
-if [ "$matched" = "gh issue edit (label)" ]; then
+# A label or link value can hold a separator too (`--add-label "a;b"
+# --title t`). The label grant covers labels only (#184), and the sub-issue
+# grant only links (#202), so for either granted name look at each gh issue
+# edit's own words: the command split at the separators outside quotes
+# (command_parts, in the classifier). A flag on another command beside it
+# (`&& git commit -m`) is that command's. The first gh issue edit part whose
+# name differs from the first scan's names the command; the first scan's
+# name stands only when every gh issue edit part reads the same.
+case "$matched" in
+"gh issue edit (label)" | "gh issue edit (sub-issue link)")
     # Each part is read as the scan above reads a line, quotes dropped, and
     # classify_gh decides from the words after its gh, so the hook and the
     # wrappers share one rule for another field (`-tT` included).
+    first=$matched
     parts=$(command_parts "$cmd")
     IFS='
 '
@@ -307,12 +296,18 @@ if [ "$matched" = "gh issue edit (label)" ]; then
         shift
         matched=""
         classify_gh "$@"
-        [ "$matched" = "gh issue edit (label and other fields)" ] && break
+        case "$matched" in
+        "gh issue edit"*) [ "$matched" = "$first" ] || break ;;
+        esac
     done
     set +f
     IFS=$oldIFS
-    [ "$matched" = "gh issue edit (label and other fields)" ] || matched="gh issue edit (label)"
-fi
+    case "$matched" in
+    "gh issue edit"*) ;;
+    *) matched=$first ;;
+    esac
+    ;;
+esac
 
 # A standing grant lets this exact form through. Only a form grant.sh can
 # name maps to an action; the other gh api forms and the piped-into-a-shell

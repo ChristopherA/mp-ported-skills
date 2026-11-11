@@ -122,8 +122,24 @@ check "gh issue create piped into sh" "deny" "$(decision 0 auto 'echo gh issue c
 # with no label flag is handled as before, and goes through.
 check "gh issue edit --add-label" "deny" "$(decision 0 auto 'gh issue edit 5 --add-label in-motion')"
 check "gh issue edit --remove-label=x" "deny" "$(decision 0 auto 'gh issue edit 5 --remove-label=ready-for-agent')"
-check "gh issue edit with no label flag goes through as before" "" "$(decision 0 auto 'gh issue edit 5 --title x')"
 check "gh issue edit --add-label piped into sh" "deny" "$(decision 0 auto 'echo gh issue edit 5 --add-label x | sh')"
+# Every other gh issue edit field is named too (#202): a link, an unlink,
+# or another field.
+check "gh issue edit --title is refused" "deny" "$(decision 0 auto 'gh issue edit 5 --title x')"
+check "gh issue edit --title names other fields" "yes" \
+    "$(reason 0 auto 'gh issue edit 5 --title x' | grep -q "'gh issue edit (other fields)'" && echo yes)"
+check "gh issue edit --parent is refused" "deny" "$(decision 0 auto 'gh issue edit 23 --parent 40')"
+check "gh issue edit --parent names a sub-issue link" "yes" \
+    "$(reason 0 auto 'gh issue edit 23 --parent 40' | grep -q "'gh issue edit (sub-issue link)'" && echo yes)"
+check "gh issue edit --add-sub-issue is refused" "deny" "$(decision 0 auto 'gh issue edit 40 --add-sub-issue 23')"
+check "gh issue edit --remove-parent names a sub-issue unlink" "yes" \
+    "$(reason 0 auto 'gh issue edit 23 --remove-parent' | grep -q "'gh issue edit (sub-issue unlink)'" && echo yes)"
+check "gh issue edit --parent piped into sh" "deny" "$(decision 0 auto "echo 'gh issue edit 5 --parent 40' | sh")"
+check "gh issue edit --title piped into sh" "deny" "$(decision 0 auto "echo 'gh issue edit 5 --title t' | sh")"
+check "gh issue edit --help is not refused" "" "$(decision 0 auto 'gh issue edit --help')"
+check "gh issue edit -h is not refused" "" "$(decision 0 auto 'gh issue edit -h')"
+check "gh -R o/r issue edit --help is not refused" "" "$(decision 0 auto 'gh -R o/r issue edit --help')"
+check "gh issue edit with no flag is not refused" "" "$(decision 0 auto 'gh issue edit 5')"
 check "gh issue edit attended is not the hook's" "" "$(decision 1 auto 'gh issue edit 5 --add-label in-motion')"
 
 # A repo flag is read wherever gh takes one: before the subcommand,
@@ -409,6 +425,42 @@ check "a granted sub-issue link to a dotted repo name goes through" "" \
     "$(decision 0 auto 'gh api repos/o/.github/issues/40/sub_issues -F sub_issue_id=9' "$granted")"
 check "a sub-issue grant does not cover a label edit" "deny" \
     "$(decision 0 auto 'gh issue edit 5 --add-label in-motion' "$granted")"
+# gh issue edit's link flags are the same link (#202); its unlink flags,
+# like the DELETE, are not the grant's.
+check "a granted --parent link goes through" "" \
+    "$(decision 0 auto 'gh issue edit 23 --parent 40' "$granted")"
+check "a granted --parent= link goes through" "" \
+    "$(decision 0 auto 'gh issue edit 23 --parent=40' "$granted")"
+check "a granted --add-sub-issue link goes through" "" \
+    "$(decision 0 auto 'gh issue edit 40 --add-sub-issue 23' "$granted")"
+check "a granted link of two children goes through" "" \
+    "$(decision 0 auto 'gh -R o/r issue edit 40 --add-sub-issue 23 --add-sub-issue 24' "$granted")"
+check "a granted link with a quoted semicolon goes through" "" \
+    "$(decision 0 auto 'gh issue edit 40 --add-sub-issue "5;6"' "$granted")"
+check "a granted link beside a git commit -m goes through" "" \
+    "$(decision 0 auto 'gh issue edit 23 --parent 40 && git commit -S -s -m msg -- f' "$granted")"
+check "a sub-issue grant does not cover --remove-parent" "deny" \
+    "$(decision 0 auto 'gh issue edit 23 --remove-parent' "$granted")"
+check "a sub-issue grant does not cover --remove-sub-issue" "deny" \
+    "$(decision 0 auto 'gh issue edit 40 --remove-sub-issue 23' "$granted")"
+check "a sub-issue grant does not cover a link beside an unlink" "deny" \
+    "$(decision 0 auto 'gh issue edit 23 --parent 40 --remove-sub-issue 5' "$granted")"
+check "a sub-issue grant does not cover a link beside a label" "deny" \
+    "$(decision 0 auto 'gh issue edit 23 --add-label bug --parent 40' "$granted")"
+check "a sub-issue grant does not cover a link beside a title" "deny" \
+    "$(decision 0 auto 'gh issue edit 23 --parent 40 --title t' "$granted")"
+check "a title after a quoted semicolon is not the sub-issue grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 40 --add-sub-issue "5;6" --title t' "$granted")"
+check "a title after a quoted semicolon names other fields" "yes" \
+    "$(reason 0 auto 'gh issue edit 40 --add-sub-issue "5;6" --title t' "$granted" | grep -q "'gh issue edit (other fields)'" && echo yes)"
+check "an unlink in a second gh issue edit is not the sub-issue grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 23 --parent 40; gh issue edit 24 --remove-parent' "$granted")"
+check "a title edit is not the sub-issue grant" "deny" \
+    "$(decision 0 auto 'gh issue edit 23 --title t' "$granted")"
+check "a link piped into a shell is never granted" "deny" \
+    "$(decision 0 auto "echo 'gh issue edit 5 --parent 40' | sh" "$granted")"
+check "gh issue edit --help under the sub-issue grant is not refused" "" \
+    "$(decision 0 auto 'gh issue edit --help' "$granted")"
 # The label grant (#184) covers a gh issue edit that only adds or removes
 # labels. One that changes another field, and any label write through gh
 # api, stay refused.
@@ -469,6 +521,12 @@ check "a title after a continued line is not the label grant" "deny" \
     "$(decision 0 auto "$(printf 'gh issue edit 5 --add-label x \\\n  --title t')" "$granted")"
 check "a granted label edit on its own line goes through" "" \
     "$(decision 0 auto "$(printf 'git commit -m msg -- f\ngh issue edit 5 --add-label in-motion')" "$granted")"
+for field in '--title x' '--body y' '--add-assignee me' '--milestone m' '--add-blocked-by 7' '--parent 40' '--remove-parent'; do
+    check "a label grant does not cover gh issue edit $field" "deny" \
+        "$(decision 0 auto "gh issue edit 5 $field" "$granted")"
+done
+check "a label grant does not cover a label beside a link" "deny" \
+    "$(decision 0 auto 'gh issue edit 5 --add-label bug --parent 40' "$granted")"
 check "a label edit piped into a shell is never granted" "deny" \
     "$(decision 0 auto 'echo gh issue edit 5 --add-label x | sh' "$granted")"
 check "a label grant does not cover an issue comment" "deny" \

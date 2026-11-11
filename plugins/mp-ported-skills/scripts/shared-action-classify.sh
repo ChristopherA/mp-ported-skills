@@ -149,6 +149,31 @@ classify_close_held_reason() {
     printf '%s' "A background session in auto mode cannot run 'gh issue close' yet (#186): $1, and the issue-close grant covers the ticket only after its work is pushed. When the ticket's work is done, list the close with the push, as \`Waiting on: git -C $2 push origin <branch>; gh issue close <N>\`, and /supervise closes the ticket after the push lands; when work is left on it, list the push alone (#217)."
 }
 
+# command_parts <command>: the command split at the separators outside
+# quotes, one part per line, for a scan that must not read a quoted
+# separator as the end of a command (`--add-label "a;b" --title t`; #184,
+# #202). With a quote left open the split cannot be trusted, so the whole
+# command is one part. A newline inside quotes or after a backslash joins
+# its part, as a space. The hook and actions.sh both split with it.
+command_parts() {
+    printf '%s' "$1" | awk '
+        { s = s (NR > 1 ? "\n" : "") $0 }
+        END {
+            sq = sprintf("%c", 39); q = ""; part = ""; n = length(s)
+            for (i = 1; i <= n; i++) {
+                c = substr(s, i, 1)
+                if (q != "" && c == "\n") c = " "
+                if (q == sq) { if (c == sq) q = ""; part = part c; continue }
+                if (c == "\\" && i < n) { d = substr(s, i + 1, 1); part = part c (d == "\n" ? " " : d); i++; continue }
+                if (q == "\"") { if (c == "\"") q = ""; part = part c; continue }
+                if (c == sq || c == "\"") { q = c; part = part c; continue }
+                if (index(";&|()`\n", c)) { print part; part = ""; continue }
+                part = part c
+            }
+            if (q != "") { gsub("\n", " ", s); print s } else print part
+        }'
+}
+
 # gh_words <args after "gh">: sets gh_sub and gh_act to the subcommand and
 # its action, passing over a repo flag (-R <repo>, -R=<repo>, -R<repo>,
 # --repo <repo>, --repo=<repo>) wherever gh takes one: before the
@@ -194,25 +219,40 @@ classify_gh() {
         ;;
     issue/create | issue/new) matched="gh issue create" ;;
     issue/edit)
-        # A label edit, for the label grant (#184): a gh issue edit with
-        # --add-label or --remove-label and no other edit flag. Every word is
-        # looked at, the ones before the action included; a repo flag is
-        # passed over, and words that are not flags (issue numbers, label
-        # values) are ignored, so a flag value that starts with - counts as
-        # another field and refuses. An edit with no label flag is left
-        # unmatched, as it was before.
-        _clabel="" _cother=""
+        # Every field a gh issue edit sets is named, by the families of its
+        # flags: label (--add-label, --remove-label) for the label grant
+        # (#184), link (--parent, --add-sub-issue) for the sub-issue grant,
+        # unlink (--remove-parent, --remove-sub-issue), and other, any other
+        # flag (#202). Every word is looked at, the ones before the action
+        # included; a repo flag is passed over, and words that are not flags
+        # (issue numbers, label values) are ignored, so a flag value that
+        # starts with - counts as other and refuses. A help flag alone
+        # prints help and sets nothing; beside a field it may be that
+        # field's value, so it counts as other there. An edit with no field
+        # flag is left unmatched.
+        _clabel="" _clink="" _cunlink="" _cother="" _chelp=""
         for _carg in "$@"; do
             case "$_carg" in
             --add-label | --remove-label | --add-label=* | --remove-label=*) _clabel=yes ;;
+            --parent | --add-sub-issue | --parent=* | --add-sub-issue=*) _clink=yes ;;
+            --remove-parent | --remove-sub-issue | --remove-parent=* | --remove-sub-issue=*) _cunlink=yes ;;
             -R | --repo | --repo=* | -R?*) ;;
+            --help | -h) _chelp=yes ;;
             -*) _cother=yes ;;
             esac
         done
-        if [ -n "$_clabel" ] && [ -n "$_cother" ]; then
-            matched="gh issue edit (label and other fields)"
-        elif [ -n "$_clabel" ]; then
+        _cfams=$_clabel$_clink$_cunlink$_cother
+        [ -z "$_chelp" ] || [ -z "$_cfams" ] || { _cother=yes; _cfams=${_cfams}yes; }
+        if [ -n "$_clabel" ] && [ "$_cfams" = yes ]; then
             matched="gh issue edit (label)"
+        elif [ -n "$_clabel" ]; then
+            matched="gh issue edit (label and other fields)"
+        elif [ -n "$_clink" ] && [ "$_cfams" = yes ]; then
+            matched="gh issue edit (sub-issue link)"
+        elif [ -n "$_cunlink" ] && [ "$_cfams" = yes ]; then
+            matched="gh issue edit (sub-issue unlink)"
+        elif [ -n "$_cfams" ]; then
+            matched="gh issue edit (other fields)"
         fi
         ;;
     api/*)
@@ -287,10 +327,13 @@ classify_gh() {
 # The action a grant names for a matched form, or nothing for a form no
 # grant covers: the piped-into-a-shell fallback and the other gh api forms,
 # which do not say which action they reach, and an issue comment's edit or
-# delete (#113), and a gh issue edit that changes more than labels (#184).
-# The two gh api POSTs above that name an issue comment or a new issue map
-# to that action (#110), the sub-issue link and reorder map to sub-issue
-# (#162), and a label-only gh issue edit maps to label (#184). No form maps
+# delete (#113), a gh issue edit that changes more than labels (#184), and
+# a gh issue edit that unlinks a sub-issue or sets any field but labels or
+# a link (#202). The two gh api POSTs above that name an issue comment or a
+# new issue map to that action (#110), the sub-issue link and reorder map to
+# sub-issue (#162), as does a gh issue edit that only links (--parent,
+# --add-sub-issue; #202), and a label-only gh issue edit maps to label
+# (#184). No form maps
 # to checked-push (#188): it covers only the supervisor's own push.sh push,
 # so a worker's push under it alone is refused as with no grant.
 grant_action() { # <matched>
@@ -303,7 +346,7 @@ grant_action() { # <matched>
     "gh issue close"*) echo issue-close ;;
     "gh issue comment" | "gh api POST (issue comment)") echo issue-comment ;;
     "gh issue create"* | "gh api POST (issue create)") echo issue-create ;;
-    "gh api POST (sub-issue link)" | "gh api PATCH (sub-issue reorder)") echo sub-issue ;;
+    "gh api POST (sub-issue link)" | "gh api PATCH (sub-issue reorder)" | "gh issue edit (sub-issue link)") echo sub-issue ;;
     "gh issue edit (label)") echo label ;;
     esac
 }

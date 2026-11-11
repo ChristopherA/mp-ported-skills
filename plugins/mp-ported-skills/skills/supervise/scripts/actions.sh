@@ -48,7 +48,8 @@
 # one the hook's own scan names for it (push, distribution-push for a push
 # in the Project's Distribution repo (#141), pr-create, pr-merge,
 # issue-close, issue-comment, issue-create, sub-issue for a gh api link
-# or reorder of a sub-issue (#162), or label for a gh issue edit that only
+# or reorder of a sub-issue (#162) or a gh issue edit that only links one
+# (#202), or label for a gh issue edit that only
 # changes labels (#184)), or, when the scan names
 # none, a light word-token guess from its text and the recorded op, good
 # enough to cite a grant, not an enforcement check; a gh write neither
@@ -274,10 +275,13 @@ action_for() {
 
 # gh_guess <command>: the action a grant names for the first gh form in
 # it, read by the classifier the hook shares from the words after any gh,
-# whatever stands before it (#121). Split as gh_write splits. Call it only
-# through $(...): it reuses gh_write's globals.
+# whatever stands before it (#121). Split at the separators outside quotes
+# (command_parts), as the hook's second look at a gh issue edit splits, so a
+# quoted separator cannot hide a field it refused for (`--add-label "a;b"
+# --title t`; #202). Call it only through $(...): it reuses gh_write's
+# globals.
 gh_guess() {
-    segments=$(printf '%s\n' "$1" | sed -E 's/(&&|\|\||[;&|()`])/\n/g' | tr -d "\"'\\\\")
+    segments=$(command_parts "$1" | tr -d "\"'\\\\")
     oldIFS=$IFS
     IFS='
 '

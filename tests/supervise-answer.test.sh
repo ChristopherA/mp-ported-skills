@@ -273,6 +273,13 @@ run_as 'blocked input needed'
 check "a granted sub-issue reorder" "0 rule grant sub-issue: tickets a capture files, under the parent" \
     "$(rc) $(sed -n 2p "$work/out")"
 # With no method and no field, gh sends a GET: a read, not the link.
+last_says 'Waiting on: gh issue edit 23 --parent 40'
+run_as 'blocked input needed'
+check "a granted gh issue edit link" "0 rule grant sub-issue: tickets a capture files, under the parent" \
+    "$(rc) $(sed -n 2p "$work/out")"
+last_says 'Waiting on: gh issue edit 23 --remove-parent'
+run_as 'blocked input needed'
+not_routine "a gh issue edit unlink under the grant" "it waits on an action no grant can cover"
 last_says 'Waiting on: gh api repos/o/r/issues/40/sub_issues'
 run_as 'blocked input needed'
 not_routine "a sub-issue read under the grant" "it waits on an action no grant can cover"
