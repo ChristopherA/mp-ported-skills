@@ -45,7 +45,7 @@ Walk the whole session for what was decided, learned or promised and is not yet 
   gh api --method PATCH 'repos/{owner}/{repo}/issues/<parent>/sub_issues/priority' -F sub_issue_id=<new ticket id> -F before_id=<#X id>
   ```
 
-- **Unattended**: file the ticket when the `issue-create` check below grants it, labelled `needs-triage` whichever route it came from: nobody has read it, and a ready ticket filed overnight could be built the next night. A ticket left unfiled is listed as the `issue-create` check says, with nothing to link. Once it is filed, check the link and the reorder, which are one shared action:
+- **Unattended**: file the ticket when the `issue-create` check below grants it, labelled `needs-triage` whichever route it came from: nobody has read it, and a ready ticket filed overnight could be built the next night. File it with a plain `gh issue create`, no `--parent`, `--blocked-by` or `--blocking`: a create with `--parent` needs the `sub-issue` grant too, and no grant covers the blocked-by flags, so put a dependency in the body as a `Blocked by: #N` line. A ticket left unfiled is listed as the `issue-create` check says, with nothing to link. Once it is filed, check the link and the reorder, which are one shared action:
 
   ```sh
   sh "${CLAUDE_SKILL_DIR}/scripts/before-clear.sh" --action sub-issue </dev/null

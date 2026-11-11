@@ -1331,7 +1331,7 @@ park_text() { # <start> -- the park line for ticket 56 started at <start>
 park_line=$(park_text "$(git -C "$granted" rev-parse --short HEAD)")
 out=$(launch_in "$granted" --ticket 56 2>/dev/null); rc=$?
 check "launch with grants: exit 0" "0 c2a368ee" "$rc $out"
-check "launch with grants: lists the grants on origin, and only those" "You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/main (push is git push; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create; sub-issue is a gh api POST to an issue's sub_issues or a PATCH to its sub_issues/priority, or gh issue edit with only --parent or --add-sub-issue; label is gh issue edit with only --add-label or --remove-label):
+check "launch with grants: lists the grants on origin, and only those" "You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/main (push is git push; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create (a create with --parent also needs sub-issue, and no grant covers one with --blocked-by or --blocking); sub-issue is a gh api POST to an issue's sub_issues or a PATCH to its sub_issues/priority, or gh issue edit with only --parent or --add-sub-issue; label is gh issue edit with only --add-label or --remove-label):
 - push: to main, once tests pass
 - issue-close
 - issue-comment: findings
@@ -2460,7 +2460,7 @@ dgit "$dproj" add docs
 dgit "$dproj" commit -m "Grant both pushes"
 dgit "$dproj" push origin main
 launch_dir "$dproj" --ticket 56 >/dev/null 2>&1
-check "launch dist: the grants name distribution-push, and which push is which" "You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/main (push is git push in this Project's repo, distribution-push is git push in its Distribution repo; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create; sub-issue is a gh api POST to an issue's sub_issues or a PATCH to its sub_issues/priority, or gh issue edit with only --parent or --add-sub-issue; label is gh issue edit with only --add-label or --remove-label):
+check "launch dist: the grants name distribution-push, and which push is which" "You are a supervised worker, launched by /supervise. This Project's standing grants, from docs/agents/supervision.md as committed on origin/main (push is git push in this Project's repo, distribution-push is git push in its Distribution repo; pr-create, pr-merge, issue-close, issue-comment and issue-create are gh pr create, gh pr merge, gh issue close, gh issue comment and gh issue create (a create with --parent also needs sub-issue, and no grant covers one with --blocked-by or --blocking); sub-issue is a gh api POST to an issue's sub_issues or a PATCH to its sub_issues/priority, or gh issue edit with only --parent or --add-sub-issue; label is gh issue edit with only --add-label or --remove-label):
 - push
 - distribution-push: the code" \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | head -n 3)"
