@@ -82,10 +82,10 @@ cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null) || cwd=""
 [ -n "$cwd" ] || cwd=$(pwd)
 [ -n "$cmd" ] || exit 0
 
-# Split on command separators, subshell/substitution parens and backticks,
-# so each segment starts with the command actually run there. Quoting is
-# not parsed: a separator inside a quoted string also splits, which can
-# over-refuse but never hides a command.
+# Read the command as the shell would run it (command_segments, in the
+# classifier): one simple command at a time, quoted text kept as words, a
+# heredoc's body left out unless a shell reads it, and each substitution a
+# command of its own (#104).
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$here/shared-action-classify.sh"
 classify_git_cmd=git
@@ -93,145 +93,180 @@ classify_base=$cwd
 classify_text=$cmd
 classify_session=$cwd
 classify_distribution_sh="$here/../skills/supervise/scripts/distribution.sh"
+oldIFS=$IFS
+nl='
+'
 
-split=$(printf '%s' "$cmd" | sed -E 's/(&&|\|\||[;&|()`])/\n/g')
+# scan_nested <text> [base]: scan text a shell runs as a command of its
+# own (`sh -c`'s argument, a here-string into a shell, eval's words), in a
+# subshell, so a cd inside it moves only that scan. It sets matched,
+# classify_dir and piped from it, and with `base`, for eval, which runs in
+# this shell, takes its folder too when the outer scan follows a cd.
+scan_nested() {
+    _sn=$(scan "$(printf '%s' "$1" | tr '\037' '\n')"
+        printf '%s\036%s\036%s\036%s\036' "$matched" "${classify_dir:-}" "$piped" "$classify_base")
+    _sn_mode=${2:-} _sn_ifs=$IFS
+    IFS=$classify_rs
+    set -f
+    # shellcheck disable=SC2086
+    set -- $_sn
+    IFS=$_sn_ifs
+    [ -z "${1:-}" ] || { matched=$1; classify_dir=${2:-}; }
+    [ -z "${3:-}" ] || piped=yes
+    [ "${follow_cd:-}" != yes ] || [ "$_sn_mode" != base ] || classify_base=${4:-$classify_base}
+}
 
-# A cd is followed only in a command of plain sequences (`;`, `&&`, `||`,
-# newlines). A cd in a subshell, a pipe or a background job leaves the
-# shell's own folder where it was, and the split above cannot tell where
-# one ends: `(cd ../proj); git push` would read another repo's grant.
-follow_cd=yes
-case "$(printf '%s' "$cmd" | sed -E 's/&&|\|\|//g')" in
-*[\(\)\|\&\`]*) follow_cd="" ;;
-esac
+# scan <text>: sets matched (and classify_dir) for the first refused form a
+# command in text runs, and piped when a shell in it reads commands this
+# scan cannot see, checked below against the whole command.
+scan() {
+    _segs=$(command_segments "$1")
+    # A cd is followed only in a command of plain sequences (`;`, `&&`,
+    # `||`, newlines). A cd in a subshell, a pipe, a background job or a
+    # substitution leaves the shell's own folder where it was:
+    # `(cd ../proj); git push` would read another repo's grant.
+    follow_cd=""
+    [ "${_segs%%"$nl"*}" != follow ] || follow_cd=yes
+    _segs=${_segs#*"$nl"}
+    case "$_segs" in follow | nofollow) _segs="" ;; esac
+    IFS=$nl
+    set -f
+    for seg in $_segs; do
+        [ -n "$matched" ] && break
+        IFS=$classify_rs
+        # shellcheck disable=SC2086
+        set -- $seg
+        IFS=$nl
+        # Skip words that run what follows them: VAR=value assignments,
+        # shell keywords, and wrappers such as env, command, xargs and
+        # `sh -c`, each past its own flags. Repeats until a word names the
+        # program itself.
+        while [ $# -gt 0 ]; do
+            case "$1" in
+            [A-Za-z_]*=*) shift; continue ;;
+            '{' | '!' | if | then | else | elif | do | while | until) shift; continue ;;
+            esac
+            case "${1##*/}" in
+            env)
+                shift
+                while [ $# -gt 0 ]; do
+                    case "$1" in
+                    -u | -C | -P) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
+                    -*) shift ;;
+                    [A-Za-z_]*=*) shift ;;
+                    *) break ;;
+                    esac
+                done
+                ;;
+            command | builtin | exec | time | nohup)
+                shift
+                while [ $# -gt 0 ]; do
+                    case "$1" in
+                    -a) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
+                    -*) shift ;;
+                    *) break ;;
+                    esac
+                done
+                ;;
+            eval)
+                # eval runs its words, joined by spaces, as a command in
+                # this shell. Words built from a substitution are text no
+                # scan can read, so the whole command is checked as well.
+                shift
+                _ev="$*"
+                case "$_ev" in *"$classify_sub"*) piped=yes ;; esac
+                [ -z "$_ev" ] || scan_nested "$_ev" base
+                set --
+                ;;
+            nice | timeout | gtimeout)
+                shift
+                while [ $# -gt 0 ]; do
+                    case "$1" in
+                    -n | -s | -k) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
+                    -*) shift ;;
+                    [0-9]*) shift ;;
+                    *) break ;;
+                    esac
+                done
+                ;;
+            xargs)
+                shift
+                while [ $# -gt 0 ]; do
+                    case "$1" in
+                    -I | -n | -P | -L | -s | -d | -E | -a) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
+                    -*) shift ;;
+                    *) break ;;
+                    esac
+                done
+                ;;
+            sh | bash | zsh | dash | ksh)
+                # `-c` and a here-string run their argument as a command,
+                # scanned on its own; one built from a substitution, or a
+                # shell with no argument, which reads its commands from a
+                # pipe or a heredoc, is checked below against the whole
+                # command; `sh script.sh` runs a file this hook cannot see
+                # into.
+                shell_c=""
+                shift
+                while [ $# -gt 0 ]; do
+                    case "$1" in
+                    --*) shift ;;
+                    -*c*) shell_c=yes; shift ;;
+                    -*) shift ;;
+                    '<<<') shell_c=yes; shift; break ;;
+                    *) break ;;
+                    esac
+                done
+                if [ -n "$shell_c" ]; then
+                    case "${1:-}" in *"$classify_sub"*) piped=yes ;; esac
+                    [ $# -eq 0 ] || scan_nested "$1"
+                elif [ $# -eq 0 ]; then
+                    piped=yes
+                fi
+                set --
+                ;;
+            *) break ;;
+            esac
+        done
+        [ $# -gt 0 ] || continue
+        case "${1##*/}" in
+        cd)
+            # A later git runs where cd went (`cd <repo> && git push`), so
+            # the grant is read there (#141), when follow_cd says it can
+            # be. `cd` alone goes home; `cd -` is not followed.
+            shift
+            [ -n "$follow_cd" ] || continue
+            while [ "${1:-}" = -P ] || [ "${1:-}" = -L ] || [ "${1:-}" = -e ]; do shift; done
+            [ "${1:-}" != -- ] || shift
+            case "${1:-}" in
+            '' | '~') classify_base=$HOME ;;
+            -*) ;;
+            /*) classify_base=$1 ;;
+            '~/'*) classify_base="$HOME/${1#\~/}" ;;
+            *) classify_base="$classify_base/$1" ;;
+            esac
+            ;;
+        git-push | git-send-pack)
+            matched="git push"
+            classify_dir=$classify_base
+            ;;
+        git)
+            shift
+            classify_git "$@"
+            ;;
+        gh)
+            shift
+            classify_gh "$@"
+            ;;
+        esac
+    done
+    set +f
+    IFS=$oldIFS
+}
 
 matched=""
 piped=""
-oldIFS=$IFS
-IFS='
-'
-set -f
-for seg in $split; do
-    [ -n "$matched" ] && break
-    # Drop quotes and backslashes, so `"git" push`, `\git push` and the
-    # quoted body of `sh -c "git push"` read as plain words.
-    seg=$(printf '%s' "$seg" | tr -d "\"'\\\\")
-    # Restore whitespace splitting to tokenize this one line into words;
-    # the newline-only IFS above is only for the `for` line split itself.
-    IFS=$oldIFS
-    # shellcheck disable=SC2086
-    set -- $seg
-    IFS='
-'
-    # Skip words that run what follows them: VAR=value assignments, shell
-    # keywords, and wrappers such as env, command, xargs and `sh -c`, each
-    # past its own flags. Repeats until a word names the program itself.
-    while [ $# -gt 0 ]; do
-        case "$1" in
-        [A-Za-z_]*=*) shift; continue ;;
-        '{' | '!' | if | then | else | elif | do | while | until) shift; continue ;;
-        esac
-        case "${1##*/}" in
-        env)
-            shift
-            while [ $# -gt 0 ]; do
-                case "$1" in
-                -u | -C | -P) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
-                -*) shift ;;
-                [A-Za-z_]*=*) shift ;;
-                *) break ;;
-                esac
-            done
-            ;;
-        command | builtin | exec | time | nohup | eval)
-            shift
-            while [ $# -gt 0 ]; do
-                case "$1" in
-                -a) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
-                -*) shift ;;
-                *) break ;;
-                esac
-            done
-            ;;
-        nice | timeout | gtimeout)
-            shift
-            while [ $# -gt 0 ]; do
-                case "$1" in
-                -n | -s | -k) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
-                -*) shift ;;
-                [0-9]*) shift ;;
-                *) break ;;
-                esac
-            done
-            ;;
-        xargs)
-            shift
-            while [ $# -gt 0 ]; do
-                case "$1" in
-                -I | -n | -P | -L | -s | -d | -E | -a) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
-                -*) shift ;;
-                *) break ;;
-                esac
-            done
-            ;;
-        sh | bash | zsh | dash | ksh)
-            # `-c` and a here-string run their argument as a command; a
-            # shell with no argument reads its commands from a pipe, checked
-            # below against the whole command; `sh script.sh` runs a file
-            # this hook cannot see into.
-            shell_c=""
-            shift
-            while [ $# -gt 0 ]; do
-                case "$1" in
-                --*) shift ;;
-                -*c*) shell_c=yes; shift ;;
-                -*) shift ;;
-                '<<<') shell_c=yes; shift; break ;;
-                *) break ;;
-                esac
-            done
-            if [ -z "$shell_c" ]; then
-                [ $# -gt 0 ] || piped=yes
-                set --
-            fi
-            ;;
-        *) break ;;
-        esac
-    done
-    [ $# -gt 0 ] || continue
-    case "${1##*/}" in
-    cd)
-        # A later git runs where cd went (`cd <repo> && git push`), so the
-        # grant is read there (#141), when follow_cd says it can be. `cd`
-        # alone goes home; `cd -` is not followed.
-        shift
-        [ -n "$follow_cd" ] || continue
-        while [ "${1:-}" = -P ] || [ "${1:-}" = -L ] || [ "${1:-}" = -e ]; do shift; done
-        [ "${1:-}" != -- ] || shift
-        case "${1:-}" in
-        '' | '~') classify_base=$HOME ;;
-        -*) ;;
-        /*) classify_base=$1 ;;
-        '~/'*) classify_base="$HOME/${1#\~/}" ;;
-        *) classify_base="$classify_base/$1" ;;
-        esac
-        ;;
-    git-push | git-send-pack)
-        matched="git push"
-        classify_dir=$classify_base
-        ;;
-    git)
-        shift
-        classify_git "$@"
-        ;;
-    gh)
-        shift
-        classify_gh "$@"
-        ;;
-    esac
-done
-set +f
-IFS=$oldIFS
+scan "$cmd"
 
 # A shell reading commands from a pipe (`echo git push | sh`) runs text
 # this scan saw only as another command's arguments, so check the whole

@@ -68,7 +68,7 @@ check "leading VAR=value before gh pr create" "deny" "$(decision 0 auto 'FOO=bar
 # wrapper, a nested shell, a substitution, or a git alias.
 check "command git push" "deny" "$(decision 0 auto 'command git push')"
 check "absolute path to git" "deny" "$(decision 0 auto '/usr/bin/git push')"
-check "backslash-escaped git" "deny" "$(decision 0 auto '\\git push')"
+check "backslash-escaped git" "deny" "$(decision 0 auto '\git push')"
 check "quoted program name" "deny" "$(decision 0 auto '"git" push')"
 check "backtick substitution" "deny" "$(decision 0 auto 'x=`git push`')"
 check "\$() substitution" "deny" "$(decision 0 auto 'echo $(git push 2>&1)')"
@@ -678,12 +678,65 @@ check "gh issue list is not gh issue close" "" "$(decision 0 auto 'gh issue list
 check "gh api read of an issue's comments" "" "$(decision 0 auto 'gh api repos/o/r/issues/104/comments')"
 check "env with no git/gh is unaffected" "" "$(decision 0 auto 'env NODE_ENV=test npm test')"
 
-# Accepted over-refusal: the splitter does not parse quoting, so a
-# separator inside a quoted string starts a new segment (docs/adr/0004).
-# In an unattended session a false refusal costs a detour through the
-# supervisor; a miss publishes.
-check "quoted text holding a separated git push is refused" "deny" \
+# Text that only names a refused form (#104): quoted text and a heredoc's
+# body are data for the command, not commands, so they run.
+check "quoted text holding a separated git push runs" "" \
     "$(decision 0 auto 'git commit -m "wip; git push later"')"
+check "a quoted heredoc naming git push runs" "" \
+    "$(decision 0 auto "$(printf "cat > edit.py <<'EOF'\nsubprocess.run('git push origin main')\nEOF\npython3 edit.py")")"
+check "an unquoted heredoc naming git push runs" "" \
+    "$(decision 0 auto "$(printf 'python3 - <<EOF\ngit push origin main\nEOF')")"
+check "a <<- heredoc naming git push runs" "" \
+    "$(decision 0 auto "$(printf "cat > f <<-'EOF'\n\tgit push\n\tEOF\necho done")")"
+check "a heredoc naming a piped push runs" "" \
+    "$(decision 0 auto "$(printf "cat > t.sh <<'EOF'\necho git push origin main | sh\nEOF")")"
+check "a heredoc naming gh pr create runs" "" \
+    "$(decision 0 auto "$(printf "python3 - <<'EOF'\ngh pr create --fill\nEOF")")"
+check "a heredoc naming gh issue close runs" "" \
+    "$(decision 0 auto "$(printf "python3 - <<'EOF'\ngh issue close 5\nEOF")")"
+check "a heredoc naming gh issue comment runs" "" \
+    "$(decision 0 auto "$(printf "cat > c.md <<'EOF'\ngh issue comment 104 --body x\nEOF")")"
+check "a heredoc naming gh issue create runs" "" \
+    "$(decision 0 auto "$(printf "cat > c.md <<'EOF'\ngh issue create --title x\nEOF")")"
+check "a heredoc naming a gh api PATCH runs" "" \
+    "$(decision 0 auto "$(printf "cat > r.sh <<'EOF'\ngh api --method PATCH repos/o/r/issues/40/sub_issues/priority -F sub_issue_id=1\nEOF")")"
+check "a quoted search for gh forms runs" "" \
+    "$(decision 0 auto 'rg -n "gh issue create|gh pr create" plugins </dev/null')"
+check "a quoted argument naming gh issue close runs" "" \
+    "$(decision 0 auto "printf '%s\n' 'a; gh issue close 3' > note.txt")"
+check "a trailing comment naming git push runs" "" \
+    "$(decision 0 auto 'git status # then; git push')"
+check "a perl edit naming git push runs" "" \
+    "$(decision 0 auto "perl -pi -e 's/a/b/; git push origin main' docs/adr/0004.md")"
+
+# Commands that still run a refused form beside such text.
+check "a push after a heredoc is refused" "deny" \
+    "$(decision 0 auto "$(printf "cat > f <<'EOF'\nnotes\nEOF\ngit push")")"
+check "a push after cd && is refused" "deny" "$(decision 0 auto 'cd sub && git push')"
+check "a push inside a subshell is refused" "deny" "$(decision 0 auto '(git push)')"
+check "sh reading a heredoc that pushes is refused" "deny" \
+    "$(decision 0 auto "$(printf "sh <<'EOF'\ngit push\nEOF")")"
+check "a heredoc piped into sh is refused" "deny" \
+    "$(decision 0 auto "$(printf "cat <<'EOF' | sh\ngit push\nEOF")")"
+check "bash -s reading a heredoc is refused" "deny" \
+    "$(decision 0 auto "$(printf 'bash -s <<EOF\ngit push\nEOF')")"
+check "sh -c of a heredoc's substitution is refused" "deny" \
+    "$(decision 0 auto "$(printf "sh -c \"\$(cat <<'EOF'\ngit push\nEOF\n)\"")")"
+check "a push in a double-quoted substitution is refused" "deny" \
+    "$(decision 0 auto 'x="$(git push)"')"
+check "a push in backticks inside quotes is refused" "deny" \
+    "$(decision 0 auto 'echo "now `git push` done"')"
+check "a push in an unquoted heredoc's substitution is refused" "deny" \
+    "$(decision 0 auto "$(printf 'cat <<EOF\n$(git push)\nEOF')")"
+check "a push after arithmetic holding << is refused" "deny" \
+    "$(decision 0 auto "$(printf 'echo $((1<<2))\ngit push')")"
+check "a push after an unclosed quote is refused" "deny" \
+    "$(decision 0 auto 'echo "abc; git push')"
+check "a push after a word holding # is refused" "deny" "$(decision 0 auto 'a#b; git push')"
+check "a push in a process substitution is refused" "deny" "$(decision 0 auto 'tee >(git push) < f')"
+check "a push in eval's quoted words is refused" "deny" "$(decision 0 auto "eval 'git push'")"
+check "eval of a substitution is refused" "deny" "$(decision 0 auto 'eval "$(printf %s "git push")"')"
+check "a here-string into sh is refused" "deny" "$(decision 0 auto "sh <<< 'gh issue close 3'")"
 
 # The maintainer's own interactive session: attended, whatever the
 # permission mode.

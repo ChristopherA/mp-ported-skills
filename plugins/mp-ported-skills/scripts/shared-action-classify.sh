@@ -174,6 +174,239 @@ command_parts() {
         }'
 }
 
+# command_segments <command>: the simple commands the shell would run from
+# the command's text, for a scan that must read a command only where it
+# runs, never inside quoted text or a heredoc's body (#104). The first line
+# says whether a `cd` in the text may be followed: `follow` when the text
+# is only plain sequences (`;`, `&&`, `||`, newlines), `nofollow` when a
+# subshell, a pipe, a background job or a substitution stands anywhere in
+# it, since the split cannot say where a cd in one of those ends. Each line
+# after it is one simple command, its words joined by $classify_rs, a
+# newline inside a word written as \037, and $classify_sub standing where a
+# substitution's output goes into a word, so a caller can tell a word whose
+# text no scan can know (`sh -c "$(cat f)"`). Quotes and backslashes are
+# removed as the shell removes them. A `$(...)`, a backtick or a process
+# substitution, outside quotes or inside double quotes, and one in an
+# unquoted heredoc's body, is a command of its own, printed as its own
+# lines; a heredoc's body is otherwise left out, as is a comment. `<<<` is
+# a word of its own, the here-string after it the next word. `>&`, `<&`,
+# `&>` and `>|` are redirections, kept in their words, not separators.
+# Arithmetic, `$((...))` or `((...))`, is one word when its inner paren
+# closes right before the last one, so `1<<2` is not read as a heredoc.
+# An unclosed quote or backtick, an empty heredoc delimiter, or arithmetic
+# that holds a substitution falls back to the quote-blind split: each
+# separator, paren or backtick ends a command, quotes and backslashes are
+# dropped, and the follow line is read from the whole text, so the scan
+# then refuses more, never less.
+classify_rs=$(printf '\036')
+classify_sub=$(printf '\035')
+command_segments() {
+    _cs_out=$(printf '%s' "$1" | awk '
+        function endw() {
+            if (inw) { seg = seg (nseg ? rs : "") w; nseg++ }
+            w = ""; inw = 0
+        }
+        function ends() {
+            endw()
+            if (nseg) out = out seg "\n"
+            seg = ""; nseg = 0
+        }
+        # sublex: lex a substitution body as commands of its own, keeping
+        # the word and command being built around it.
+        function sublex(t, d,   sw, sinw, sseg, snseg) {
+            sw = w; sinw = inw; sseg = seg; snseg = nseg
+            w = ""; inw = 0; seg = ""; nseg = 0
+            lex(t, d)
+            w = sw; inw = sinw; seg = sseg; nseg = snseg
+            nofollow = 1
+        }
+        # balanced: the text of t from j, an opening paren, to its closing
+        # one, quotes and backslashes respected; bend is where it ended and
+        # bclosed whether it closed.
+        function balanced(t, j,   b, depth, bq, c, m) {
+            m = length(t); b = ""; depth = 0; bq = ""; bclosed = 0
+            for (; j <= m; j++) {
+                c = substr(t, j, 1); b = b c
+                if (bq == sq) { if (c == sq) bq = ""; continue }
+                if (c == "\\" && j < m) { j++; b = b substr(t, j, 1); continue }
+                if (bq == "\"") { if (c == "\"") bq = ""; continue }
+                if (c == sq || c == "\"") { bq = c; continue }
+                if (c == "(") depth++
+                else if (c == ")" && --depth == 0) { bclosed = 1; break }
+            }
+            bend = (j > m ? m : j)
+            return b
+        }
+        # arith: whether t at j, a "((", is arithmetic; atext is its text
+        # and aend where it ended. Arithmetic holding a substitution sets
+        # fallback.
+        function arith(t, j,   b, inner, e) {
+            b = balanced(t, j)
+            if (!bclosed) return 0
+            e = bend
+            inner = balanced(t, j + 1)
+            if (!bclosed || bend != e - 1) return 0
+            if (index(b, "$(") || index(b, "`")) fallback = 1
+            atext = b; aend = e
+            return 1
+        }
+        # subst: t at j is "$(": lex a command substitution, or take
+        # arithmetic as text. Returns where it ended; sets sarith.
+        function subst(t, j, d,   b) {
+            sarith = 0
+            if (substr(t, j + 2, 1) == "(" && arith(t, j + 1)) { sarith = 1; return aend }
+            b = balanced(t, j + 1)
+            sublex(substr(b, 2, length(b) - (bclosed ? 2 : 1)), d + 1)
+            return bend
+        }
+        # btick: t at j is a backtick: lex up to the next unescaped one.
+        function btick(t, j, d,   k, m, b, c) {
+            m = length(t); b = ""
+            for (k = j + 1; k <= m; k++) {
+                c = substr(t, k, 1)
+                if (c == "\\" && k < m) { k++; c = substr(t, k, 1); b = b (c == "`" || c == "\\" || c == "$" ? "" : "\\") c; continue }
+                if (c == "`") break
+                b = b c
+            }
+            if (k > m) { fallback = 1; k = m }
+            sublex(b, d + 1)
+            return k
+        }
+        # bodysubs: the substitutions in an unquoted heredoc body.
+        function bodysubs(b, d,   j, m, c) {
+            m = length(b)
+            for (j = 1; j <= m; j++) {
+                c = substr(b, j, 1)
+                if (c == "\\") { j++; continue }
+                if (c == "$" && substr(b, j + 1, 1) == "(") { j = subst(b, j, d); continue }
+                if (c == "`") j = btick(b, j, d)
+            }
+        }
+        function lex(t, d,   i, n, c, q, x, dl, quo, dash, h, line, body, k) {
+            n = length(t); q = ""; nh[d] = 0
+            for (i = 1; i <= n; i++) {
+                c = substr(t, i, 1)
+                if (q == sq) { if (c == sq) q = ""; else w = w (c == "\n" ? nl : c); continue }
+                if (q == "ansi") {
+                    if (c == "\\" && i < n) { i++; w = w substr(t, i, 1); continue }
+                    if (c == sq) q = ""; else w = w (c == "\n" ? nl : c)
+                    continue
+                }
+                if (q == "\"") {
+                    if (c == "\\" && i < n && index("\"\\$`\n", substr(t, i + 1, 1))) { i++; c = substr(t, i, 1); if (c != "\n") w = w c; continue }
+                    if (c == "\"") { q = ""; continue }
+                    if (c == "$" && substr(t, i + 1, 1) == "(") {
+                        i = subst(t, i, d)
+                        if (sarith) { x = "$" atext; gsub("\n", nl, x); w = w x } else w = w mk
+                        continue
+                    }
+                    if (c == "`") { i = btick(t, i, d); w = w mk; continue }
+                    w = w (c == "\n" ? nl : c); continue
+                }
+                if (c == "\\") {
+                    if (i < n) { i++; c = substr(t, i, 1); if (c != "\n") { w = w c; inw = 1 } }
+                    continue
+                }
+                if (c == sq || c == "\"") { q = c; inw = 1; continue }
+                if (c == "$" && substr(t, i + 1, 1) == sq) { q = "ansi"; inw = 1; i++; continue }
+                if (c == "$" && substr(t, i + 1, 1) == "(") {
+                    i = subst(t, i, d)
+                    if (sarith) { x = "$" atext; gsub("\n", nl, x); w = w x } else w = w mk
+                    inw = 1; continue
+                }
+                if (c == "(" && !inw && substr(t, i + 1, 1) == "(" && arith(t, i)) {
+                    x = atext; gsub("\n", nl, x); w = w x; inw = 1; i = aend; continue
+                }
+                if (c == "`") { i = btick(t, i, d); w = w mk; inw = 1; continue }
+                # A process substitution, >(...) or <(...).
+                if (c == "(" && w ~ /[<>]$/) {
+                    x = balanced(t, i)
+                    sublex(substr(x, 2, length(x) - (bclosed ? 2 : 1)), d + 1)
+                    i = bend; w = w mk; continue
+                }
+                if (c == "#" && !inw) { while (i < n && substr(t, i + 1, 1) != "\n") i++; continue }
+                if (c == " " || c == "\t") { endw(); continue }
+                if (c == "<" && substr(t, i + 1, 2) == "<<") { endw(); w = "<<<"; inw = 1; endw(); i += 2; continue }
+                if (c == "<" && substr(t, i + 1, 1) == "<") {
+                    # A heredoc: its delimiter, and whether any of it was
+                    # quoted, which makes the body pure data.
+                    if (w ~ /^[0-9]+$/) { w = ""; inw = 0 }
+                    endw(); i++; dash = 0
+                    if (substr(t, i + 1, 1) == "-") { i++; dash = 1 }
+                    while (i < n && index(" \t", substr(t, i + 1, 1))) i++
+                    dl = ""; quo = 0
+                    while (i < n) {
+                        x = substr(t, i + 1, 1)
+                        if (index(" \t\n;&|()<>", x)) break
+                        i++
+                        if (x == sq || x == "\"") {
+                            quo = 1
+                            while (i < n && substr(t, i + 1, 1) != x) { i++; dl = dl substr(t, i, 1) }
+                            if (i >= n) fallback = 1
+                            i++; continue
+                        }
+                        if (x == "\\") { quo = 1; if (i < n) { i++; dl = dl substr(t, i, 1) }; continue }
+                        dl = dl x
+                    }
+                    if (dl == "") fallback = 1
+                    k = ++nh[d]; hq[d, k] = dl; hdash[d, k] = dash; hquo[d, k] = quo
+                    continue
+                }
+                if (c == "&") {
+                    if (substr(t, i + 1, 1) == "&") { ends(); i++; continue }
+                    if (substr(t, i + 1, 1) == ">") { w = w "&>"; i++; inw = 1; continue }
+                    if (w ~ /[<>]$/) { w = w c; continue }
+                    ends(); nofollow = 1; continue
+                }
+                if (c == "|") {
+                    if (substr(t, i + 1, 1) == "|") { ends(); i++; continue }
+                    if (w ~ />$/) { w = w c; continue }
+                    ends(); nofollow = 1; continue
+                }
+                if (c == ";") { ends(); continue }
+                if (c == "(" || c == ")") { ends(); nofollow = 1; continue }
+                if (c == "\n") {
+                    ends()
+                    for (h = 1; h <= nh[d]; h++) {
+                        body = ""
+                        while (i < n) {
+                            k = index(substr(t, i + 1), "\n")
+                            line = k ? substr(t, i + 1, k - 1) : substr(t, i + 1)
+                            i = k ? i + k : n
+                            if (hdash[d, h]) sub(/^\t+/, "", line)
+                            if (line == hq[d, h]) break
+                            body = body line "\n"
+                        }
+                        if (!hquo[d, h]) bodysubs(body, d)
+                    }
+                    nh[d] = 0
+                    continue
+                }
+                w = w c; inw = 1
+            }
+            if (q != "") fallback = 1
+            ends()
+        }
+        { s = s (NR > 1 ? "\n" : "") $0 }
+        END {
+            sq = sprintf("%c", 39); nl = sprintf("%c", 31); rs = sprintf("%c", 30); mk = sprintf("%c", 29)
+            out = ""; w = ""; inw = 0; seg = ""; nseg = 0; nofollow = 0; fallback = 0
+            lex(s, 0)
+            if (fallback) print "fallback"
+            else printf "%s\n%s", (nofollow ? "nofollow" : "follow"), out
+        }')
+    if [ "$_cs_out" != fallback ]; then
+        printf '%s\n' "$_cs_out"
+        return 0
+    fi
+    case "$(printf '%s' "$1" | sed -E 's/&&|\|\|//g')" in
+    *[\(\)\|\&\`]*) echo nofollow ;;
+    *) echo follow ;;
+    esac
+    printf '%s\n' "$1" | sed -E 's/(&&|\|\||[;&|()`])/\n/g' | tr -d "\"'\\\\" |
+        awk -v rs="$classify_rs" '{ o = ""; for (k = 1; k <= NF; k++) o = o (k > 1 ? rs : "") $k; if (NF) print o }'
+}
+
 # gh_words <args after "gh">: sets gh_sub and gh_act to the subcommand and
 # its action, passing over a repo flag (-R <repo>, -R=<repo>, -R<repo>,
 # --repo <repo>, --repo=<repo>) wherever gh takes one: before the
