@@ -44,13 +44,24 @@ itself one by editing this file.
        sub-issue      linking an issue under a parent, a gh api POST to
                       repos/<o>/<r>/issues/<n>/sub_issues, or reordering
                       a parent's sub-issues, a gh api PATCH to
-                      repos/<o>/<r>/issues/<n>/sub_issues/priority. Not
-                      removing one, which no grant covers. The note says
+                      repos/<o>/<r>/issues/<n>/sub_issues/priority, or
+                      gh issue edit with only --parent or
+                      --add-sub-issue. Not removing one (a DELETE,
+                      --remove-parent, --remove-sub-issue), which no
+                      grant covers. The note says
                       which tickets, as
                       `- sub-issue: a capture's tickets, under the work's own parent; the worker's own ticket, to the end of its parent's order`
-                      does; the hook checks only the action.
+                      does: the second covers a worker that parks its
+                      ticket (#158). The hook checks only the action.
+       label          gh issue edit with only --add-label or
+                      --remove-label, as
+                      `- label: a capture's in-motion and live-check relabels`
+                      grants. Not an edit that also changes another field
+                      (--title, --body, ...), which no grant covers.
+     No grant covers any other gh issue edit: --title, --body, an
+     assignee, a milestone or a blocked-by link.
      No grant covers any other gh api write or a GraphQL mutation,
-     addComment, createIssue and addSubIssue included.
+     addComment, createIssue, addSubIssue and a label write included.
      Example: `- push: release branches only`
      A push grant covers the commits a worker's capture makes after its
      reviewed work only when its note says so, as
