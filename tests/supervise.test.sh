@@ -557,6 +557,13 @@ cwd $project
 question Should pid always win?
 $parked_made" "$(watch_park done 9121ff49 --ticket 158)"
 command rm -rf "$cfg/projects"
+# Only a park in progress is exempt: a turn that made parked-<own ticket> and
+# ended on anything but `Parked:` left the branch for no park, so it is moved.
+check "watch --since: a turn ended not parked, after parked-<own ticket>, is moved" "moved
+cwd $project
+$parked_made" "$(watch_park done 9121ff49 --ticket 158)"
+out=$(watch_park working-busy c2a368ee --ticket '#' 2>&1)
+check "watch: --ticket needs a number after its #" "1 Error: --ticket needs the ticket's number, not ''" "$? $out"
 check "watch --since: without --ticket, parked-158 is moved" "moved
 cwd $project
 $parked_made" "$(watch_park working-busy c2a368ee)"

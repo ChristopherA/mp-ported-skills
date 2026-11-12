@@ -293,6 +293,28 @@ cwd /work/project
 reading 108% of zone
 due: background task bsig1 is cut" "$(zwatch --held 903)"
 stub "$zsigning"
+# A parking worker (it made parked-<its ticket>, #260) is not capture-due, but
+# a signature it waits on past the capture point is still returned.
+prepo="$work/park-repo"
+mkdir -p "$prepo"
+git -C "$prepo" init -q -b main
+git -C "$prepo" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q --allow-empty -m seed
+git -C "$prepo" branch parked-158
+jq --arg d "$prepo" '[.[] | .cwd |= (if . then sub("^/work/project"; $d) else . end)]' \
+    "$fixtures/working-busy.json" >"$work/park-busy.json"
+pwatch() { # -- watch.sh --zone on working-busy in $prepo, as the worker for #158
+    sh "$scripts/watch.sh" --id c2a368ee --dir "$prepo" --ticket 158 --zone --file "$work/park-busy.json" </dev/null 2>&1 |
+        grep -v '^note: ' | sed 's/^after [0-9][0-9]*$/after EPOCH/'
+}
+check "zone: a parking worker's pending signature is still returned" "blocked signing approval
+cwd $prepo
+reading 108% of zone
+$approval
+after EPOCH" "$(pwatch)"
+stub "$(printf '%s\n' "$zsigning" | grep -v -e ssh-sk-helper -e ssh-keygen)"
+check "zone: a parking worker with no signature waiting goes on working" "working
+cwd $prepo" "$(pwatch)"
+stub "$zsigning"
 check "zone: --held needs a pid" "Error: --held needs the pid on a helper line, not 'x'" "$(zwatch --held x)"
 out=$(sh "$scripts/watch.sh" --id c2a368ee --held 903 --file "$fixtures/working-busy.json" </dev/null 2>&1)
 check "zone: --held without --zone is refused" "Error: --held is read only with --zone" "$out"

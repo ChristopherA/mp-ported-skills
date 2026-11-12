@@ -77,17 +77,19 @@
 # `branch <name>` for each branch other than the snapshot's current one that
 # was made or moved since, each followed by a `commit <sha> <subject>` line
 # for each of its commits that neither the snapshot's HEAD nor that current
-# branch holds. Any such line turns working or done into moved, but for a
-# `branch parked-<N>` line, in either repo, with --ticket N, the worker's own
-# ticket: that branch is a park in progress, so the watch goes on until the
-# turn ends on `Parked:` (#260). With --ticket N and --zone, a working worker
-# that has made parked-N is not capture-due, since a parking worker runs its
-# capture before its park comment: made is listed since the snapshot, or, in
-# DIR or the snapshot's Distribution repo, made at or after the worker's
-# startedAt by the branch's reflog, so a snapshot taken mid-park, which does
-# not list it, still counts it, and a parked-N an earlier run left does not.
-# A parked-<M> for another ticket, or any branch without --ticket, is moved
-# as before. A Project
+# branch holds. Any such line turns working or done into moved.
+# With --ticket N, the worker's own ticket, a `branch parked-<N>` line moves
+# nothing while the worker works: it is a park in progress, so the watch goes
+# on until the turn ends on `Parked:` (#260). A turn that ends otherwise is
+# moved. A parked-<M> for another ticket, or any branch without --ticket, is
+# moved as before.
+# With --ticket N and --zone, a working worker that has made parked-N is not
+# capture-due, since a parking worker runs its capture before its park
+# comment; a signature it waits on is still returned. It has made parked-N
+# when the snapshot's list holds it or, in DIR or the snapshot's Distribution
+# repo, the branch's reflog dates it at or after the worker's startedAt: a
+# snapshot taken mid-park does not list it, and a parked-N an earlier run
+# left is not counted. A Project
 # with a Distribution repo (#125) has it in the snapshot too; what it gained
 # follows a `distribution <path>` line, in the same lines.
 # A worker denied EnterWorktree made its worktree with `git worktree add`
@@ -201,6 +203,7 @@ DETAIL=""
 CAPTURE=""
 HELD=""
 TICKET=""
+TICKET_GIVEN=""
 INTERVAL=30
 TIMEOUT=14400
 STALL=1800
@@ -216,7 +219,7 @@ while [ $# -gt 0 ]; do
         --after)    need_value "$@"; AFTER="$2"; shift 2 ;;
         --zone)     ZONE=1; shift ;;
         --held)     need_value "$@"; HELD="$2"; shift 2 ;;
-        --ticket)   need_value "$@"; TICKET="${2#\#}"; shift 2 ;;
+        --ticket)   need_value "$@"; TICKET="${2#\#}"; TICKET_GIVEN=1; shift 2 ;;
         --wait-blocked) WAIT_BLOCKED=1; shift ;;
         --detail)   need_value "$@"; DETAIL="$2"; shift 2 ;;
         --capture)  CAPTURE=1; shift ;;
@@ -273,7 +276,7 @@ case $STALL in '' | *[!0-9]*) fail "--stall needs whole seconds, not '$STALL'" ;
 case $AFTER in *[!0-9]*) fail "--after needs epoch seconds, not '$AFTER'" ;; esac
 case $HELD in *[!0-9]*) fail "--held needs the pid on a helper line, not '$HELD'" ;; esac
 [ -z "$HELD" ] || [ -n "$ZONE" ] || fail "--held is read only with --zone"
-case $TICKET in *[!0-9]*) fail "--ticket needs the ticket's number, not '$TICKET'" ;; esac
+[ -z "$TICKET_GIVEN" ] || case $TICKET in '' | *[!0-9]*) fail "--ticket needs the ticket's number, not '$TICKET'" ;; esac
 # claude agents and the job's state.json both follow the config dir, so an
 # unset one would read another profile's sessions.
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the profile being watched is unknown"
@@ -554,8 +557,8 @@ commits() {
 # listed, and makes a working, done or capture-due session moved. So is one made in the
 # Distribution repo the snapshot names, after a `distribution <path>` line.
 # With --ticket N, the worker's own parked-N branch is listed but moves
-# nothing, and with --zone keeps a working session from being capture-due
-# (#260).
+# nothing while the worker works, and with --zone keeps a working session
+# from being capture-due (#260).
 report() {
     out=$(classify "$1") || return 1
     made=""
@@ -579,7 +582,7 @@ report() {
         own_park="branch parked-$TICKET"
         if printf '%s\n' "$made" | grep -Fqx "$own_park"; then
             parking=1
-        else
+        elif [ -n "$ZONE" ]; then
             started=$(started_of "$1")
             for park_repo in "$DIR" "$dist"; do
                 [ -n "$park_repo" ] || continue
@@ -608,15 +611,15 @@ report() {
                     | select(.status == "idle") | .sessionId // empty')
                 if turn_ended "$session_id"; then
                     out=$(printf 'done%s\nnote claude agents still said working' "${out#working}")
-                elif [ -n "$ZONE" ] && [ -z "$parking" ] && t=$(transcript_of "$(session_id_of "$1")") && [ -n "$t" ]; then
+                elif [ -n "$ZONE" ] && t=$(transcript_of "$(session_id_of "$1")") && [ -n "$t" ]; then
                     zone_rc=0
                     reading=$(sh "$(dirname -- "$0")/zone.sh" --transcript "$t" --due --model "$zone_model" \
                         --pid "$(pid_of "$1")" </dev/null 2>/dev/null) || zone_rc=$?
                     held=$(printf '%s\n' "$reading" | sed -n 's/^not due: held for a commit signing approval at the Mac: //p')
-                    if [ "$zone_rc" -eq 0 ]; then
+                    if [ "$zone_rc" -eq 0 ] && [ -z "$parking" ]; then
                         out=$(printf 'capture-due%s\nreading %s\n%s' "${out#working}" \
                             "$(printf '%s\n' "$reading" | head -n 1)" "$(printf '%s\n' "$reading" | sed -n 2p)")
-                    elif [ -n "$held" ] && [ "$(helper_pid "$held")" != "$HELD" ]; then
+                    elif [ "$zone_rc" -ne 0 ] && [ -n "$held" ] && [ "$(helper_pid "$held")" != "$HELD" ]; then
                         # The capture is held for a signature at or past the
                         # capture point: only the maintainer at the Mac can
                         # release it (#206). The helper --held names was
@@ -680,9 +683,13 @@ report() {
         esac
     fi
     if [ -n "$made" ]; then
-        # Any worktree or branch line but the worker's own park is a move.
+        # Any worktree or branch line is a move, but for the worker's own
+        # park while it is still working: a turn that ended on anything but
+        # `Parked:` (parked, which no move changes) left it for no park.
         moves=$(printf '%s\n' "$made" | grep -E '^(worktree|branch) ')
-        [ -z "$own_park" ] || moves=$(printf '%s\n' "$moves" | grep -Fvx "$own_park")
+        case $out in
+            working*) [ -z "$own_park" ] || moves=$(printf '%s\n' "$moves" | grep -Fvx "$own_park") ;;
+        esac
         if [ -n "$moves" ]; then
             case $out in
                 working* | done* | capture-due*) out=$(printf '%s\n' "$out" | sed '1s/.*/moved/') ;;
