@@ -39,7 +39,7 @@ check() { # <name> <expected> <actual>
 # the calling session, it would skip the grant lookup below without a
 # single test here asking for that -- the exact silent-skip the variable
 # is designed to never cause from the hook's own default.
-unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS CLAUDE_CODE_SESSION_ATTENDED
+unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS MP_DENY_SHARED_ACTIONS_NO_PASS_ON CLAUDE_CODE_SESSION_ATTENDED
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 outside=$(mktemp -d)
 git init -q "$outside"
@@ -804,6 +804,10 @@ check "bypass: --receive-pack to a local path is refused" "deny" "$(decision 0 a
 check "redirect: 2>&1 is not the destination" "deny" "$(decision 0 auto 'git push 2>&1')"
 check "redirect: >/tmp/out is not the destination" "deny" "$(decision 0 auto 'git push >/tmp/out.log')"
 check "redirect: > out is not the destination" "deny" "$(decision 0 auto 'git push > /tmp/out.log')"
+check "probe: NO_PASS_ON refuses a local push" "deny" \
+    "$(export MP_DENY_SHARED_ACTIONS_NO_PASS_ON=1; decision 0 auto "git push $localrepo/remote.git main")"
+check "probe: NO_PASS_ON refuses an unresolved push" "deny" \
+    "$(export MP_DENY_SHARED_ACTIONS_NO_PASS_ON=1; decision 0 auto 'git remote add scratch /tmp/x/remote.git && git push scratch main')"
 check "redirect: a local push with 2>&1 passes" "" "$(decision 0 auto "git push $localrepo/remote.git main 2>&1")"
 command rm -rf "$localrepo"
 

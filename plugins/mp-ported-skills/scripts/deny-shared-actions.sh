@@ -304,8 +304,14 @@ scan() {
             # that reaches that wrapper is passed: named plainly, not by a
             # path, not behind env or `command -p`, and not in a command
             # that names PATH or a GIT_ variable.
+            # MP_DENY_SHARED_ACTIONS_NO_PASS_ON, set by actions.sh's probe
+            # of whether a past command was a shared action, skips this:
+            # passing a push on is a deferral to the wrapper, not a finding
+            # that it was local, and the variable only makes this hook
+            # refuse more.
             if [ "$matched" = "git push" ] && [ "$_git_word" = git ] &&
-                [ -z "$seg_bypass" ] && [ -z "$push_text_bypass" ]; then
+                [ -z "$seg_bypass" ] && [ -z "$push_text_bypass" ] &&
+                [ -z "${MP_DENY_SHARED_ACTIONS_NO_PASS_ON:-}" ]; then
                 classify_push_where "$@"
                 [ -z "$cd_unread" ] || classify_push_where=unresolved
                 case "$classify_push_where" in

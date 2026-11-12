@@ -1874,18 +1874,28 @@ repo_git() { # <folder> <git args...> -- git there, unsigned, with a test identi
     repo_dir=$1; shift
     git -C "$repo_dir" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@"
 }
+# The hook passes a push to a path on this machine on to worker-bin's git
+# (#94), so each repo here gets a network push URL for the pushes in its
+# transcripts to meet, and fixture_push pushes past it to the bare origin,
+# then fetches so origin's refs follow.
+fixture_push() { # <folder> <push args...>
+    fp_dir=$1; shift
+    repo_git "$fp_dir" push -q "$(git -C "$fp_dir" remote get-url origin)" "$@" 2>/dev/null
+    git -C "$fp_dir" fetch -q --prune origin 2>/dev/null
+}
 remote="$work/remote.git"
 repo="$work/worker-repo"
 git init -q --bare "$remote"
 git init -q -b main "$repo"
 repo_git "$repo" commit -q --allow-empty -m start
 repo_git "$repo" remote add origin "$remote"
-repo_git "$repo" push -q origin main 2>/dev/null
+repo_git "$repo" remote set-url --push origin https://example.invalid/worker-repo.git
+fixture_push "$repo" main
 # A clone has origin/HEAD, whose short name is the bare remote name.
 git -C "$repo" remote set-head origin main
 start=$(git -C "$repo" rev-parse HEAD)
 repo_git "$repo" commit -q --allow-empty -m "worker's commit"
-repo_git "$repo" push -q origin HEAD:66-deny-shared-actions-to-background-workers 2>/dev/null
+fixture_push "$repo" HEAD:66-deny-shared-actions-to-background-workers
 pushed="branch origin/66-deny-shared-actions-to-background-workers ungranted: holds the worker's commits"
 # The same branch when the transcript holds no push of the worker's to it.
 others="branch origin/66-deny-shared-actions-to-background-workers pushed by someone else: holds the worker's commits"
@@ -2005,7 +2015,7 @@ transcript turn-ended -work-project "$sid"
 job
 main_start=$(git -C "$repo" rev-parse HEAD)
 repo_git "$repo" commit -q --allow-empty -m "pushed to main"
-repo_git "$repo" push -q origin HEAD:main 2>/dev/null
+fixture_push "$repo" HEAD:main
 check "actions: a push to main, not origin/HEAD" "branch origin/main pushed by someone else: holds the worker's commits" \
     "$(actions "$main_start")"
 
@@ -2036,11 +2046,50 @@ check "actions: a push to another branch is not this one" "branch origin/main pu
 check "actions: a push with no result may have landed" "branch origin/main ungranted: holds the worker's commits" \
     "$(printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"git push origin main"}}]}}' \
         >"$cfg/projects/-work-project/$sid.jsonl"; actions "$main_start" | grep '^branch')"
+# A push to a path on this machine is no shared action (#94): one the hook
+# passes, recorded as a push, whose every `To` line names a local path, is
+# left out, and does not make origin/main the worker's.
+push_call() { # <id> <command> <result text>: a Bash call whose result recorded a push of main
+    jq -cn --arg id "$1" --arg c "$2" \
+        '{type: "assistant", message: {role: "assistant", content: [{type: "tool_use", id: $id, name: "Bash", input: {command: $c}}]}}'
+    jq -cn --arg id "$1" --arg t "$3" \
+        '{type: "user", toolUseResult: {gitOperation: {push: {branch: "main"}}}, message: {role: "user", content: [{type: "tool_result", tool_use_id: $id, is_error: false, content: $t}]}}'
+}
+local_actions() { # <command> <result text>: actions.sh's output for that one call
+    push_call l1 "$1" "$2" >"$cfg/projects/-work-project/$sid.jsonl"
+    actions "$main_start"
+}
+check "actions: a push to a local path is left out" "branch origin/main pushed by someone else: holds the worker's commits" \
+    "$(local_actions 'git push /tmp/scratch/remote.git main 2>&1' "To /tmp/scratch/remote.git
+ * [new branch]      main -> main")"
+check "actions: a push to a file:// URL is left out" "branch origin/main pushed by someone else: holds the worker's commits" \
+    "$(local_actions 'git push file:///tmp/scratch/remote.git main 2>&1' "To file:///tmp/scratch/remote.git
+ * [new branch]      main -> main")"
+check "actions: the ticket's same-command remote is left out" "branch origin/main pushed by someone else: holds the worker's commits" \
+    "$(local_actions 'w=$(mktemp -d) && git init -q --bare "$w/r.git" && cd "$w" && git remote add origin "$w/r.git" && git push origin main 2>&1' "To /tmp/tmp.abc/r.git
+ * [new branch]      main -> main")"
+check "actions: a passed push whose To line is the network is listed" "branch origin/main ungranted: holds the worker's commits
+command succeeded ungranted: x=\$(mktemp -d) && cd \"\$x\" && git push origin main 2>&1 -- push main" \
+    "$(local_actions 'x=$(mktemp -d) && cd "$x" && git push origin main 2>&1' "To https://github.com/o/r.git
+   abc..def  main -> main")"
+check "actions: a passed push with one local and one network To line is listed" "branch origin/main ungranted: holds the worker's commits
+command succeeded ungranted: git push /tmp/scratch/remote.git main 2>&1 -- push main" \
+    "$(local_actions 'git push /tmp/scratch/remote.git main 2>&1' "To /tmp/scratch/remote.git
+ * [new branch]      main -> main
+To https://github.com/o/r.git
+   abc..def  main -> main")"
+check "actions: a local push with no To line stays listed" "branch origin/main ungranted: holds the worker's commits
+command succeeded ungranted: git push -q /tmp/scratch/remote.git main -- push main" \
+    "$(local_actions 'git push -q /tmp/scratch/remote.git main' '')"
+check "actions: a push the hook refuses is listed whatever its To line" "branch origin/main ungranted: holds the worker's commits
+command succeeded ungranted: git push origin main 2>&1 -- push main" \
+    "$(local_actions 'git push origin main 2>&1' "To /tmp/scratch/remote.git
+ * [new branch]      main -> main")"
 # An unreadable transcript clears no one: the branch stays the worker's.
 printf 'not json\n' >"$cfg/projects/-work-project/$sid.jsonl"
 check "actions: an unreadable transcript leaves the branch the worker's" "branch origin/main ungranted: holds the worker's commits" \
     "$(actions "$main_start" | grep '^branch')"
-repo_git "$repo" push -q -f origin "$start:main" 2>/dev/null
+fixture_push "$repo" -f "$start:main"
 
 # Nothing shared: the worker's commits are only local, and it ran no
 # shared command.
@@ -2101,17 +2150,18 @@ new_grant_repo() { # <folder var name> <grant file content> [dist path]: a repo 
     git init -q -b main "$grepo"
     repo_git "$grepo" commit -q --allow-empty -m start
     repo_git "$grepo" remote add origin "$gremote"
-    repo_git "$grepo" push -q origin main 2>/dev/null
+    repo_git "$grepo" remote set-url --push origin "https://example.invalid/grant-repo-$grant_n.git"
+    fixture_push "$grepo" main
     git -C "$grepo" remote set-head origin main
     mkdir -p "$grepo/docs/agents"
     printf '%s' "$2" >"$grepo/docs/agents/supervision.md"
     [ -z "${3:-}" ] || printf '%s\n' "$3" >"$grepo/docs/agents/distribution-repo.md"
     repo_git "$grepo" add docs/agents
     repo_git "$grepo" commit -q -m "grant"
-    repo_git "$grepo" push -q origin main 2>/dev/null
+    fixture_push "$grepo" main
     gstart=$(git -C "$grepo" rev-parse HEAD)
     repo_git "$grepo" commit -q --allow-empty -m "worker's commit"
-    repo_git "$grepo" push -q origin HEAD:66-deny-shared-actions-to-background-workers 2>/dev/null
+    fixture_push "$grepo" HEAD:66-deny-shared-actions-to-background-workers
 }
 grant_n=1
 
@@ -2363,6 +2413,7 @@ command succeeded ungranted: gh pr -R o/r new --fill" \
 gdist="$work/grant-dist"
 git init -q -b main "$gdist"
 repo_git "$gdist" commit -q --allow-empty -m start
+repo_git "$gdist" remote add origin https://example.invalid/grant-dist.git
 gdist=$(CDPATH= cd -- "$gdist" && pwd -P)
 {
     bash_call d1 "git -C $gdist push origin main"

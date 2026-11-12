@@ -29,6 +29,11 @@
 # that pushes, which the command text does not show. Only calls whose text
 # names gh, push, send-pack or alias are checked against the hook, so a push
 # through a git alias from config shows only when its result recorded it.
+# A push to a path on this machine is no shared action (#94) and is left
+# out, its branch too: one the hook passes, whose result Claude Code
+# recorded as a push alone, and whose output's every `To <url>` line names
+# a local path (classify_url_local). A push whose output has no `To` line,
+# such as one run with `-q`, stays listed.
 #
 # <status> is `succeeded`, `refused` (by the auto-mode classifier or the
 # #66 hook), `failed` (any other error) or `no result`. <cmd> is the
@@ -148,11 +153,13 @@ refused() {
     [ -n "$(hook_reason "$1")" ]
 }
 
-# hook_reason <command>: the hook's refusal reason for it, or empty, under
-# the same terms as refused.
+# hook_reason <command> [<no-pass-on>]: the hook's refusal reason for it, or
+# empty, under the same terms as refused. The hook passes a local or
+# unresolved push on to worker-bin's git (#94), which is no finding that
+# it stayed local, so this asks it not to unless <no-pass-on> is empty.
 hook_reason() {
     jq -cn --arg c "$1" '{permission_mode: "auto", tool_name: "Bash", tool_input: {command: $c}}' |
-        (cd "$DIR" && CLAUDE_CODE_SESSION_ATTENDED=0 MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS=1 sh "$hook") |
+        (cd "$DIR" && CLAUDE_CODE_SESSION_ATTENDED=0 MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS=1 MP_DENY_SHARED_ACTIONS_NO_PASS_ON=${2-1} sh "$hook") |
         jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null
 }
 
@@ -267,6 +274,7 @@ calls() {
         | ($cmd | split("\n")) as $lines
         | {cmd: $cmd, ops: $ops, recorded: ($ops != ""),
            pushed: ($result.op.push.branch? // ""),
+           to: [($result.text? // "") | split("\n")[] | select(startswith("To ")) | .[3:]],
            status: (if $result == null then "no result"
                      elif ($result.error | not) then "succeeded"
                      elif ($result.text | test("denied by the Claude Code auto mode classifier|on its own \\(#66\\)")) then "refused"
@@ -274,6 +282,22 @@ calls() {
            rest: ($lines[0]
                   + (if ($lines | length) > 1 then " ..." else "" end)
                   + (if $ops != "" then " -- " + $ops else "" end))}' "$1" 2>/dev/null
+}
+
+# local_push <row> <command>: whether the call is a push to paths on this
+# machine alone (#94): its recorded op is one push and nothing else, the
+# hook passes the command and it holds no gh write, and every `To <url>`
+# line in its output, of which there is at least one, names a local path.
+local_push() {
+    printf '%s' "$1" | jq -e '.ops | test("^push [^,]*$")' >/dev/null 2>&1 || return 1
+    if gh_write "$2" || [ -n "$(hook_reason "$2" "")" ]; then return 1; fi
+    _lp_to=$(printf '%s' "$1" | jq -r '.to[]') || return 1
+    [ -n "$_lp_to" ] || return 1
+    while IFS= read -r _lp_url; do
+        classify_url_local "$_lp_url" || return 1
+    done <<EOF
+$_lp_to
+EOF
 }
 
 # action_for <cmd> <ops>: push, distribution-push, pr-create, pr-merge,
@@ -493,7 +517,9 @@ if [ -n "$sid" ]; then
         for row in $rows; do
             IFS=$oldIFS
             cmd=$(printf '%s' "$row" | jq -r .cmd)
-            if [ "$(printf '%s' "$row" | jq -r .recorded)" = true ] || gh_write "$cmd" || refused "$cmd"; then
+            if [ "$(printf '%s' "$row" | jq -r .recorded)" = true ] && local_push "$row" "$cmd"; then
+                continue
+            elif [ "$(printf '%s' "$row" | jq -r .recorded)" = true ] || gh_write "$cmd" || refused "$cmd"; then
                 ops=$(printf '%s' "$row" | jq -r .ops)
                 status=$(printf '%s' "$row" | jq -r .status)
                 rest=$(printf '%s' "$row" | jq -r .rest)
