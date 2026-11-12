@@ -159,7 +159,10 @@ scan() {
         # program itself.
         while [ $# -gt 0 ]; do
             case "$1" in
-            [A-Za-z_]*=*) shift; continue ;;
+            [A-Za-z_]*=*)
+                # zsh's path and fpath arrays move where git is found.
+                case "${1%%=*}" in path | path+ | fpath | fpath+) push_text_bypass=yes ;; esac
+                shift; continue ;;
             '{' | '!' | if | then | else | elif | do | while | until) shift; continue ;;
             esac
             case "${1##*/}" in
@@ -206,6 +209,10 @@ scan() {
                 # eval runs its words, joined by spaces, as a command in
                 # this shell. Words built from a substitution are text no
                 # scan can read, so the whole command is checked as well.
+                # What it defines (a function named git) holds after it,
+                # and its scan runs in a subshell, so no later push is
+                # handed on to the wrapper (#94).
+                push_text_bypass=yes
                 shift
                 IFS=' '
                 _ev="$*"
@@ -265,6 +272,14 @@ scan() {
             esac
         done
         [ $# -gt 0 ] || continue
+        # Any command but these plain programs could change what the word
+        # `git` runs later in the text (a function named git, hash, alias,
+        # a sourced file, a program by a path of its own), so after one, no
+        # push is handed on to the wrapper (#94).
+        case "$1" in
+        git | cd | mktemp | mkdir | rm | rmdir | touch | echo | printf | ls | cat | pwd | true | false | test | '[' | cp | mv | ln | '}') ;;
+        *) push_text_bypass=yes ;;
+        esac
         case "${1##*/}" in
         cd)
             # A later git runs where cd went (`cd <repo> && git push`), so
@@ -302,8 +317,9 @@ scan() {
             # to worker-bin's git, which reads the destination again when
             # it runs and refuses anything but a local one. So only a git
             # that reaches that wrapper is passed: named plainly, not by a
-            # path, not behind env or `command -p`, and not in a command
-            # that names PATH or a GIT_ variable.
+            # path, not behind env or `command -p`, not in a command that
+            # names PATH or a GIT_ variable, and not after any command but
+            # a short list of plain programs (push_text_bypass).
             # MP_DENY_SHARED_ACTIONS_NO_PASS_ON, set by actions.sh's probe
             # of whether a past command was a shared action, skips this:
             # passing a push on is a deferral to the wrapper, not a finding

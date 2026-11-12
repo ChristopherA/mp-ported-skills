@@ -517,9 +517,10 @@ if [ -n "$sid" ]; then
         for row in $rows; do
             IFS=$oldIFS
             cmd=$(printf '%s' "$row" | jq -r .cmd)
-            if [ "$(printf '%s' "$row" | jq -r .recorded)" = true ] && local_push "$row" "$cmd"; then
+            recorded=$(printf '%s' "$row" | jq -r .recorded)
+            if [ "$recorded" = true ] && local_push "$row" "$cmd"; then
                 continue
-            elif [ "$(printf '%s' "$row" | jq -r .recorded)" = true ] || gh_write "$cmd" || refused "$cmd"; then
+            elif [ "$recorded" = true ] || gh_write "$cmd" || refused "$cmd"; then
                 ops=$(printf '%s' "$row" | jq -r .ops)
                 status=$(printf '%s' "$row" | jq -r .status)
                 rest=$(printf '%s' "$row" | jq -r .rest)

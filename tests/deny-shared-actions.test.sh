@@ -809,6 +809,21 @@ check "probe: NO_PASS_ON refuses a local push" "deny" \
 check "probe: NO_PASS_ON refuses an unresolved push" "deny" \
     "$(export MP_DENY_SHARED_ACTIONS_NO_PASS_ON=1; decision 0 auto 'git remote add scratch /tmp/x/remote.git && git push scratch main')"
 check "redirect: a local push with 2>&1 passes" "" "$(decision 0 auto "git push $localrepo/remote.git main 2>&1")"
+# A command that could change what `git` runs takes the push out of the
+# wrapper's reach, so it is refused, unresolved or local.
+check "rebind: a plain program before a local push passes" "" "$(decision 0 auto "echo hi; mkdir -p /tmp/x && git push $localrepo/remote.git main")"
+check "rebind: a function named git is refused" "deny" "$(decision 0 auto 'R=https://example.invalid/x.git; git() { /usr/bin/git "$@"; }; git push "$R" main')"
+check "rebind: a function named git before a cd is refused" "deny" "$(decision 0 auto 'git(){ /usr/bin/git "$@"; }; cd "$(pwd)" && git push origin main')"
+check "rebind: function git { } is refused" "deny" "$(decision 0 auto 'function git { /usr/bin/git "$@"; }; git push "$R"')"
+check "rebind: a function by a variable is refused" "deny" "$(decision 0 auto "git() { \"\$G\" \"\$@\"; }; git push $localrepo/remote.git main")"
+check "rebind: hash -p is refused" "deny" "$(decision 0 auto 'hash -p /usr/bin/git git; git push "$R" main')"
+check "rebind: zsh hash git= is refused" "deny" "$(decision 0 auto 'hash git=/usr/bin/git; git push "$R"')"
+check "rebind: zsh path= is refused" "deny" "$(decision 0 auto 'path=(/usr/bin $path); git push "$R"')"
+check "rebind: zsh path+= is refused" "deny" "$(decision 0 auto "path+=(/usr/bin); git push $localrepo/remote.git main")"
+check "rebind: an alias on an earlier line is refused" "deny" "$(decision 0 auto "shopt -s expand_aliases; alias git=/usr/bin/git
+git push \"\$R\"")"
+check "rebind: a sourced file is refused" "deny" "$(decision 0 auto '. ./f.sh; git push "$R"')"
+check "rebind: eval of a function is refused" "deny" "$(decision 0 auto "eval 'git() { /usr/bin/git \"\$@\"; }'; git push \"\$R\"")"
 command rm -rf "$localrepo"
 
 # The maintainer's own interactive session: attended, whatever the
