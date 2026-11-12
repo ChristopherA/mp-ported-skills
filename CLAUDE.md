@@ -160,6 +160,10 @@ Build a JSON value from a shell string with `jq -n --arg`, as `fixed_nums` in `r
 
 A jq regex that must match at the start of any line of a multi-line string, such as a heading inside an issue comment, puts `(?m)` inline: `test("(?m)^## Agent Brief")`. A `"m"` flag does not make `^` match after a newline, in jq or in the gojq that `gh --jq` runs, so a heading below a comment's first line is missed with exit 0. Give the fixture a line before the heading: #228's first filter passed checks whose fixtures all put it first.
 
+## Walking command_segments
+
+A function that walks `command_segments`' lines with `IFS=$classify_rs; set -- $seg` overwrites its own arguments, so it saves the ones it still needs first, or calls `each_command` in `actions.sh`. Text built back from words for a nested scan joins them with `IFS=' '` set around `"$*"`, because `"$*"` joins with IFS's first character. In #104, `push_targets` read its recorded branch as unset after the loop, and the hook's `eval` joined its words with the newline the loop's IFS held, so `eval git push` read as two commands and ran until the review.
+
 ## Checking a path is a repo
 
 To check that a path a file names is a repo of its own, compare `git -C <path> rev-parse --show-toplevel` with the path, resolved. `rev-parse --git-dir` succeeds in any folder inside a repo, so a plain folder there passes and the checks after it read the repo around it: `launch.sh` and `push.sh` accepted such a folder as a Distribution repo until #167, and `state.sh` read the Project's own git as its Distribution repo's until #142's review. In `supervise`'s scripts, call `own_repo_top` from `own-repo.sh` rather than writing the comparison again; for a Distribution repo path, call `distribution_check` from `distribution-repo.sh`, which builds on it and also refuses a linked worktree and the Project's own repo, so `launch.sh`, `push.sh` and `resuming`'s `state.sh` cannot disagree on it (#209).
