@@ -40,16 +40,22 @@ check "no backgrounded line" "" "$(bg_session_id "Workspace not trusted")"
 check "id is hex only" "" "$(bg_session_id "backgrounded · not-an-id")"
 check "a name with no separator is not an id" "" "$(bg_session_id "backgrounded · c2a368eezz")"
 
-# The helper reads the line as launch.sh does: its pattern is launch.sh's.
+# The helper reads the line as launch.sh does: its colour strip and its
+# pattern are launch.sh's.
 pattern='s/^backgrounded · \([0-9a-f][0-9a-f]*\)\( · .*\)\{0,1\}$/\1/p'
+strip='sed "s/$esc\[[0-9;]*m//g"'
 check "launch.sh uses the same pattern" 1 "$(grep -cF "$pattern" "$launch_sh")"
 check "the helper uses the same pattern" 1 "$(grep -cF "$pattern" "$root/tests/live/session-id.sh")"
+check "launch.sh uses the same colour strip" 1 "$(grep -cF "$strip" "$launch_sh")"
+check "the helper uses the same colour strip" 1 \
+    "$(grep -cF "$(printf '%s' "$strip" | sed 's/\$esc/$session_id_esc/')" "$root/tests/live/session-id.sh")"
 
-# Every live test that launches `claude --bg` reads its id through the helper.
+# Every live test that launches a background session reads its id through
+# the helper. Any mention of --bg counts, however it starts claude.
 for f in "$root"/tests/live/*.sh; do
     case $f in */session-id.sh) continue ;; esac
-    grep -q 'claude --bg\|claude "\$@"' "$f" || continue
-    grep -q '^backgrounded\|sed -n .s/^backgrounded' "$f" &&
+    grep -q -e '--bg' "$f" || continue
+    grep -q -e 's/^backgrounded' "$f" &&
         check "$(basename "$f") parses the line itself" none found
     check "$(basename "$f") sources the helper" 1 "$(grep -c '^\. "\$root/tests/live/session-id.sh"$' "$f")"
 done
