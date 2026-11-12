@@ -30,6 +30,7 @@
 set -u
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd -P)
+. "$root/tests/live/session-id.sh"
 
 for c in claude jq; do
     if ! command -v "$c" >/dev/null 2>&1; then
@@ -127,9 +128,7 @@ out=$(cd "$scratch" && claude --bg --model "${MP_LIVE_MODEL:-claude-sonnet-5}" -
 # Each output is read as the supervise script that reads it does: this
 # launch line as launch.sh reads it, past color (FORCE_COLOR colors the id)
 # and a ` · <name>` tail, and the resume line below as resume.sh reads it.
-esc=$(printf '\033')
-id=$(printf '%s\n' "$out" | sed "s/$esc\[[0-9;]*m//g" |
-    sed -n 's/^backgrounded · \([0-9a-f][0-9a-f]*\)\( · .*\)\{0,1\}$/\1/p' | head -n 1)
+id=$(bg_session_id "$out")
 if [ -z "$id" ]; then
     bad 1 "it printed: $out"
     finish

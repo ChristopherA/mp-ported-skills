@@ -21,6 +21,7 @@
 set -u
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd -P)
+. "$root/tests/live/session-id.sh"
 config=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
 
 if ! command -v claude >/dev/null 2>&1; then
@@ -44,7 +45,7 @@ prompt="Test $token. Run exactly these three Bash commands, one at a time, and n
 set -- --bg --permission-mode auto --plugin-dir "$root/plugins/mp-ported-skills"
 [ -n "${MP_LIVE_MODEL:-}" ] && set -- "$@" --model "$MP_LIVE_MODEL"
 out=$(cd "$root" && claude "$@" "$prompt" </dev/null 2>&1)
-id=$(printf '%s\n' "$out" | sed -n 's/^backgrounded · \([0-9a-f][0-9a-f]*\)$/\1/p' | head -n 1)
+id=$(bg_session_id "$out")
 if [ -z "$id" ]; then
     printf 'FAIL launch: claude --bg printed no session id:\n%s\n' "$out"
     exit 1

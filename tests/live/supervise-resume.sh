@@ -22,6 +22,7 @@
 set -u
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd -P)
+. "$root/tests/live/session-id.sh"
 scripts="$root/plugins/mp-ported-skills/skills/supervise/scripts"
 : "${CLAUDE_CONFIG_DIR:?CLAUDE_CONFIG_DIR must be set, as watch.sh and resume.sh read it}"
 
@@ -47,7 +48,7 @@ word="heliotrope$$"
 
 out=$(cd "$scratch" && claude --bg --model "${MP_LIVE_MODEL:-claude-sonnet-5}" --permission-mode auto \
     "Test $token. Remember this codeword: $word. Use no tools. Reply with only OK." </dev/null 2>&1)
-id=$(printf '%s\n' "$out" | sed -n 's/^backgrounded · \([0-9a-f][0-9a-f]*\)$/\1/p' | head -n 1)
+id=$(bg_session_id "$out")
 if [ -z "$id" ]; then
     printf 'FAIL launch: claude --bg printed no session id:\n%s\n' "$out"
     command rm -rf "$scratch"
