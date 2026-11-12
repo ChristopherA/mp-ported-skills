@@ -49,7 +49,10 @@
 # alias given with `-c alias.X=...` or found in git config.
 # A `cd <dir>` before the git moves the repo the grant is read from. A push
 # in a Project's Distribution repo needs the Project's distribution-push
-# grant, not push (classify_distribution, #141).
+# grant, not push (classify_distribution, #141). A push to a path on this
+# machine, or one whose destination cannot be read from the text yet, is
+# passed on to worker-bin's git, which reads it when it runs (#94;
+# classify_push_where, docs/adr/0006).
 # So `git commit -m "a; git push"` and an edit script written by a quoted
 # heredoc that names a push both run. `sh -c`'s argument, a here-string
 # into a shell, eval's words and `env -S`'s string are scanned again on
