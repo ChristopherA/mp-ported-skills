@@ -271,7 +271,13 @@ scan() {
             # the grant is read there (#141), when follow_cd says it can
             # be. `cd` alone goes home; `cd -` is not followed.
             shift
-            [ -n "$follow_cd" ] || continue
+            if [ -z "$follow_cd" ]; then
+                # A cd not followed, to a folder the shell has yet to
+                # expand (`x=$(mktemp -d) && cd "$x"`), leaves a later
+                # push's repo unknown (#94).
+                case "$*" in *'$'* | *'`'* | *"$classify_sub"*) cd_unread=yes ;; esac
+                continue
+            fi
             while [ "${1:-}" = -P ] || [ "${1:-}" = -L ] || [ "${1:-}" = -e ]; do shift; done
             [ "${1:-}" != -- ] || shift
             case "${1:-}" in
@@ -301,6 +307,7 @@ scan() {
             if [ "$matched" = "git push" ] && [ "$_git_word" = git ] &&
                 [ -z "$seg_bypass" ] && [ -z "$push_text_bypass" ]; then
                 classify_push_where "$@"
+                [ -z "$cd_unread" ] || classify_push_where=unresolved
                 case "$classify_push_where" in
                 local | unresolved) matched="" ;;
                 esac
@@ -319,6 +326,7 @@ scan() {
 matched=""
 piped=""
 push_text_bypass=""
+cd_unread=""
 case "$cmd" in *PATH* | *GIT_*) push_text_bypass=yes ;; esac
 scan "$cmd"
 

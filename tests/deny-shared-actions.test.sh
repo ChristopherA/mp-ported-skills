@@ -766,6 +766,47 @@ check "env -S's string joins the words after it" "deny" "$(decision 0 auto "env 
 check "env -S of a string naming no form runs" "" "$(decision 0 auto "env -S 'echo git push'")"
 check "a here-string into sh is refused" "deny" "$(decision 0 auto "sh <<< 'gh issue close 3'")"
 
+# A push to a path on this machine is no shared action (#94): the hook
+# passes it, and one whose remote the same command creates, on to
+# worker-bin's git. A network destination stays refused.
+localrepo=$(mktemp -d)
+git init -q "$localrepo"
+git init -q --bare "$localrepo/remote.git"
+git -C "$localrepo" remote add origin "$localrepo/remote.git"
+check "local: a push to a literal path passes" "" "$(decision 0 auto "git push $localrepo/remote.git main")"
+check "local: a push to a file:// URL passes" "" "$(decision 0 auto "git push file://$localrepo/remote.git main")"
+check "local: a push to origin that is a local path passes" "" "$(decision 0 auto 'git push origin main' "$localrepo")"
+check "local: a bare push to a local origin passes" "" "$(decision 0 auto 'git push' "$localrepo")"
+check "local: the ticket's whole command passes" "" \
+    "$(decision 0 auto 'work=$(mktemp -d) && git init -q --bare "$work/remote.git" && git init -q "$work/r" && cd "$work/r" && git remote add origin "$work/remote.git" && git push origin main')"
+check "local: a remote created in the same command passes" "" \
+    "$(decision 0 auto 'git remote add scratch /tmp/x/remote.git && git push scratch main')"
+check "local: a push after cd to a substituted folder passes" "" "$(decision 0 auto 'x=$(mktemp -d) && cd "$x" && git push origin main')"
+check "network: a substitution alone does not hide origin" "deny" "$(decision 0 auto 'x=$(mktemp -d) && git push origin main')"
+check "network: a push before the unread cd is refused" "deny" "$(decision 0 auto 'x=$(mktemp -d); git push origin main; cd "$x"')"
+check "network: an https:// URL is refused" "deny" "$(decision 0 auto 'git push https://example.invalid/x.git main')"
+check "network: an ssh:// URL is refused" "deny" "$(decision 0 auto 'git push ssh://git@example.invalid/x.git main')"
+check "network: a git@host:path URL is refused" "deny" "$(decision 0 auto 'git push git@example.invalid:o/x.git main')"
+check "network: origin resolving to the network is refused" "deny" "$(decision 0 auto 'git push origin main')"
+git -C "$localrepo" remote set-url --push origin https://example.invalid/pushurl.git
+check "network: a local fetch URL with a network push URL is refused" "deny" "$(decision 0 auto 'git push origin main' "$localrepo")"
+git -C "$localrepo" remote set-url --push origin "$localrepo/remote.git"
+git -C "$localrepo" config url.https://example.invalid/.insteadOf "$localrepo/"
+check "network: a local path an insteadOf rule rewrites is refused" "deny" "$(decision 0 auto "git push $localrepo/other.git main" "$localrepo")"
+git -C "$localrepo" config --unset url.https://example.invalid/.insteadOf
+check "bypass: git by path to a local path is refused" "deny" "$(decision 0 auto "/usr/bin/git push $localrepo/remote.git main")"
+check "bypass: env -i git to a local path is refused" "deny" "$(decision 0 auto "env -i git push $localrepo/remote.git main")"
+check "bypass: command -p git to a local path is refused" "deny" "$(decision 0 auto "command -p git push $localrepo/remote.git main")"
+check "bypass: PATH= before git to a local path is refused" "deny" "$(decision 0 auto "PATH=/usr/bin git push $localrepo/remote.git main")"
+check "bypass: a GIT_ variable before git is refused" "deny" "$(decision 0 auto "GIT_SSH_COMMAND=x git push $localrepo/remote.git main")"
+check "bypass: -c before push to a local path is refused" "deny" "$(decision 0 auto "git -c core.x=y push $localrepo/remote.git main")"
+check "bypass: --receive-pack to a local path is refused" "deny" "$(decision 0 auto "git push --receive-pack=x $localrepo/remote.git main")"
+check "redirect: 2>&1 is not the destination" "deny" "$(decision 0 auto 'git push 2>&1')"
+check "redirect: >/tmp/out is not the destination" "deny" "$(decision 0 auto 'git push >/tmp/out.log')"
+check "redirect: > out is not the destination" "deny" "$(decision 0 auto 'git push > /tmp/out.log')"
+check "redirect: a local push with 2>&1 passes" "" "$(decision 0 auto "git push $localrepo/remote.git main 2>&1")"
+command rm -rf "$localrepo"
+
 # The maintainer's own interactive session: attended, whatever the
 # permission mode.
 check "attended, auto mode: push allowed" "" "$(decision 1 auto 'git push')"
