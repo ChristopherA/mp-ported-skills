@@ -146,6 +146,10 @@ scan() {
         # shellcheck disable=SC2086
         set -- $seg
         IFS=$nl
+        # A wrapper that finds the program by a PATH of its own (`env -i`,
+        # `command -p`) bypasses worker-bin's git, so a push it runs is
+        # never handed on to the wrapper (#94).
+        seg_bypass=""
         # Skip words that run what follows them: VAR=value assignments,
         # shell keywords, and wrappers such as env, command, xargs and
         # `sh -c`, each past its own flags. Repeats until a word names the
@@ -157,6 +161,7 @@ scan() {
             esac
             case "${1##*/}" in
             env)
+                seg_bypass=yes
                 shift
                 while [ $# -gt 0 ]; do
                     case "$1" in
@@ -188,6 +193,7 @@ scan() {
                 while [ $# -gt 0 ]; do
                     case "$1" in
                     -a) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
+                    -*p*) seg_bypass=yes; shift ;;
                     -*) shift ;;
                     *) break ;;
                     esac
@@ -278,8 +284,24 @@ scan() {
             classify_dir=$classify_base
             ;;
         git)
+            _git_word=$1
             shift
             classify_git "$@"
+            # A push to a path on this machine is no shared action (#94),
+            # and nor, here, is one whose destination cannot be read yet,
+            # such as a remote the same command creates: both are handed on
+            # to worker-bin's git, which reads the destination again when
+            # it runs and refuses anything but a local one. So only a git
+            # that reaches that wrapper is passed: named plainly, not by a
+            # path, not behind env or `command -p`, and not in a command
+            # that names PATH or a GIT_ variable.
+            if [ "$matched" = "git push" ] && [ "$_git_word" = git ] &&
+                [ -z "$seg_bypass" ] && [ -z "$push_text_bypass" ]; then
+                classify_push_where "$@"
+                case "$classify_push_where" in
+                local | unresolved) matched="" ;;
+                esac
+            fi
             ;;
         gh)
             shift
@@ -293,6 +315,8 @@ scan() {
 
 matched=""
 piped=""
+push_text_bypass=""
+case "$cmd" in *PATH* | *GIT_*) push_text_bypass=yes ;; esac
 scan "$cmd"
 
 # A shell reading commands from a pipe (`echo git push | sh`) runs text

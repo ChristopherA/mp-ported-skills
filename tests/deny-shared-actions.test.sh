@@ -29,14 +29,24 @@ check() { # <name> <expected> <actual>
 
 # Every variable the hook reads, set or unset here. The hook runs
 # `git config` to resolve aliases, so git reads no global or system config
-# and no repo but the scratch one below, and the checks run from a folder
-# outside any repo. MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS unset: left set in
+# and no repo but the scratch ones below, and the checks run from a
+# scratch repo of their own whose origin is a network URL: a push to a
+# path on this machine, or one whose remote cannot be read, is passed on
+# to worker-bin's git (#94), so a check that a form is refused needs a
+# remote that resolves to the network. Each scratch repo below whose
+# origin is a bare repo for grant.sh to read gets a network push URL for
+# the same reason. MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS unset: left set in
 # the calling session, it would skip the grant lookup below without a
 # single test here asking for that -- the exact silent-skip the variable
 # is designed to never cause from the hook's own default.
 unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS CLAUDE_CODE_SESSION_ATTENDED
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 outside=$(mktemp -d)
+git init -q "$outside"
+git -C "$outside" remote add origin https://example.invalid/outside.git
+# Folders the checks push from, inside that repo, so a push there reads its
+# network origin.
+mkdir -p "$outside/some/dir" "$outside/repo" "$outside/sub"
 cd "$outside" || exit 1
 
 entry='.hooks.PreToolUse[] | select(.hooks[0].command | test("deny-shared-actions"))'
@@ -79,7 +89,7 @@ check "eval" "deny" "$(decision 0 auto 'eval "git push"')"
 check "time" "deny" "$(decision 0 auto 'time git push')"
 check "nohup" "deny" "$(decision 0 auto 'nohup git push &')"
 check "xargs" "deny" "$(decision 0 auto 'echo origin | xargs git push')"
-check "xargs with flags" "deny" "$(decision 0 auto 'echo origin | xargs -n 1 -I {} git push {}')"
+check "xargs with flags" "deny" "$(decision 0 auto 'echo main | xargs -n 1 -I {} git push origin {}')"
 check "exec" "deny" "$(decision 0 auto 'exec git push')"
 check "builtin command chain" "deny" "$(decision 0 auto 'builtin command env git push')"
 check "env -u NAME" "deny" "$(decision 0 auto 'env -u GIT_DIR git push')"
@@ -205,19 +215,27 @@ check "refusal names the grant file and the supervisor" \
 # A standing grant on the committed default branch lets the matching form
 # through; an ungranted action, or a grant read from the working tree only,
 # still refuses (#58).
+# seed_push <dir>: push the scratch repo's main to its bare origin, past
+# the network push URL the hook reads, and fetch so origin/main, where
+# grant.sh reads the grants, follows.
+seed_push() {
+    git -C "$1" -c commit.gpgsign=false push -q "$(git -C "$1" remote get-url origin)" main 2>/dev/null
+    git -C "$1" fetch -q origin
+}
 granted=$(mktemp -d)
 remote="$granted.git"
 git init -q --bare "$remote"
 git init -q -b main "$granted"
 git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q --allow-empty -m start
 git -C "$granted" remote add origin "$remote"
-git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+seed_push "$granted"
 git -C "$granted" remote set-head origin main
+git -C "$granted" remote set-url --push origin https://example.invalid/granted.git
 mkdir -p "$granted/docs/agents"
 printf '## Grants\n\n- push\n- issue-close: routine\n- issue-comment\n' >"$granted/docs/agents/supervision.md"
 git -C "$granted" add docs/agents/supervision.md
 git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -m grants
-git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+seed_push "$granted"
 
 check "a granted push goes through" "" "$(decision 0 auto 'git push' "$granted")"
 check "a granted push in a compound command goes through" "" \
@@ -311,8 +329,9 @@ pushed_repo() { # <dir> <grants>: a repo with <grants> in supervision.md on orig
     dgit_in "$1" add docs
     dgit_in "$1" commit -q -m grants
     dgit_in "$1" remote add origin "$1.git"
-    dgit_in "$1" push -q origin main 2>/dev/null
+    seed_push "$1"
     dgit_in "$1" remote set-head origin main
+    dgit_in "$1" remote set-url --push origin "https://example.invalid/${1##*/}.git"
 }
 hproj="$outside/hproj"
 hdist="$outside/hdist"
@@ -321,7 +340,7 @@ pushed_repo "$hproj" '- push'
 printf '../hdist\n' >"$hproj/docs/agents/distribution-repo.md"
 dgit_in "$hproj" add docs
 dgit_in "$hproj" commit -q -m dist
-dgit_in "$hproj" push -q origin main 2>/dev/null
+seed_push "$hproj"
 hdist_real=$(cd "$hdist" && pwd -P)
 check "push grant alone: a push into the Distribution repo is refused" "deny" \
     "$(decision 0 auto "git -C $hdist push origin main" "$hproj")"
@@ -351,7 +370,7 @@ check "push grant alone: with the worker's marker, a session in the Distribution
     "$(decision 0 auto "git push origin main" "$hdist")"
 printf '## Grants\n\n- distribution-push\n' >"$hproj/docs/agents/supervision.md"
 dgit_in "$hproj" commit -q -am 'distribution-push only'
-dgit_in "$hproj" push -q origin main 2>/dev/null
+seed_push "$hproj"
 check "distribution-push grant: a push into the Distribution repo goes through" "" \
     "$(decision 0 auto "git -C $hdist push origin main" "$hproj")"
 check "distribution-push grant: and from a session in it, by its marker" "" \
@@ -362,7 +381,7 @@ check "distribution-push grant alone: the Project's own push is refused" "deny" 
 # worker's push under it alone, in either repo, is refused as with no grant.
 printf '## Grants\n\n- checked-push: code-only pushes\n' >"$hproj/docs/agents/supervision.md"
 dgit_in "$hproj" commit -q -am 'checked-push only'
-dgit_in "$hproj" push -q origin main 2>/dev/null
+seed_push "$hproj"
 check "checked-push grant alone: the Project's own push is refused" "deny" \
     "$(decision 0 auto "git push origin main" "$hproj")"
 check "checked-push grant alone: a push into the Distribution repo is refused" "deny" \
@@ -374,7 +393,7 @@ check "checked-push grant alone: a session in the Distribution repo is refused" 
 # close is refused and waits for Push on approval.
 printf '## Grants\n\n- issue-close\n' >"$hproj/docs/agents/supervision.md"
 dgit_in "$hproj" commit -q -am 'issue-close only'
-dgit_in "$hproj" push -q origin main 2>/dev/null
+seed_push "$hproj"
 dgit_in "$hdist" branch -q -u origin/main main
 check "issue-close grant, Distribution repo pushed: the close goes through" "" \
     "$(decision 0 auto 'gh issue close 186 --comment done' "$hproj")"
@@ -388,7 +407,7 @@ check "issue-close grant, Distribution commit unpushed: refused from a session i
     "$(decision 0 auto 'gh issue close 186' "$hdist")"
 check "issue-close grant, Distribution commit unpushed: a comment is not held" "deny" \
     "$(decision 0 auto 'gh issue comment 186 --body x' "$hproj")"
-dgit_in "$hdist" push -q origin main 2>/dev/null
+seed_push "$hdist"
 check "issue-close grant, Distribution commit pushed: the close goes through again" "" \
     "$(decision 0 auto 'gh issue close 186' "$hproj")"
 dgit_in "$hdist" checkout -q -b local-only
@@ -400,13 +419,14 @@ dgit_in "$hdist" checkout -q main
 mkdir -p "$hproj/plain"
 printf 'plain\n' >"$hproj/docs/agents/distribution-repo.md"
 dgit_in "$hproj" commit -q -am 'dist is a plain folder'
-dgit_in "$hproj" push -q origin main 2>/dev/null
+seed_push "$hproj"
 dgit_in "$hproj" commit -q --allow-empty -m 'unpushed Project commit'
 check "issue-close grant, a plain-folder Distribution path: the close goes through" "" \
     "$(decision 0 auto 'gh issue close 186' "$hproj")"
 
 ungranted=$(mktemp -d)
 git init -q -b main "$ungranted"
+git -C "$ungranted" remote add origin https://example.invalid/ungranted.git
 git -C "$ungranted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q --allow-empty -m start
 mkdir -p "$ungranted/docs/agents"
 printf '## Grants\n\n- push\n' >"$ungranted/docs/agents/supervision.md"
@@ -414,7 +434,7 @@ check "a grant only in the working tree, not pushed, still refuses" "deny" \
     "$(decision 0 auto 'git push' "$ungranted")"
 printf '## Grants\n\n- issue-create\n' >"$granted/docs/agents/supervision.md"
 git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "issue-create only"
-git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+seed_push "$granted"
 check "a granted issue create goes through" "" \
     "$(decision 0 auto 'gh issue create --title x --body y --label ready-for-agent' "$granted")"
 check "a new issue through gh api goes through on the same grant" "" \
@@ -429,7 +449,7 @@ check "a sub-issue link is not the issue-create grant" "deny" \
 # parent's sub-issues, and no other gh api write to an issue.
 printf '## Grants\n\n- sub-issue\n' >"$granted/docs/agents/supervision.md"
 git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "sub-issue only"
-git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+seed_push "$granted"
 check "a granted sub-issue link goes through" "" \
     "$(decision 0 auto 'gh api --method POST repos/{owner}/{repo}/issues/40/sub_issues -F sub_issue_id=9' "$granted")"
 check "a granted sub-issue link with an implicit POST goes through" "" \
@@ -513,7 +533,7 @@ check "gh issue edit --help under the sub-issue grant is not refused" "" \
 # api, stay refused.
 printf '## Grants\n\n- label: relabels\n' >"$granted/docs/agents/supervision.md"
 git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "label only"
-git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+seed_push "$granted"
 check "a granted label edit goes through" "" \
     "$(decision 0 auto 'gh issue edit 5 --add-label in-motion' "$granted")"
 check "a granted relabel of two labels goes through" "" \
@@ -598,13 +618,13 @@ check "a GraphQL addLabelsToLabelable is not the label grant" "deny" \
     "$(decision 0 auto "gh api graphql -f query='mutation { addLabelsToLabelable(input: {labelableId: \"I_1\", labelIds: [\"L_1\"]}) { clientMutationId } }'" "$granted")"
 printf '## Grants\n\n- label: relabels\n- issue-comment: findings\n' >"$granted/docs/agents/supervision.md"
 git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "label and comment"
-git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+seed_push "$granted"
 check "a granted label edit beside a granted comment -F goes through" "" \
     "$(decision 0 auto 'gh issue edit 5 --add-label in-motion; gh issue comment 5 -F /tmp/x.md' "$granted")"
 # gh pr new is gh's alias for gh pr create (#120): the same grant covers it.
 printf '## Grants\n\n- pr-create\n' >"$granted/docs/agents/supervision.md"
 git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "pr-create only"
-git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+seed_push "$granted"
 check "a granted pr create goes through" "" \
     "$(decision 0 auto 'gh pr create --fill' "$granted")"
 check "a granted gh pr new goes through" "" \
@@ -617,7 +637,7 @@ parent_forms='--title t --parent 40|--title t --parent=40|-t "a;b" --parent 40'
 grant_with() { # <grant>...: commit and push a supervision.md granting them
     { printf '## Grants\n\n'; for g in "$@"; do printf -- '- %s\n' "$g"; done; } >"$granted/docs/agents/supervision.md"
     git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "grants: $*"
-    git -C "$granted" -c commit.gpgsign=false push -q origin main 2>/dev/null
+    seed_push "$granted"
 }
 for grants in issue-create sub-issue 'issue-create sub-issue'; do
     # shellcheck disable=SC2086

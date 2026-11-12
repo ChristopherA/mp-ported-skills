@@ -54,6 +54,117 @@ classify_git() {
     fi
 }
 
+# classify_push_where <args after "git">: after classify_git matched a
+# plain `git push`, where it sends commits (#94). Sets classify_push_where:
+#   local       every URL it pushes to is a path on this machine (a plain
+#               path or file://), which nobody else sees
+#   shared      a network URL, or a form whose destination this cannot
+#               trust: a `-c` or --config-env setting, --git-dir or
+#               --work-tree, --receive-pack or --exec (a command run for
+#               the push), a submodule push, or a URL an insteadOf or
+#               pushInsteadOf rule rewrites
+#   unresolved  the destination cannot be read now: classify_dir is not a
+#               repo yet, the remote is not configured there, or the word
+#               holds text the shell has yet to expand ($, a backtick, a
+#               substitution, a glob or ~)
+# A remote name is read through `git remote get-url --push --all` in
+# classify_dir, which applies insteadOf and pushInsteadOf; a word that is
+# not a configured remote is a URL when it holds a slash or a colon. The
+# default destination is git's own: branch.<b>.pushRemote,
+# remote.pushDefault, branch.<b>.remote, then origin. Uses
+# classify_git_cmd, as classify_git does.
+classify_push_where() {
+    classify_push_where=unresolved
+    _cpg=${classify_git_cmd:-git}
+    while [ $# -gt 0 ]; do
+        case "$1" in
+        -c | --config-env | --config-env=* | --git-dir | --git-dir=* | --work-tree | --work-tree=*)
+            classify_push_where=shared
+            return 0
+            ;;
+        -C) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
+        -*) shift ;;
+        *) break ;;
+        esac
+    done
+    [ "${1:-}" = push ] || { classify_push_where=shared; return 0; }
+    shift
+    _cpd="" _cprepo=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+        --) shift; _cpd=${1:-}; break ;;
+        --repo=*) _cprepo=${1#--repo=} ;;
+        --repo) [ $# -lt 2 ] || { _cprepo=$2; shift; } ;;
+        --receive-pack* | --exec*) classify_push_where=shared; return 0 ;;
+        --recurse-submodules=no | --recurse-submodules=check | --no-recurse-submodules) ;;
+        --recurse-submodules*) classify_push_where=shared; return 0 ;;
+        --push-option) [ $# -lt 2 ] || shift ;;
+        # A redirection, which the hook's scan keeps as words (`2>&1`,
+        # `> out`): an operator standing alone takes the next word.
+        '>'* | '<'* | '&>'* | [0-9]'>'* | [0-9]'<'*)
+            case "$1" in *'>' | *'<' | *'>|' | *'>>') [ $# -lt 2 ] || shift ;; esac
+            ;;
+        --*) ;;
+        # A short cluster ending in o (`-o`, `-fo`) takes the next word as
+        # its push option.
+        -*o) [ $# -lt 2 ] || shift ;;
+        -*) ;;
+        *) _cpd=$1; break ;;
+        esac
+        shift
+    done
+    [ -n "$_cpd" ] || _cpd=$_cprepo
+    "$_cpg" -C "$classify_dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
+    if [ -z "$_cpd" ]; then
+        _cpb=$("$_cpg" -C "$classify_dir" symbolic-ref --short -q HEAD 2>/dev/null)
+        for _cpk in ${_cpb:+"branch.$_cpb.pushRemote"} remote.pushDefault ${_cpb:+"branch.$_cpb.remote"}; do
+            _cpd=$("$_cpg" -C "$classify_dir" config --get "$_cpk" 2>/dev/null) && [ -n "$_cpd" ] && break
+            _cpd=""
+        done
+        [ -n "$_cpd" ] || _cpd=origin
+    fi
+    case "$_cpd" in *'$'* | *'`'* | *"$classify_sub"* | *'*'* | *'?'* | *'['* | '~'*) return 0 ;; esac
+    if _cpurls=$("$_cpg" -C "$classify_dir" remote get-url --push --all "$_cpd" 2>/dev/null); then
+        :
+    else
+        case "$_cpd" in
+        */* | *:*) ;;
+        *) return 0 ;;
+        esac
+        # git rewrites a URL given on the command line by the same rules.
+        _cprules=$("$_cpg" -C "$classify_dir" config --get-regexp '^url\..*\.(push)?insteadof$' 2>/dev/null | sed 's/^[^ ]* //')
+        _cpifs=$IFS
+        IFS='
+'
+        for _cpr in $_cprules; do
+            case "$_cpd" in "$_cpr"*) IFS=$_cpifs; classify_push_where=shared; return 0 ;; esac
+        done
+        IFS=$_cpifs
+        _cpurls=$_cpd
+    fi
+    [ -n "$_cpurls" ] || return 0
+    _cpifs=$IFS
+    IFS='
+'
+    for _cpu in $_cpurls; do
+        classify_url_local "$_cpu" || { IFS=$_cpifs; classify_push_where=shared; return 0; }
+    done
+    IFS=$_cpifs
+    classify_push_where=local
+}
+
+# classify_url_local <url>: succeeds when git reads the URL as a path on
+# this machine: file://, or no scheme and no colon before the first slash
+# (`host:path` is ssh's form, `<transport>::<address>` a helper's).
+classify_url_local() {
+    case "$1" in
+    '') return 1 ;;
+    file://*) return 0 ;;
+    *://*) return 1 ;;
+    esac
+    case "${1%%/*}" in *:*) return 1 ;; esac
+}
+
 # classify_distribution: after classify_git matched a push, name it as a
 # push in a Project's Distribution repo when classify_dir is one (#141).
 # Such a push is the Project's to grant, as `distribution-push`, never

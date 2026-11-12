@@ -83,12 +83,20 @@ last() { printf '%s\n' "$1" | tail -n 1; }
 check "git on PATH is the wrapper" "$bin/git" "$(worker 0 . 'command -v git' | head -n 1)"
 check "gh on PATH is the wrapper" "$bin/gh" "$(worker 0 . 'command -v gh' | head -n 1)"
 
-# A checkout with a remote, and no grant.
+# A checkout with a remote, and no grant. A push to a path on this machine
+# is no shared action (#94), so origin's push URL is an ssh:// one, which a
+# fake ssh serves from <name>.git here: the wrappers read a network remote,
+# and a push that goes through still lands where the checks look.
+realgit=$(command -v git)
+printf '#!/bin/sh\n# Runs the command git asks the host for, on this machine.\nshift\nexec sh -c "%s ${1#git-}"\n' "$realgit" >fake/ssh
+chmod +x fake/ssh
+export GIT_SSH_COMMAND="$work/fake/ssh" GIT_SSH_VARIANT=simple
 repo() { # <name>: a checkout pushed to <name>.git
     git init -q --bare "$work/$1.git"
     git init -q -b main "$work/$1"
     git -C "$work/$1" -c commit.gpgsign=false commit -q --allow-empty -m start
     git -C "$work/$1" remote add origin "$work/$1.git"
+    git -C "$work/$1" remote set-url --push origin "ssh://example.invalid$work/$1.git"
     git -C "$work/$1" push -q origin main 2>/dev/null
     git -C "$work/$1" remote set-head origin main
 }
@@ -109,6 +117,51 @@ check "a push through find -exec is refused" "1" \
 check "a push through an alias is refused" "exit=1" \
     "$(last "$(worker 0 plain 'git -c alias.ship=push ship -q origin main')")"
 check "the remote still did not move" "$before" "$(git -C plain.git rev-parse main)"
+
+# A push to a path on this machine is no shared action (#94): a scratch
+# bare repo a test made, even in the same command, takes the push.
+out=$(worker 0 . 'w=$(mktemp -d) && git init -q --bare "$w/remote.git" && git init -q -b main "$w/c" &&
+    git -C "$w/c" -c commit.gpgsign=false commit -q --allow-empty -m x &&
+    git -C "$w/c" remote add origin "$w/remote.git" && git -C "$w/c" push -q origin main &&
+    git -C "$w/remote.git" rev-parse --verify -q main >/dev/null && echo landed; command rm -rf "$w"')
+check "a push to a bare repo made in the same command goes through" "landed exit=0" "$(printf '%s\n' "$out" | tr '\n' ' ' | sed 's/ $//')"
+git init -q --bare "$work/local.git"
+check "a push to a local path goes through" "exit=0" "$(last "$(worker 0 plain "git push -q '$work/local.git' main")")"
+check "a push to a file:// URL goes through" "exit=0" "$(last "$(worker 0 plain "git push -q 'file://$work/local.git' HEAD:refs/heads/f")")"
+check "the local remote took both" "$(git -C plain rev-parse main) $(git -C plain rev-parse main)" \
+    "$(git -C local.git rev-parse main) $(git -C local.git rev-parse f)"
+git -C plain remote add scratch "$work/local.git"
+check "a remote name that resolves to a local path goes through" "exit=0" \
+    "$(last "$(worker 0 plain 'git push -q scratch HEAD:refs/heads/g')")"
+git -C plain config branch.main.pushRemote scratch
+check "no destination named: branch.main.pushRemote, a local one, goes through" "exit=0" \
+    "$(last "$(worker 0 plain 'git push -q')")"
+git -C plain config --unset branch.main.pushRemote
+# Network remotes, and forms whose destination cannot be trusted, stay
+# refused: they never reach the network, since the wrapper refuses first.
+for url in https://example.invalid/o/r.git ssh://example.invalid/o/r.git git@example.invalid:o/r.git example.invalid:o/r.git; do
+    check "a push to $url is refused" "exit=1" "$(last "$(worker 0 plain "git push -q $url main")")"
+done
+check "origin, which resolves to a network URL, is still refused" "exit=1" "$(last "$(worker 0 plain 'git push -q origin main')")"
+check "no destination named: origin, a network one, is refused" "exit=1" "$(last "$(worker 0 plain 'git push -q')")"
+git -C plain remote set-url --add --push scratch ssh://example.invalid/o/r.git
+check "a remote with a local and a network push URL is refused" "exit=1" "$(last "$(worker 0 plain 'git push -q scratch main')")"
+git -C plain remote set-url --delete --push scratch 'ssh://example.invalid/o/r.git'
+check "a -c setting before push is refused" "exit=1" \
+    "$(last "$(worker 0 plain "git -c remote.scratch.pushurl=ssh://example.invalid/o/r.git push -q scratch main")")"
+check "--receive-pack, a command run for the push, is refused" "exit=1" \
+    "$(last "$(worker 0 plain "git push -q --receive-pack=git-receive-pack '$work/local.git' main")")"
+check "--git-dir before push is refused" "exit=1" \
+    "$(last "$(worker 0 . "git --git-dir='$work/plain/.git' push -q '$work/local.git' main")")"
+check "a submodule push is refused" "exit=1" \
+    "$(last "$(worker 0 plain "git push -q --recurse-submodules=on-demand '$work/local.git' main")")"
+git -C plain config "url.ssh://example.invalid/.pushInsteadOf" "$work/"
+check "a local URL a pushInsteadOf rule rewrites is refused" "exit=1" \
+    "$(last "$(worker 0 plain "git push -q '$work/local.git' main")")"
+git -C plain config --unset "url.ssh://example.invalid/.pushInsteadOf"
+check "-o's value is not read as the destination" "exit=1" \
+    "$(last "$(worker 0 plain "git push -q -o '$work/local.git' origin main")")"
+check "the network remote did not move" "$before" "$(git -C plain.git rev-parse main)"
 
 # Ordinary git goes through, exit status and all.
 check "git status goes through" "exit=0" "$(last "$(worker 0 plain 'git status --short')")"

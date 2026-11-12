@@ -56,6 +56,13 @@ git) classify_git "$@" ;;
 gh) classify_gh "$@" ;;
 esac
 [ -n "$matched" ] || exec "$real" "$@"
+# A push to a path on this machine, such as a scratch bare repo a test made,
+# is no shared action (#94): resolved here, when the remote exists, from
+# the arguments git was started with.
+if [ "$matched" = "git push" ]; then
+    classify_push_where "$@"
+    [ "$classify_push_where" != local ] || exec "$real" "$@"
+fi
 classify_distribution
 
 action=$(grant_action "$matched")
