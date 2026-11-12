@@ -174,6 +174,8 @@ A `watch.sh` check of something the worker made during its run (a branch, a work
 
 A script that needs the worker's ticket takes it as an option (`--ticket N`, as `record.sh` and `watch.sh` do), never by parsing the worker's name: open #171 renames workers, and a parse of the old name would fail without a sound.
 
+To keep a watch from returning one state, gate that state's line, not the branch that computes it. `watch.sh --zone`'s branch returns `capture-due` and also the signing hold, `blocked signing approval`, so skipping the whole branch drops both: in #260, the first build skipped it for a parking worker, so a commit signature waiting past the capture point went unreported until the review caught it. Give the exemption a test where the other state should still be returned.
+
 ## Records in a git folder
 
 A script that reads a record another `supervise` script writes under `git rev-parse --git-path <name>`, such as `mp-supervise-pushed` or `mp-supervise-watched`, resolves the path from the same folder the writer used, which is the Project folder (`record.sh`'s `PROJECT`), never the worker's cwd. `--git-path` gives a linked worktree a git folder of its own, so a read from a worktree cwd finds no record and reports its absence as a fact: in #182, the first build of the watch delay would have read every worktree run's watch time as unknown, and only the review caught it. Test the read with `--dir` a linked worktree.
