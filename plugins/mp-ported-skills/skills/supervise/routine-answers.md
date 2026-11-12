@@ -10,7 +10,7 @@ sh "${CLAUDE_SKILL_DIR}/scripts/answer.sh" --id ID --dir "<project folder>" --ti
 
 It reads the question from the worker's transcript: a pending AskUserQuestion with one question, a last line `Waiting on: <command>`, or the last sentence of its last message when that ends on the only `?` in it. Only two kinds are routine. A confirmation of ticket N is the whole sentence, naming no other ticket. A shared action (push, PR create or merge, issue close, comment or create) is the question's opening verb, the only action it names, and one `grant.sh` finds granted on origin's default branch. A question that offers a choice (" or "), names another ticket, or is anything else goes to the maintainer, as does a permission prompt and an action no grant covers. A question the supervisor answered once and the worker asks again is not answered twice.
 
-- **Exit 0**: it printed `question <q>`, `rule ticket` or `rule grant <citation>`, and `answer <prompt>`. Send the prompt as a follow-up (Follow-ups, in `SKILL.md`), watch again with `--after` and `--zone`, and go on by the new watch's first line:
+- **Exit 0**: it printed `question <q>`, `rule ticket` or `rule grant <citation>`, and `answer <prompt>`. Send the prompt as a follow-up (Follow-ups, in `SKILL.md`), watch again with `--after`, `--zone` and `--ticket N`, and go on by the new watch's first line:
 
   ```sh
   sh "${CLAUDE_SKILL_DIR}/scripts/resume.sh" --id ID --dir "<project folder>" --prompt "$(sed -n 's/^answer //p' "<scratchpad>/answer.txt")" </dev/null
