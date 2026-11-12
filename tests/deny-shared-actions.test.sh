@@ -736,6 +736,14 @@ check "a push after a word holding # is refused" "deny" "$(decision 0 auto 'a#b;
 check "a push in a process substitution is refused" "deny" "$(decision 0 auto 'tee >(git push) < f')"
 check "a push in eval's quoted words is refused" "deny" "$(decision 0 auto "eval 'git push'")"
 check "eval of a substitution is refused" "deny" "$(decision 0 auto 'eval "$(printf %s "git push")"')"
+check "eval's unquoted words are one command" "deny" "$(decision 0 auto 'eval git push origin main')"
+check "eval's unquoted gh words are one command" "deny" "$(decision 0 auto 'x; eval gh pr create --fill')"
+check "eval of words naming no form runs" "" "$(decision 0 auto 'eval echo push')"
+check "env -S runs its string" "deny" "$(decision 0 auto "env -S 'git push origin main'")"
+check "env -S joined to its string runs it" "deny" "$(decision 0 auto "env -S'gh pr create --fill'")"
+check "env --split-string= runs its string" "deny" "$(decision 0 auto "env --split-string='git push'")"
+check "env -S's string joins the words after it" "deny" "$(decision 0 auto "env -S 'git' push")"
+check "env -S of a string naming no form runs" "" "$(decision 0 auto "env -S 'echo git push'")"
 check "a here-string into sh is refused" "deny" "$(decision 0 auto "sh <<< 'gh issue close 3'")"
 
 # The maintainer's own interactive session: attended, whatever the

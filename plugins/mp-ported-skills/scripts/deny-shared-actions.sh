@@ -52,20 +52,23 @@
 # grant, not push (classify_distribution, #141).
 # So `git commit -m "a; git push"` and an edit script written by a quoted
 # heredoc that names a push both run. `sh -c`'s argument, a here-string
-# into a shell and eval's words are scanned again on their own; one built
-# from a substitution, or a shell reading a pipe or heredoc, takes the
-# whole-text check. Text the splitter cannot read (an unclosed quote,
-# arithmetic holding a substitution) falls back to the quote-blind split,
-# which refuses more: in an unattended session a false refusal costs a
-# detour through the supervisor, where a miss would publish.
+# into a shell, eval's words and `env -S`'s string are scanned again on
+# their own; one built from a substitution, or a shell reading a pipe or
+# heredoc, takes the whole-text check. Text the splitter cannot read (an
+# unclosed quote, arithmetic holding a substitution) falls back to the
+# quote-blind split, which refuses more: in an unattended session a false
+# refusal costs a detour through the supervisor, where a miss would
+# publish.
 #
 # Known gaps: a command built from variables (`g=git; $g push`), a
-# wrapper not listed above (`sudo`, `find -exec`), and a GraphQL mutation
+# wrapper not listed above (`sudo`, `find -exec`), a program that runs a
+# quoted string as code of its own (`perl -e 'system("git push")'`,
+# `python3 -c`, `awk`), which reads as quoted data, and a GraphQL mutation
 # read from a file. The hook sees only the command text, never what a
 # script it names goes on to run, so `sh some-script.sh` that pushes gets
 # past this hook whatever it contains. worker-path.sh's git and gh wrappers
-# cover that case, and the variable and find -exec ones, by the real
-# arguments (docs/adr/0006).
+# cover that case, and the variable, find -exec and interpreter ones, by
+# the real arguments (docs/adr/0006).
 #
 # Reads the PreToolUse payload on stdin. Prints a deny decision and exits 0
 # when the command matches one of the refused forms; otherwise prints
@@ -158,11 +161,27 @@ scan() {
                 while [ $# -gt 0 ]; do
                     case "$1" in
                     -u | -C | -P) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
+                    # -S splits its string into words and runs them, with
+                    # the words after it, so the string is scanned as a
+                    # command of its own, joined to them by spaces.
+                    -S | --split-string) shift; env_split=yes; break ;;
+                    -S* | --split-string=*)
+                        _es=${1#-S}; _es=${_es#--split-string=}; shift
+                        set -- "$_es" "$@"; env_split=yes; break ;;
                     -*) shift ;;
                     [A-Za-z_]*=*) shift ;;
                     *) break ;;
                     esac
                 done
+                if [ -n "${env_split:-}" ]; then
+                    env_split=""
+                    IFS=' '
+                    _ev="$*"
+                    IFS=$nl
+                    case "$_ev" in *"$classify_sub"*) piped=yes ;; esac
+                    [ -z "$_ev" ] || scan_nested "$_ev"
+                    set --
+                fi
                 ;;
             command | builtin | exec | time | nohup)
                 shift
@@ -179,7 +198,9 @@ scan() {
                 # this shell. Words built from a substitution are text no
                 # scan can read, so the whole command is checked as well.
                 shift
+                IFS=' '
                 _ev="$*"
+                IFS=$nl
                 case "$_ev" in *"$classify_sub"*) piped=yes ;; esac
                 [ -z "$_ev" ] || scan_nested "$_ev" base
                 set --
