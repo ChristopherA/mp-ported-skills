@@ -168,6 +168,12 @@ A function that walks `command_segments`' lines with `IFS=$classify_rs; set -- $
 
 To check that a path a file names is a repo of its own, compare `git -C <path> rev-parse --show-toplevel` with the path, resolved. `rev-parse --git-dir` succeeds in any folder inside a repo, so a plain folder there passes and the checks after it read the repo around it: `launch.sh` and `push.sh` accepted such a folder as a Distribution repo until #167, and `state.sh` read the Project's own git as its Distribution repo's until #142's review. In `supervise`'s scripts, call `own_repo_top` from `own-repo.sh` rather than writing the comparison again; for a Distribution repo path, call `distribution_check` from `distribution-repo.sh`, which builds on it and also refuses a linked worktree and the Project's own repo, so `launch.sh`, `push.sh` and `resuming`'s `state.sh` cannot disagree on it (#209).
 
+## What a worker made, across watches
+
+A `watch.sh` check of something the worker made during its run (a branch, a worktree) does not rest on `--since`'s list alone. A supervisor that watches again, after a follow-up or a hand check, often takes a fresh snapshot first, and that snapshot already holds what the worker made before it, so the list leaves it out. Date the thing against the worker's `startedAt` as well, as `made_after` reads a branch's reflog. Test it with a snapshot taken after the thing exists, and with no `--since`. In #260, the first build counted `parked-N` only when the snapshot listed it, and the #183 run's second watch, on a fresh snapshot, would still have returned `capture-due`; only the spec review caught it.
+
+A script that needs the worker's ticket takes it as an option (`--ticket N`, as `record.sh` and `watch.sh` do), never by parsing the worker's name: open #171 renames workers, and a parse of the old name would fail without a sound.
+
 ## Records in a git folder
 
 A script that reads a record another `supervise` script writes under `git rev-parse --git-path <name>`, such as `mp-supervise-pushed` or `mp-supervise-watched`, resolves the path from the same folder the writer used, which is the Project folder (`record.sh`'s `PROJECT`), never the worker's cwd. `--git-path` gives a linked worktree a git folder of its own, so a read from a worktree cwd finds no record and reports its absence as a fact: in #182, the first build of the watch delay would have read every worktree run's watch time as unknown, and only the review caught it. Test the read with `--dir` a linked worktree.
