@@ -209,15 +209,30 @@ gh_write_words() {
     echo yes
 }
 
-# command_lines <command>: the simple commands the shell would run from it,
-# one per line, words joined by $classify_rs (command_segments, in the
-# classifier the hook shares, without its follow line), so a command named
-# only in a heredoc's body or a quoted argument is not read as one (#104).
-command_lines() {
-    _cl=$(command_segments "$1")
-    case "$_cl" in
-        *"$actions_nl"*) printf '%s\n' "${_cl#*"$actions_nl"}" ;;
+# each_command <fn> <command>: runs fn on the words of each simple command
+# the shell would run from the command (command_segments, in the classifier
+# the hook shares), printing what each run prints, so a command named only
+# in a heredoc's body or a quoted argument is not read as one (#104).
+each_command() {
+    _ec_fn=$1
+    _ec=$(command_segments "$2")
+    case "$_ec" in
+        *"$actions_nl"*) _ec=${_ec#*"$actions_nl"} ;;
+        *) return 0 ;;
     esac
+    _ec_ifs=$IFS
+    IFS=$actions_nl
+    set -f
+    for _ec_seg in $_ec; do
+        IFS=$classify_rs
+        # shellcheck disable=SC2086
+        set -- $_ec_seg
+        IFS=$_ec_ifs
+        "$_ec_fn" "$@"
+        IFS=$actions_nl
+    done
+    set +f
+    IFS=$_ec_ifs
 }
 actions_nl='
 '
@@ -225,22 +240,7 @@ actions_nl='
 # gh_write <command>: whether a command in it is such a gh write, read only
 # where it runs, as the hook reads it.
 gh_write() {
-    segments=$(command_lines "$1")
-    oldIFS=$IFS
-    IFS=$actions_nl
-    set -f
-    found=""
-    for seg in $segments; do
-        IFS=$classify_rs
-        # shellcheck disable=SC2086
-        set -- $seg
-        IFS=$oldIFS
-        found=$found$(gh_write_words "$@")
-        IFS=$actions_nl
-    done
-    set +f
-    IFS=$oldIFS
-    [ -n "$found" ]
+    [ -n "$(each_command gh_write_words "$1")" ]
 }
 
 # calls <transcript>: one JSON row per Bash call worth checking: its
@@ -299,8 +299,8 @@ action_for() {
 # whatever stands before it (#121). Split at the separators outside quotes
 # (command_parts), as the hook's second look at a gh issue edit splits, so a
 # quoted separator cannot hide a field it refused for (`--add-label "a;b"
-# --title t`; #202). Call it only through $(...): it reuses gh_write's
-# globals.
+# --title t`; #202). Call it only through $(...): it sets
+# segments and oldIFS, which the transcript loop also uses.
 gh_guess() {
     segments=$(command_parts "$1" | tr -d "\"'\\\\")
     oldIFS=$IFS
@@ -328,31 +328,13 @@ gh_guess() {
 # push_targets <cmd> <recorded branch>: the branch names a succeeded push
 # reached, one per line, or `*` when it may have reached any. The recorded
 # branch is what Claude Code saw; the command's own `git push` words name
-# the rest, read as gh_write reads them. Call it only through $(...): it
-# reuses the globals gh_write and the transcript loop set.
+# the rest, read as gh_write reads them.
 push_targets() {
-    recorded_branch=$2
-    [ -z "$recorded_branch" ] || printf '%s\n' "$recorded_branch"
-    segments=$(command_lines "$1")
-    oldIFS=$IFS
-    IFS=$actions_nl
-    set -f
-    named=""
-    for seg in $segments; do
-        IFS=$classify_rs
-        # shellcheck disable=SC2086
-        set -- $seg
-        IFS=$oldIFS
-        reached=$(push_words "$@")
-        IFS=$actions_nl
-        [ -z "$reached" ] || named="$named$reached
-"
-    done
-    set +f
-    IFS=$oldIFS
+    [ -z "$2" ] || printf '%s\n' "$2"
+    named=$(each_command push_words "$1")
     if [ -n "$named" ]; then
-        printf '%s' "$named"
-    elif [ -z "$recorded_branch" ]; then
+        printf '%s\n' "$named"
+    elif [ -z "$2" ]; then
         echo '*'
     fi
 }
