@@ -78,13 +78,16 @@
 # was made or moved since, each followed by a `commit <sha> <subject>` line
 # for each of its commits that neither the snapshot's HEAD nor that current
 # branch holds. Any such line turns working or done into moved, but for a
-# `branch parked-<N>` line, in either repo, when N is the worker's own
-# ticket, which its name gives as launch.sh names it (`worker <project> #N`):
-# that branch is a park in progress, so the watch goes on until the turn ends
-# on `Parked:` (#260). With --zone, a working worker that has made it is not
-# capture-due: a parking worker runs its capture before its park comment. A
-# parked-<N> for another ticket, or a worker whose name gives no ticket, is
-# moved as before. A Project
+# `branch parked-<N>` line, in either repo, with --ticket N, the worker's own
+# ticket: that branch is a park in progress, so the watch goes on until the
+# turn ends on `Parked:` (#260). With --ticket N and --zone, a working worker
+# that has made parked-N is not capture-due, since a parking worker runs its
+# capture before its park comment: made is listed since the snapshot, or, in
+# DIR or the snapshot's Distribution repo, made at or after the worker's
+# startedAt by the branch's reflog, so a snapshot taken mid-park, which does
+# not list it, still counts it, and a parked-N an earlier run left does not.
+# A parked-<M> for another ticket, or any branch without --ticket, is moved
+# as before. A Project
 # with a Distribution repo (#125) has it in the snapshot too; what it gained
 # follows a `distribution <path>` line, in the same lines.
 # A worker denied EnterWorktree made its worktree with `git worktree add`
@@ -123,11 +126,11 @@
 # so it adds only the first note.
 #
 # Usage:
-#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone [--held PID]] [--wait-blocked] [--detail PATH [--capture]] [--interval SECONDS] [--timeout SECONDS] [--stall SECONDS]
+#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--ticket N] [--zone [--held PID]] [--wait-blocked] [--detail PATH [--capture]] [--interval SECONDS] [--timeout SECONDS] [--stall SECONDS]
 #       poll while working (and, with --wait-blocked, while blocked as
 #       above); on timeout print the last
 #       one and exit 124
-#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone [--held PID]] [--wait-blocked] [--detail PATH [--capture]] --file PATH
+#   watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--ticket N] [--zone [--held PID]] [--wait-blocked] [--detail PATH [--capture]] --file PATH
 #       classify one saved `claude agents --json --all` output
 #   watch.sh --dir DIR --snapshot
 #       print DIR's repo state for --since: take it before the launch
@@ -197,6 +200,7 @@ WAIT_BLOCKED=""
 DETAIL=""
 CAPTURE=""
 HELD=""
+TICKET=""
 INTERVAL=30
 TIMEOUT=14400
 STALL=1800
@@ -212,6 +216,7 @@ while [ $# -gt 0 ]; do
         --after)    need_value "$@"; AFTER="$2"; shift 2 ;;
         --zone)     ZONE=1; shift ;;
         --held)     need_value "$@"; HELD="$2"; shift 2 ;;
+        --ticket)   need_value "$@"; TICKET="${2#\#}"; shift 2 ;;
         --wait-blocked) WAIT_BLOCKED=1; shift ;;
         --detail)   need_value "$@"; DETAIL="$2"; shift 2 ;;
         --capture)  CAPTURE=1; shift ;;
@@ -219,7 +224,7 @@ while [ $# -gt 0 ]; do
         --timeout)  need_value "$@"; TIMEOUT="$2"; shift 2 ;;
         --stall)    need_value "$@"; STALL="$2"; shift 2 ;;
         --help)
-            printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone [--held PID]] [--wait-blocked] [--detail PATH [--capture]] [--interval S] [--timeout S] [--stall S] | watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--zone [--held PID]] [--wait-blocked] [--detail PATH [--capture]] --file PATH | watch.sh --dir DIR --snapshot\n'
+            printf 'Usage: watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--ticket N] [--zone [--held PID]] [--wait-blocked] [--detail PATH [--capture]] [--interval S] [--timeout S] [--stall S] | watch.sh --id ID [--dir DIR [--since FILE]] [--after EPOCH] [--ticket N] [--zone [--held PID]] [--wait-blocked] [--detail PATH [--capture]] --file PATH | watch.sh --dir DIR --snapshot\n'
             printf 'Prints: working, moved, done, blocked signing approval, parked, capture-due, hang, blocked <what>, stopped, gone or unknown <state>; then cwd, reading, needs, helper, after, question, worktree, branch and commit lines.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
@@ -268,6 +273,7 @@ case $STALL in '' | *[!0-9]*) fail "--stall needs whole seconds, not '$STALL'" ;
 case $AFTER in *[!0-9]*) fail "--after needs epoch seconds, not '$AFTER'" ;; esac
 case $HELD in *[!0-9]*) fail "--held needs the pid on a helper line, not '$HELD'" ;; esac
 [ -z "$HELD" ] || [ -n "$ZONE" ] || fail "--held is read only with --zone"
+case $TICKET in *[!0-9]*) fail "--ticket needs the ticket's number, not '$TICKET'" ;; esac
 # claude agents and the job's state.json both follow the config dir, so an
 # unset one would read another profile's sessions.
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] || fail "CLAUDE_CONFIG_DIR is not set, so the profile being watched is unknown"
@@ -428,14 +434,22 @@ session_id_of() {
         | .sessionId // empty' 2>/dev/null
 }
 
-# ticket_of <agents json>: the ticket number in the job's name, as launch.sh
-# names a worker (`worker <project> #N`, then ` (continued)` or `: <title>`),
-# or empty when the name gives none. The first `#N` after the project is the
-# ticket; a title that names another ticket comes after it.
-ticket_of() {
+# started_of <agents json>: when the job started, in epoch seconds, or empty
+# when the list names no time.
+started_of() {
     printf '%s' "$1" | jq -r --arg id "$ID" '
         [.[] | select(.kind == "background" and .id == $id)] | first
-        | .name // "" | capture("^worker [^#]* #(?<n>[0-9]+)( |:|$)").n // empty' 2>/dev/null
+        | .startedAt // empty | . / 1000 | floor' 2>/dev/null
+}
+
+# made_after <repo> <branch> <epoch>: whether the branch's reflog shows it
+# made at or after the epoch. Its oldest entry is the one that made it; a
+# branch with no reflog, or no epoch, is not.
+made_after() {
+    [ -n "$3" ] || return 1
+    made_at=$(git -C "$1" log -g --format=%gd --date=unix "refs/heads/$2" -- 2>/dev/null |
+        tail -n 1 | sed -n 's/.*@{\([0-9][0-9]*\)}$/\1/p')
+    [ -n "$made_at" ] && [ "$made_at" -ge "$3" ]
 }
 
 # transcript_size <session id>: total bytes across its transcript and the
@@ -539,11 +553,13 @@ commits() {
 # With --since, a worktree or branch made in the repo since the snapshot is
 # listed, and makes a working, done or capture-due session moved. So is one made in the
 # Distribution repo the snapshot names, after a `distribution <path>` line.
-# The worker's own parked-<ticket> branch is listed but moves nothing, and
-# with --zone keeps a working session from being capture-due (#260).
+# With --ticket N, the worker's own parked-N branch is listed but moves
+# nothing, and with --zone keeps a working session from being capture-due
+# (#260).
 report() {
     out=$(classify "$1") || return 1
     made=""
+    dist=""
     if [ -n "$SINCE" ]; then
         made=$(made_since "$DIR" "$(command cat "$SINCE")")
         dist=$(sed -n 's/^distribution //p' "$SINCE")
@@ -553,13 +569,24 @@ report() {
 }distribution $dist" "$dist_made")
         fi
     fi
-    # The worker's own parked-<ticket> branch, made since the snapshot, is a
-    # park in progress: not a move, and its capture ran before it (#260).
+    # The worker's own parked-<ticket> branch, made since the snapshot or
+    # since the worker started, is a park in progress: not a move, and its
+    # capture ran before it (#260). A snapshot taken mid-park, as a second
+    # watch takes, does not list it, so the reflog says when it was made.
     own_park=""
-    ticket=$(ticket_of "$1")
-    [ -z "$ticket" ] || own_park="branch parked-$ticket"
     parking=""
-    [ -z "$own_park" ] || ! printf '%s\n' "$made" | grep -Fqx "$own_park" || parking=1
+    if [ -n "$TICKET" ]; then
+        own_park="branch parked-$TICKET"
+        if printf '%s\n' "$made" | grep -Fqx "$own_park"; then
+            parking=1
+        else
+            started=$(started_of "$1")
+            for park_repo in "$DIR" "$dist"; do
+                [ -n "$park_repo" ] || continue
+                if made_after "$park_repo" "parked-$TICKET" "$started"; then parking=1; fi
+            done
+        fi
+    fi
     case $out in
         done*)
             if [ -n "$AFTER" ] && stale_done "$(session_id_of "$1")"; then
@@ -654,8 +681,9 @@ report() {
     fi
     if [ -n "$made" ]; then
         # Any worktree or branch line but the worker's own park is a move.
-        # (An empty own_park drops only empty lines, which are not listed.)
-        if printf '%s\n' "$made" | grep -E '^(worktree|branch) ' | grep -Fvx "$own_park" | grep -q .; then
+        moves=$(printf '%s\n' "$made" | grep -E '^(worktree|branch) ')
+        [ -z "$own_park" ] || moves=$(printf '%s\n' "$moves" | grep -Fvx "$own_park")
+        if [ -n "$moves" ]; then
             case $out in
                 working* | done* | capture-due*) out=$(printf '%s\n' "$out" | sed '1s/.*/moved/') ;;
             esac

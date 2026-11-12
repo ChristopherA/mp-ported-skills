@@ -464,32 +464,50 @@ cwd /work/project" \
 
 # A worker that has made parked-<its ticket> is parking, and ran its capture
 # before its park comment: past the capture point it is not capture-due
-# (#260). Its ticket comes from its name, as launch.sh names it.
+# (#260). --ticket names its ticket. A snapshot taken mid-park does not list
+# the branch, so its reflog says whether it was made since the worker started.
 repo="$work/zproj"
 rgit() { git -C "$repo" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@" >/dev/null; }
 mkdir -p "$repo"; rgit init -b main; rgit commit --allow-empty -m seed
 sh "$scripts/watch.sh" --dir "$repo" --snapshot </dev/null >"$work/zsince"
-jq --arg d "$repo" '[.[] | .cwd |= (if . then sub("^/work/project"; $d) else . end)
-    | if .id == "c2a368ee" then .name = "worker zproj #158: Pick a winner" else . end]' \
-    "$fixtures/working-busy.json" >"$work/zbusy.json"
+zfixture() { # <startedAt ms> -- working-busy in $repo, started then
+    jq --arg d "$repo" --argjson s "$1" '[.[] | .cwd |= (if . then sub("^/work/project"; $d) else . end)
+        | if .id == "c2a368ee" then .startedAt = $s else . end]' \
+        "$fixtures/working-busy.json" >"$work/zbusy.json"
+}
+zfixture 1790661685745
 { call 60000 a; result a; call 102000 b; result b; } >"$work/t.jsonl"; put
 job claude-made-up-1
-zwatch() { sh "$scripts/watch.sh" --id c2a368ee --dir "$repo" --since "$work/zsince" --zone \
-    --file "$work/zbusy.json" </dev/null 2>&1 | grep -v '^note: '; }
+zwatch() { # [option]... -- watch.sh --dir $repo --zone on zbusy, as the worker for #158
+    sh "$scripts/watch.sh" --id c2a368ee --dir "$repo" --ticket 158 --zone "$@" \
+        --file "$work/zbusy.json" </dev/null 2>&1 | grep -v '^note: '; }
+due68="reading 68% of zone
+due"
 check "watch --zone --since: past the point with nothing made is capture-due" "capture-due
 cwd $repo
-reading 68% of zone
-due" "$(zwatch)"
+$due68" "$(zwatch --since "$work/zsince")"
 rgit branch parked-158
 check "watch --zone --since: past the point after parked-<own ticket> is working" "working
 cwd $repo
-branch parked-158" "$(zwatch)"
+branch parked-158" "$(zwatch --since "$work/zsince")"
+sh "$scripts/watch.sh" --dir "$repo" --snapshot </dev/null >"$work/zsince-mid"
+check "watch --zone: a snapshot taken mid-park, parked-<own ticket> made since the start, is working" "working
+cwd $repo" "$(zwatch --since "$work/zsince-mid")"
+check "watch --zone: with no --since, parked-<own ticket> made since the start is working" "working
+cwd $repo" "$(zwatch)"
+zfixture 4102444800000
+check "watch --zone: a parked-<own ticket> made before the worker started is capture-due" "capture-due
+cwd $repo
+$due68" "$(zwatch --since "$work/zsince-mid")"
+zfixture 1790661685745
+check "watch --zone: without --ticket, parked-158 is capture-due" "capture-due
+cwd $repo
+$due68" "$(sh "$scripts/watch.sh" --id c2a368ee --dir "$repo" --zone --file "$work/zbusy.json" </dev/null 2>&1 | grep -v '^note: ')"
 rgit branch -m parked-158 parked-159
 check "watch --zone --since: parked-<another ticket> is still moved" "moved
 cwd $repo
-reading 68% of zone
-due
-branch parked-159" "$(zwatch)"
+$due68
+branch parked-159" "$(zwatch --since "$work/zsince")"
 
 printf 'supervise-zone: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
