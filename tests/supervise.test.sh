@@ -529,6 +529,60 @@ question Should pid always win?
 branch kept
 commit $(git -C "$project" rev-parse --short kept) On kept" "$(watch_since done 9121ff49)"
 command rm -rf "$cfg/projects"
+# A park in progress makes parked-<n> for the worker's own ticket, which its
+# name gives (`worker <project> #N: <title>`, as launch.sh names it), before
+# its turn ends on `Parked:`: the branch alone is not a move (#260). A fresh
+# snapshot keeps these checks clear of the `kept` branch's commit above.
+sh "$scripts/watch.sh" --dir "$project" --snapshot </dev/null >"$work/since-park"
+named() { # <fixture> <id> <name> -- in_project's fixture, with that worker's name
+    jq --arg id "$2" --arg n "$3" '[.[] | if .id == $id then .name = $n else . end]' \
+        "$(in_project "$1")" >"$work/$1.named.json"
+    echo "$work/$1.named.json"
+}
+watch_park() { # <fixture> <id> [name] -- watch.sh --since the fresh snapshot, the worker named for #158
+    sh "$scripts/watch.sh" --id "$2" --dir "$project" --since "$work/since-park" \
+        --file "$(named "$1" "$2" "${3:-worker project #158: Pick a winner}")" </dev/null
+}
+project_git branch parked-158
+project_git checkout -q parked-158
+project_git commit --allow-empty -m "Parked work"
+project_git checkout -q main
+parked_made="branch parked-158
+commit $(git -C "$project" rev-parse --short parked-158) Parked work"
+check "watch --since: a park in progress on parked-<own ticket> is working" "working
+cwd $project
+$parked_made" "$(watch_park working-busy c2a368ee)"
+check "watch --since: a continued worker's park in progress is working" "working
+cwd $project
+$parked_made" "$(watch_park working-busy c2a368ee 'worker project #158 (continued): Pick a winner')"
+waiting_on "Parked: Should pid always win?"
+check "watch --since: a park on parked-<own ticket> that ended is parked" "parked
+cwd $project
+question Should pid always win?
+$parked_made" "$(watch_park done 9121ff49)"
+command rm -rf "$cfg/projects"
+check "watch --since: parked-<own ticket> is moved when the name gives no ticket" "moved
+cwd $project
+$parked_made" "$(watch_park working-busy c2a368ee 'bash date command')"
+check "watch --since: a title naming another ticket does not make it own" "moved
+cwd $project
+$parked_made" "$(watch_park working-busy c2a368ee 'worker project #15: Fix #158: a park')"
+project_git branch -m parked-158 parked-159
+check "watch --since: parked-<another ticket> is moved" "moved
+cwd $project
+branch parked-159
+commit $(git -C "$project" rev-parse --short parked-159) Parked work" "$(watch_park working-busy c2a368ee)"
+project_git branch -m parked-159 parked-158
+project_git branch side
+project_git checkout -q side
+project_git commit --allow-empty -m "On side"
+project_git checkout -q main
+check "watch --since: another branch beside parked-<own ticket> is moved" "moved
+cwd $project
+$parked_made
+branch side
+commit $(git -C "$project" rev-parse --short side) On side" "$(watch_park working-busy c2a368ee)"
+project_git branch -D parked-158 side
 # A detached worktree's commits are on no branch, so they follow its line.
 project_git worktree add -q --detach "$project/.wt-detached"
 git -C "$project/.wt-detached" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q --allow-empty -m "Detached"

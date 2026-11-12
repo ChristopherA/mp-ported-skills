@@ -462,5 +462,34 @@ check "watch --zone: a done worker stays done" "done
 cwd /work/project" \
     "$(sh "$scripts/watch.sh" --id 9121ff49 --zone --file "$fixtures/done.json" </dev/null 2>&1)"
 
+# A worker that has made parked-<its ticket> is parking, and ran its capture
+# before its park comment: past the capture point it is not capture-due
+# (#260). Its ticket comes from its name, as launch.sh names it.
+repo="$work/zproj"
+rgit() { git -C "$repo" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@" >/dev/null; }
+mkdir -p "$repo"; rgit init -b main; rgit commit --allow-empty -m seed
+sh "$scripts/watch.sh" --dir "$repo" --snapshot </dev/null >"$work/zsince"
+jq --arg d "$repo" '[.[] | .cwd |= (if . then sub("^/work/project"; $d) else . end)
+    | if .id == "c2a368ee" then .name = "worker zproj #158: Pick a winner" else . end]' \
+    "$fixtures/working-busy.json" >"$work/zbusy.json"
+{ call 60000 a; result a; call 102000 b; result b; } >"$work/t.jsonl"; put
+job claude-made-up-1
+zwatch() { sh "$scripts/watch.sh" --id c2a368ee --dir "$repo" --since "$work/zsince" --zone \
+    --file "$work/zbusy.json" </dev/null 2>&1 | grep -v '^note: '; }
+check "watch --zone --since: past the point with nothing made is capture-due" "capture-due
+cwd $repo
+reading 68% of zone
+due" "$(zwatch)"
+rgit branch parked-158
+check "watch --zone --since: past the point after parked-<own ticket> is working" "working
+cwd $repo
+branch parked-158" "$(zwatch)"
+rgit branch -m parked-158 parked-159
+check "watch --zone --since: parked-<another ticket> is still moved" "moved
+cwd $repo
+reading 68% of zone
+due
+branch parked-159" "$(zwatch)"
+
 printf 'supervise-zone: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

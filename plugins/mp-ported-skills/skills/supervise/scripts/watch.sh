@@ -77,7 +77,14 @@
 # `branch <name>` for each branch other than the snapshot's current one that
 # was made or moved since, each followed by a `commit <sha> <subject>` line
 # for each of its commits that neither the snapshot's HEAD nor that current
-# branch holds. Any such line turns working or done into moved. A Project
+# branch holds. Any such line turns working or done into moved, but for a
+# `branch parked-<N>` line, in either repo, when N is the worker's own
+# ticket, which its name gives as launch.sh names it (`worker <project> #N`):
+# that branch is a park in progress, so the watch goes on until the turn ends
+# on `Parked:` (#260). With --zone, a working worker that has made it is not
+# capture-due: a parking worker runs its capture before its park comment. A
+# parked-<N> for another ticket, or a worker whose name gives no ticket, is
+# moved as before. A Project
 # with a Distribution repo (#125) has it in the snapshot too; what it gained
 # follows a `distribution <path>` line, in the same lines.
 # A worker denied EnterWorktree made its worktree with `git worktree add`
@@ -421,6 +428,16 @@ session_id_of() {
         | .sessionId // empty' 2>/dev/null
 }
 
+# ticket_of <agents json>: the ticket number in the job's name, as launch.sh
+# names a worker (`worker <project> #N`, then ` (continued)` or `: <title>`),
+# or empty when the name gives none. The first `#N` after the project is the
+# ticket; a title that names another ticket comes after it.
+ticket_of() {
+    printf '%s' "$1" | jq -r --arg id "$ID" '
+        [.[] | select(.kind == "background" and .id == $id)] | first
+        | .name // "" | capture("^worker [^#]* #(?<n>[0-9]+)( |:|$)").n // empty' 2>/dev/null
+}
+
 # transcript_size <session id>: total bytes across its transcript and the
 # subagent transcripts in the folder beside it, or empty when it has none
 # (never 0 for "no transcript yet", so a session with no transcript at all
@@ -522,8 +539,27 @@ commits() {
 # With --since, a worktree or branch made in the repo since the snapshot is
 # listed, and makes a working, done or capture-due session moved. So is one made in the
 # Distribution repo the snapshot names, after a `distribution <path>` line.
+# The worker's own parked-<ticket> branch is listed but moves nothing, and
+# with --zone keeps a working session from being capture-due (#260).
 report() {
     out=$(classify "$1") || return 1
+    made=""
+    if [ -n "$SINCE" ]; then
+        made=$(made_since "$DIR" "$(command cat "$SINCE")")
+        dist=$(sed -n 's/^distribution //p' "$SINCE")
+        if [ -n "$dist" ]; then
+            dist_made=$(made_since "$dist" "$(sed -n 's/^dist //p' "$SINCE")")
+            [ -z "$dist_made" ] || made=$(printf '%s\n%s' "${made:+$made
+}distribution $dist" "$dist_made")
+        fi
+    fi
+    # The worker's own parked-<ticket> branch, made since the snapshot, is a
+    # park in progress: not a move, and its capture ran before it (#260).
+    own_park=""
+    ticket=$(ticket_of "$1")
+    [ -z "$ticket" ] || own_park="branch parked-$ticket"
+    parking=""
+    [ -z "$own_park" ] || ! printf '%s\n' "$made" | grep -Fqx "$own_park" || parking=1
     case $out in
         done*)
             if [ -n "$AFTER" ] && stale_done "$(session_id_of "$1")"; then
@@ -545,7 +581,7 @@ report() {
                     | select(.status == "idle") | .sessionId // empty')
                 if turn_ended "$session_id"; then
                     out=$(printf 'done%s\nnote claude agents still said working' "${out#working}")
-                elif [ -n "$ZONE" ] && t=$(transcript_of "$(session_id_of "$1")") && [ -n "$t" ]; then
+                elif [ -n "$ZONE" ] && [ -z "$parking" ] && t=$(transcript_of "$(session_id_of "$1")") && [ -n "$t" ]; then
                     zone_rc=0
                     reading=$(sh "$(dirname -- "$0")/zone.sh" --transcript "$t" --due --model "$zone_model" \
                         --pid "$(pid_of "$1")" </dev/null 2>/dev/null) || zone_rc=$?
@@ -616,22 +652,15 @@ report() {
                 fi ;;
         esac
     fi
-    if [ -n "$SINCE" ]; then
-        made=$(made_since "$DIR" "$(command cat "$SINCE")")
-        dist=$(sed -n 's/^distribution //p' "$SINCE")
-        if [ -n "$dist" ]; then
-            dist_made=$(made_since "$dist" "$(sed -n 's/^dist //p' "$SINCE")")
-            [ -z "$dist_made" ] || made=$(printf '%s\n%s' "${made:+$made
-}distribution $dist" "$dist_made")
+    if [ -n "$made" ]; then
+        # Any worktree or branch line but the worker's own park is a move.
+        # (An empty own_park drops only empty lines, which are not listed.)
+        if printf '%s\n' "$made" | grep -E '^(worktree|branch) ' | grep -Fvx "$own_park" | grep -q .; then
+            case $out in
+                working* | done* | capture-due*) out=$(printf '%s\n' "$out" | sed '1s/.*/moved/') ;;
+            esac
         fi
-        if [ -n "$made" ]; then
-            if printf '%s\n' "$made" | grep -Eq '^(worktree|branch) '; then
-                case $out in
-                    working* | done* | capture-due*) out=$(printf '%s\n' "$out" | sed '1s/.*/moved/') ;;
-                esac
-            fi
-            out=$(printf '%s\n%s' "$out" "$made")
-        fi
+        out=$(printf '%s\n%s' "$out" "$made")
     fi
     printf '%s\n' "$out"
 }
