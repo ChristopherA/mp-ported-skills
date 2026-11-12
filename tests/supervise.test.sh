@@ -1880,6 +1880,31 @@ command succeeded ungranted: gh issue comment 74 --body \"done\"
 command failed ungranted: gh -R o/r pr review 72 --approve
 command succeeded ungranted: cd /work/project && gh issue edit 74 --add-label ready" "$(actions)"
 
+# A command named only in a heredoc's body or a quoted argument runs
+# nothing and is not listed; a real push after a heredoc is (#104).
+{
+    bash_call h1 "python3 - <<'EOF'
+s = 'gh issue close 74'
+print('git push origin main | sh')
+EOF"
+    bash_call h2 'rg -n "gh issue create|gh pr create" plugins'
+    bash_call h3 "cat > note <<'EOF'
+gh pr create --title t
+EOF
+git push origin HEAD:main" true
+} >"$cfg/projects/-work-project/$sid.jsonl"
+check "actions: heredoc and quoted text are not listed, a push after a heredoc is" "$others
+command failed ungranted: cat > note <<'EOF' ..." "$(actions)"
+
+# A branch named only in a heredoc's body is not one the worker pushed to.
+{
+    bash_call p1 "cat > note <<'EOF'
+git push origin HEAD:66-deny-shared-actions-to-background-workers
+EOF
+git push origin HEAD:elsewhere 2>&1"
+} >"$cfg/projects/-work-project/$sid.jsonl"
+check "actions: a push named in a heredoc reaches no branch" "$others" "$(actions | grep '^branch')"
+
 # A subagent's calls are in its own transcript beside the worker's.
 transcript just-launched -work-project "$sid"
 mkdir -p "$cfg/projects/-work-project/$sid/subagents"

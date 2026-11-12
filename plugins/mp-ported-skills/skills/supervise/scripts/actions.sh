@@ -209,19 +209,34 @@ gh_write_words() {
     echo yes
 }
 
-# gh_write <command>: whether a command in it is such a gh write. Split as
-# the hook splits, on separators, with quotes dropped.
-gh_write() {
-    segments=$(printf '%s\n' "$1" | sed -E 's/(&&|\|\||[;&|()`])/\n/g' | tr -d "\"'\\\\")
-    oldIFS=$IFS
-    IFS='
+# command_lines <command>: the simple commands the shell would run from it,
+# one per line, words joined by $classify_rs (command_segments, in the
+# classifier the hook shares, without its follow line), so a command named
+# only in a heredoc's body or a quoted argument is not read as one (#104).
+command_lines() {
+    _cl=$(command_segments "$1")
+    case "$_cl" in
+        *"$actions_nl"*) printf '%s\n' "${_cl#*"$actions_nl"}" ;;
+    esac
+}
+actions_nl='
 '
+
+# gh_write <command>: whether a command in it is such a gh write, read only
+# where it runs, as the hook reads it.
+gh_write() {
+    segments=$(command_lines "$1")
+    oldIFS=$IFS
+    IFS=$actions_nl
     set -f
     found=""
     for seg in $segments; do
-        IFS=$oldIFS
+        IFS=$classify_rs
         # shellcheck disable=SC2086
-        found=$found$(gh_write_words $seg)
+        set -- $seg
+        IFS=$oldIFS
+        found=$found$(gh_write_words "$@")
+        IFS=$actions_nl
     done
     set +f
     IFS=$oldIFS
@@ -313,22 +328,23 @@ gh_guess() {
 # push_targets <cmd> <recorded branch>: the branch names a succeeded push
 # reached, one per line, or `*` when it may have reached any. The recorded
 # branch is what Claude Code saw; the command's own `git push` words name
-# the rest. Split as gh_write splits, with redirections dropped first so
-# `2>&1` is not read as a refspec. Call it only through $(...): it reuses
-# the globals gh_write and the transcript loop set.
+# the rest, read as gh_write reads them. Call it only through $(...): it
+# reuses the globals gh_write and the transcript loop set.
 push_targets() {
-    [ -z "$2" ] || printf '%s\n' "$2"
-    segments=$(printf '%s\n' "$1" | sed -E 's/[0-9]*[<>]+(&[0-9-]+| *[^ &|;<>]+)//g' |
-        sed -E 's/(&&|\|\||[;&|()`])/\n/g' | tr -d "\"'\\\\")
+    recorded_branch=$2
+    [ -z "$recorded_branch" ] || printf '%s\n' "$recorded_branch"
+    segments=$(command_lines "$1")
     oldIFS=$IFS
-    IFS='
-'
+    IFS=$actions_nl
     set -f
     named=""
     for seg in $segments; do
-        IFS=$oldIFS
+        IFS=$classify_rs
         # shellcheck disable=SC2086
-        reached=$(push_words $seg)
+        set -- $seg
+        IFS=$oldIFS
+        reached=$(push_words "$@")
+        IFS=$actions_nl
         [ -z "$reached" ] || named="$named$reached
 "
     done
@@ -336,15 +352,32 @@ push_targets() {
     IFS=$oldIFS
     if [ -n "$named" ]; then
         printf '%s' "$named"
-    elif [ -z "$2" ]; then
+    elif [ -z "$recorded_branch" ]; then
         echo '*'
     fi
 }
 
 # push_words <word>...: for a `git push` or `git send-pack`, the branch
 # names its refspecs push to, and `*` when it names none, or one that
-# cannot be read as a branch.
+# cannot be read as a branch. Redirections are dropped first, so `2>&1` is
+# not read as a refspec: a word ending in `<` or `>` takes the word after
+# it, its target, and any other word holding one is dropped alone. A word
+# built from a substitution's output can name any branch.
 push_words() {
+    _pw_n=$#
+    _pw_drop=""
+    while [ "$_pw_n" -gt 0 ]; do
+        _pw_n=$((_pw_n - 1))
+        _pw=$1
+        shift
+        if [ -n "$_pw_drop" ]; then _pw_drop=""; continue; fi
+        case "$_pw" in
+            *'<' | *'>') _pw_drop=yes; continue ;;
+            *'<'* | *'>'*) continue ;;
+            *"$classify_sub"*) _pw='*' ;;
+        esac
+        set -- "$@" "$_pw"
+    done
     while [ $# -gt 0 ]; do
         case "$1" in
             [A-Za-z_]*=* | env | command | exec | time | nohup) shift ;;
