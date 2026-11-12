@@ -234,9 +234,14 @@ check "unattended: refused" "1" "$?"
 check "unattended: says why" "Error: push.sh pushes for the maintainer's attended session; a background session pushes only on a standing grant" \
     "$(printf '%s\n' "$out" | tail -n 1)"
 check "unattended: nothing pushed" "$start" "$(git -C "$remote" rev-parse main)"
+# The wrapper lets a push to a local path through (#94), so give origin a
+# network push URL for this check, and take it off again after.
+git -C "$project" remote set-url --push origin https://example.invalid/x.git
 out=$( (export CLAUDE_CODE_SESSION_ATTENDED=0 PATH="$root/plugins/mp-ported-skills/scripts/worker-bin:$PATH"
     cd "$project" && git push -q origin main 2>&1) )
 check "unattended: the git wrapper still refuses the push" "1" "$?"
+git -C "$project" config --unset remote.origin.pushurl
+check "unattended: the wrapper's refusal moved nothing" "$start" "$(git -C "$remote" rev-parse main)"
 out=$( (export CLAUDE_CODE_SESSION_ATTENDED=0; sh "$scripts/push.sh" --dir "$project" --id 3fb49286 --start "$start" --check --sweep "$sweep" </dev/null 2>&1) )
 check "unattended: --check still runs" "0" "$?"
 
