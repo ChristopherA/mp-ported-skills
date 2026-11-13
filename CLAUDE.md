@@ -66,6 +66,8 @@ A live test removes every background session it starts, with `claude stop` then 
 
 A live test that runs `supervise`'s `resume.sh` (or `launch.sh`) in a scratch folder inside this checkout releases the worker's marker in its cleanup, with `release.sh --dir <scratch> --id <id>`. The marker goes in the repo holding the folder, which is this checkout, so a test that only stops and removes its session leaves this checkout read-only to every attended session: a `git commit` here was refused, naming a worker the test had already removed.
 
+A live test does both through `tests/live/worker-cleanup.sh`: it sources the file, defines `cleanup` (safe to call before the launch, with the id still empty), and calls `worker_cleanup_trap cleanup` before it launches, so an interrupted run cleans up too. The helper traps INT and TERM as well as EXIT, because dash and zsh skip an EXIT trap on a fatal signal while bash runs it, so a check under macOS `sh` alone passes without them; `tests/live-worker-cleanup.test.sh` runs under dash too for that reason (#95). Any `claude agents` read the cleanup makes goes through `agents_list`, since a hung one there blocks the interrupted exit.
+
 The profile's sessions start in auto mode, so a test that needs a permission prompt launches with `--permission-mode default`.
 
 A test that needs a transcript's text builds on the shape-only fixtures in `tests/fixtures/transcripts/` and fills their text blocks in the test, as `tests/supervise-last-message.test.sh` does. Do not cut a new fixture with a real session's text kept: the auto-mode classifier refused copying a worker's transcript text into the repo (#71).
