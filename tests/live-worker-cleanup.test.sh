@@ -3,7 +3,7 @@
 # helper the live supervise tests clean up with (#95).
 #
 # Runs a small script shaped like a live test: it sources the helper, sets
-# its cleanup with live_trap, and then ends normally, fails, or is sent INT
+# its cleanup with worker_cleanup_trap, and then ends normally, fails, or is sent INT
 # or TERM. A fake `claude` logs each call, and a stub release.sh logs its
 # arguments. Checks that every ending stops and removes each session,
 # releases the first one's marker and removes the scratch folder, and that
@@ -55,10 +55,10 @@ set -u
 scratch="$work/scratch"
 id=""
 cleanup() {
-    [ -z "\$id" ] || live_remove_worker "$work/scripts" "\$scratch" "\$id" 5b8e1f04
+    [ -z "\$id" ] || worker_cleanup_remove "$work/scripts" "\$scratch" "\$id" 5b8e1f04
     command rm -rf "\$scratch"
 }
-live_trap cleanup
+worker_cleanup_trap cleanup
 mkdir -p "\$scratch"
 [ "\$ENDING" = early ] && exit 1
 id=c2a368ee
@@ -104,7 +104,7 @@ done
 for t in supervise-resume supervise-watch; do
     f="$root/tests/live/$t.sh"
     check "$t: sources the helper" 1 "$(grep -cF '. "$root/tests/live/worker-cleanup.sh"' "$f")"
-    check "$t: sets the trap" 1 "$(grep -cx 'live_trap cleanup' "$f")"
+    check "$t: sets the trap" 1 "$(grep -cx 'worker_cleanup_trap cleanup' "$f")"
     check "$t: unsets CLAUDE_CODE_SESSION_ATTENDED" 1 "$(grep -c '^unset .*CLAUDE_CODE_SESSION_ATTENDED' "$f")"
 done
 

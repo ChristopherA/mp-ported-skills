@@ -70,6 +70,15 @@ stop_worker() { # <id>: the fake viewer exits, as claude attach does when its wo
     while [ -n "$(windows | grep -x "$1")" ] && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
 }
 export MP_VIEW_WAIT=1
+# session_of <id> <view.sh output>: the session its viewer line names.
+session_of() { printf '%s\n' "$2" | sed -n "s/^viewer \\(.*\\):$1 runs claude attach $1\$/\\1/p"; }
+# folder_named <session>: yes when it is named for a folder `project`.
+folder_named() {
+    case $1 in
+        mp-supervise-project-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]) echo yes ;;
+        *) echo "no: '$1'" ;;
+    esac
+}
 
 # --- open ------------------------------------------------------------------
 out=$(view --id c2a368ee --dir "$project")
@@ -77,12 +86,8 @@ rc=$?
 check "open: exit 0" 0 "$rc"
 # The session is named for the Project folder: its name, then a short hash
 # of its full path, so two Projects never share one.
-S=$(printf '%s\n' "$out" | sed -n 's/^viewer \(.*\):c2a368ee runs claude attach c2a368ee$/\1/p')
-case $S in
-    mp-supervise-project-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]) named=yes ;;
-    *) named="no: '$S'" ;;
-esac
-check "open: the session is named for the Project folder" yes "$named"
+S=$(session_of c2a368ee "$out")
+check "open: the session is named for the Project folder" yes "$(folder_named "$S")"
 check "open: names the window and the watch command" "viewer $S:c2a368ee runs claude attach c2a368ee
 watch: tmux attach -t $S (in iTerm2: tmux -CC attach -t $S)" "$out"
 check "open: one window, named for the worker" c2a368ee "$(windows)"
@@ -117,12 +122,8 @@ check "second worker: its own window" "c2a368ee
 other="$work/other/project"
 mkdir -p "$other"
 out=$(view --id 9d0c7a31 --dir "$other")
-O=$(printf '%s\n' "$out" | sed -n 's/^viewer \(.*\):9d0c7a31 runs claude attach 9d0c7a31$/\1/p')
-case $O in
-    mp-supervise-project-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]) named=yes ;;
-    *) named="no: '$O'" ;;
-esac
-check "two Projects: the other is named for its folder too" yes "$named"
+O=$(session_of 9d0c7a31 "$out")
+check "two Projects: the other is named for its folder too" yes "$(folder_named "$O")"
 check "two Projects: a session each" yes "$([ "$O" != "$S" ] && echo yes || echo no)"
 check "two Projects: the other's window is in its own session" 9d0c7a31 "$(windows "$O")"
 check "two Projects: this one's windows are untouched" "c2a368ee

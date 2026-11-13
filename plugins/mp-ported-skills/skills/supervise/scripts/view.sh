@@ -4,7 +4,9 @@
 # those windows. The session is named for the Project folder,
 # `mp-supervise-<folder name>-<4 hex digits of its path's cksum>`, so two
 # supervisors in different Projects each have their own, and one run's
-# --close leaves the other's viewers open (#95). With --iterm, open an iTerm2 split pane beside this session
+# --close leaves the other's viewers open (#95). A session named plain
+# `mp-supervise`, from a version before, is left for the maintainer to
+# remove. With --iterm, open an iTerm2 split pane beside this session
 # instead, for `/supervise --watch iterm` (#102), or close one.
 #
 # The window's own command is `claude attach <id>`, run with the profile's

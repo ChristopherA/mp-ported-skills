@@ -48,10 +48,10 @@ unset CLAUDE_CODE_SESSION_ATTENDED
 scratch="$root/.live-resume-$$"
 id=""
 cleanup() {
-    [ -z "$id" ] || live_remove_worker "$scripts" "$scratch" "$id"
+    [ -z "$id" ] || worker_cleanup_remove "$scripts" "$scratch" "$id"
     command rm -rf "$scratch"
 }
-live_trap cleanup
+worker_cleanup_trap cleanup
 mkdir -p "$scratch"
 token="resume-live-$$-$(date +%s)"
 word="heliotrope$$"

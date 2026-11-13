@@ -26,6 +26,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd -P)
 . "$root/tests/live/session-id.sh"
 . "$root/tests/live/worker-cleanup.sh"
 scripts="$root/plugins/mp-ported-skills/skills/supervise/scripts"
+. "$scripts/agents.sh"
 : "${CLAUDE_CONFIG_DIR:?CLAUDE_CONFIG_DIR must be set, as watch.sh, resume.sh and view.sh read it}"
 
 for c in claude tmux; do
@@ -57,17 +58,19 @@ session=""
 
 windows() { [ -n "$session" ] && tmux list-windows -t "=$session" -F '#{window_name}' 2>/dev/null; }
 live_here() { # background sessions in the scratch folder that are not stopped
-    claude agents --json --all </dev/null 2>/dev/null |
+    # Through agents_list, which kills a hung call: the cleanup trap runs
+    # this, and a hang there would block an interrupted run's exit.
+    agents_list 2>/dev/null |
         jq -r --arg d "$scratch" '[.[] | select(.kind == "background" and .cwd == $d and .state != "stopped") | .id] | join(" ")'
 }
 id=""
 cleanup() {
     tmux kill-server >/dev/null 2>&1
     # shellcheck disable=SC2046
-    [ -z "$id" ] || live_remove_worker "$scripts" "$scratch" "$id" $(live_here)
+    [ -z "$id" ] || worker_cleanup_remove "$scripts" "$scratch" "$id" $(live_here)
     command rm -rf "$scratch" "$tmp"
 }
-live_trap cleanup
+worker_cleanup_trap cleanup
 mkdir -p "$scratch"
 
 out=$(cd "$scratch" && claude --bg --model "${MP_LIVE_MODEL:-claude-sonnet-5}" --permission-mode auto \

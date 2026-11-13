@@ -193,9 +193,13 @@ printf '%s\n' "\$*" >>"$work/tmux-calls"
 exit 1
 EOF
 chmod +x "$work/tmux-bin/tmux"
-out=$( (PATH="$work/tmux-bin:$PATH"; export PATH; finish granted --tmux 2>&1) )
-check "finish: --tmux asks tmux about this Project's session only" yes \
-    "$(grep -qx 'has-session -t =mp-supervise-granted-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]' "$work/tmux-calls" && echo yes || echo no)"
+check "finish: the fake tmux is first on PATH" "$work/tmux-bin/tmux" \
+    "$(PATH="$work/tmux-bin:$PATH" command -v tmux)"
+out=$( (PATH="$work/tmux-bin:$PATH"; export PATH
+    [ "$(command -v tmux)" = "$work/tmux-bin/tmux" ] || exit 99
+    finish granted --tmux 2>&1) )
+check "finish: --tmux asks tmux about this Project's session only" "has-session -t =mp-supervise-granted-XXXX" \
+    "$(sed 's/-[0-9a-f]\{4\}$/-XXXX/' "$work/tmux-calls" 2>/dev/null)"
 check "finish: --tmux with no session open is clean" clean "$(printf '%s\n' "$out" | head -n 1 | cut -d ' ' -f 1)"
 
 # --- a Distribution repo ---------------------------------------------------
