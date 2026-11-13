@@ -8,7 +8,7 @@ With `--watch tmux`, the maintainer can watch the worker in tmux. Open a viewer 
 sh "${CLAUDE_SKILL_DIR}/scripts/view.sh" --id ID --dir "<project folder>" </dev/null
 ```
 
-It opens a window in the tmux session `mp-supervise` whose own command is `claude attach ID`, so the window closes by itself when the worker is stopped, and the session ends with its last window. It prints the window and the watch command. Pass both lines on in the next message to the maintainer, with the rule below. Exit 1: no viewer opened, for the reason it names. Report it and go on: the run does not depend on the viewer.
+It opens a window in a tmux session named for the Project folder, `mp-supervise-<folder name>-<4 hex digits>` (the digits come from the folder's full path, so supervisors in two Projects never share a session and one run's cleanup leaves the other's viewer open), whose own command is `claude attach ID`, so the window closes by itself when the worker is stopped, and the session ends with its last window. It prints the window and the watch command. Pass both lines on in the next message to the maintainer, with the rule below. Exit 1: no viewer opened, for the reason it names. Report it and go on: the run does not depend on the viewer.
 
 With `--watch iterm`, the viewer is an iTerm2 split pane beside this session, opened at the same times, with nothing to attach by hand:
 
@@ -20,7 +20,7 @@ It splits this session's pane through `iterm-pane`'s `pane-open.sh`, and the pan
 
 Never open a viewer at any other time, and never in a loop. Attaching wakes a stopped session, so a viewer opened between `resume.sh`'s stop and its resume makes the resume start a copy and splits the worker (#55).
 
-Tell the maintainer, with the watch command (`tmux attach -t mp-supervise`, or `tmux -CC attach -t mp-supervise` in iTerm2) or the pane:
+Tell the maintainer, with the watch command `view.sh` printed (`tmux attach -t <session>`, or `tmux -CC attach -t <session>` in iTerm2) or the pane:
 
 - the viewer is live: what they type there reaches the worker as a prompt, and answering a permission prompt there is fine;
 - attaching to the worker by hand (`claude attach ID`, or a viewer of their own) between a stop and a resume splits the worker. Leaving the tmux session (`Ctrl+B d`) is always safe; with `--watch iterm`, leave the pane for the supervisor to close.
@@ -32,10 +32,10 @@ At the end of a settled run, `finish.sh` (Finishing, in `SKILL.md`) closes the v
 With `--watch tmux`, once the worker is stopped or gone, remove the tmux session too, so the run leaves none behind:
 
 ```sh
-sh "${CLAUDE_SKILL_DIR}/scripts/view.sh" --close </dev/null
+sh "${CLAUDE_SKILL_DIR}/scripts/view.sh" --close --dir "<project folder>" </dev/null
 ```
 
-It prints `closed mp-supervise`, or `no tmux session mp-supervise` when the window already closed with the worker. With `--watch iterm`, close the pane instead, with the coordinates `view.sh` printed when it opened it:
+It removes only that Project's session, and prints `closed <session>`, or `no tmux session <session>` when the window already closed with the worker. With `--watch iterm`, close the pane instead, with the coordinates `view.sh` printed when it opened it:
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/view.sh" --close --pane '<session> <window> <tab>' </dev/null

@@ -8,6 +8,8 @@ Run one ticket in a Project, from the Hub or from inside the Project, as the mai
 
 The Project folder, relative to this session's folder or absolute, is the first word here (`.` when this session runs inside the Project); `--model <id>`, `--effort <level>`, `--watch tmux` or `--watch iterm`, and `--loop`, optionally with a ticket count (`--loop 2`), may follow: $ARGUMENTS
 
+`--watch` takes `tmux` or `iterm` and nothing else. Given any other value, or none, stop before any step, launch nothing, and reply with one line, `Error: --watch takes tmux or iterm, not '<value>'` (`''` for none).
+
 ## Starting this session
 
 No step of this skill, `capturing` or `resuming` calls `Artifact`, `Workflow`, `ScheduleWakeup`, `SendFeedback` or Claude in Chrome: a supervisor does not publish a page, run a workflow, schedule a `/loop` wakeup, draft feedback or drive a browser. `launch.sh` leaves the same ones out of a worker. A supervisor started from a terminal without them has 20.4k tokens less at its first call, 13.6 points of a 150k zone (`docs/research/supervisor-context.md`):

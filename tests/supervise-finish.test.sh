@@ -181,6 +181,23 @@ check "finish: a relative record keeps the detail file beside it" "detail $work/
     "$(printf '%s\n' "$out" | tail -n 1)"
 check "finish: no detail file in the Project folder" "no" "$([ -e "$work/granted/out" ] && echo yes || echo no)"
 
+# --- the tmux viewer -------------------------------------------------------
+# --tmux closes the session named for this Project folder, not one every
+# supervisor shares (#95). A fake tmux, on PATH for this run only, logs what
+# it is asked and holds no session.
+worker granted
+mkdir -p "$work/tmux-bin"
+cat >"$work/tmux-bin/tmux" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >>"$work/tmux-calls"
+exit 1
+EOF
+chmod +x "$work/tmux-bin/tmux"
+out=$( (PATH="$work/tmux-bin:$PATH"; export PATH; finish granted --tmux 2>&1) )
+check "finish: --tmux asks tmux about this Project's session only" yes \
+    "$(grep -qx 'has-session -t =mp-supervise-granted-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]' "$work/tmux-calls" && echo yes || echo no)"
+check "finish: --tmux with no session open is clean" clean "$(printf '%s\n' "$out" | head -n 1 | cut -d ' ' -f 1)"
+
 # --- a Distribution repo ---------------------------------------------------
 # --dist-start reaches record.sh, which counts the Distribution repo's
 # commits from the Project folder, though the worker's checkout is DIR (#216).

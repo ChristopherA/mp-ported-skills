@@ -150,7 +150,7 @@ fi
 
 # 2. The viewer.
 if [ -n "$TMUX_VIEW" ]; then
-    run view.sh sh "$here/view.sh" --close || flag "viewer not closed: $(why)"
+    run view.sh sh "$here/view.sh" --close --dir "$DIR" || flag "viewer not closed: $(why)"
 elif [ -n "$PANE" ]; then
     run view.sh sh "$here/view.sh" --close --pane "$PANE" || flag "viewer not closed: $(why)"
 fi

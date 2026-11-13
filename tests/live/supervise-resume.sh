@@ -11,8 +11,8 @@
 # codeword through resume.sh and waits again. Checks that resume.sh woke the
 # original (no copy), and that the answer is in the job's original
 # transcript. Removes the session, its marker in this checkout and the
-# folder. It needs `claude` and two
-# model calls; without `claude` it prints SKIP and exits 0.
+# folder, at the end or when interrupted (INT, TERM). It needs `claude` and
+# two model calls; without `claude` it prints SKIP and exits 0.
 #
 # Set MP_LIVE_MODEL to choose the model; it must support auto mode (Haiku
 # 4.5 does not). Default claude-sonnet-5.
@@ -23,6 +23,7 @@ set -u
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd -P)
 . "$root/tests/live/session-id.sh"
+. "$root/tests/live/worker-cleanup.sh"
 scripts="$root/plugins/mp-ported-skills/skills/supervise/scripts"
 : "${CLAUDE_CONFIG_DIR:?CLAUDE_CONFIG_DIR must be set, as watch.sh and resume.sh read it}"
 
@@ -41,7 +42,16 @@ check() { # <name> <expected> <actual>
     fi
 }
 
+# resume.sh and watch.sh run git; a worker-style session's 0 would make
+# the git wrappers refuse what a real supervisor runs.
+unset CLAUDE_CODE_SESSION_ATTENDED
 scratch="$root/.live-resume-$$"
+id=""
+cleanup() {
+    [ -z "$id" ] || live_remove_worker "$scripts" "$scratch" "$id"
+    command rm -rf "$scratch"
+}
+live_trap cleanup
 mkdir -p "$scratch"
 token="resume-live-$$-$(date +%s)"
 word="heliotrope$$"
@@ -51,19 +61,9 @@ out=$(cd "$scratch" && claude --bg --model "${MP_LIVE_MODEL:-claude-sonnet-5}" -
 id=$(bg_session_id "$out")
 if [ -z "$id" ]; then
     printf 'FAIL launch: claude --bg printed no session id:\n%s\n' "$out"
-    command rm -rf "$scratch"
     exit 1
 fi
 echo "launched $id"
-cleanup() {
-    claude stop "$id" </dev/null >/dev/null 2>&1
-    claude rm "$id" </dev/null >/dev/null 2>&1
-    # resume.sh writes the worker's marker in the repo holding the scratch
-    # folder, which is this checkout; release it so this checkout is not
-    # left read-only.
-    sh "$scripts/release.sh" --dir "$scratch" --id "$id" </dev/null >/dev/null 2>&1
-    command rm -rf "$scratch"
-}
 
 first=$(sh "$scripts/watch.sh" --id "$id" --dir "$scratch" --interval 5 --timeout 300 </dev/null)
 check "the first turn ends" done "$(printf '%s\n' "$first" | head -n 1)"
@@ -97,6 +97,5 @@ if [ -n "$transcript" ]; then
         "$(printf '%s' "$answer" | grep -q "$word" && echo yes || echo no)"
 fi
 
-cleanup
 echo "supervise-resume live: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

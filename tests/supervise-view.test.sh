@@ -62,7 +62,8 @@ export PATH
 project="$work/project"
 mkdir -p "$project"
 view() { sh "$scripts/view.sh" "$@" </dev/null 2>&1; }
-windows() { tmux list-windows -t =mp-supervise -F '#{window_name}' 2>/dev/null; }
+windows() { tmux list-windows -t "=${1:-$S}" -F '#{window_name}' 2>/dev/null; }
+alive() { tmux has-session -t "=$1" 2>/dev/null; echo $?; }
 stop_worker() { # <id>: the fake viewer exits, as claude attach does when its worker is stopped
     kill "$(command cat "$fake/pid-$1")" 2>/dev/null
     n=0
@@ -74,8 +75,16 @@ export MP_VIEW_WAIT=1
 out=$(view --id c2a368ee --dir "$project")
 rc=$?
 check "open: exit 0" 0 "$rc"
-check "open: names the window and the watch command" "viewer mp-supervise:c2a368ee runs claude attach c2a368ee
-watch: tmux attach -t mp-supervise (in iTerm2: tmux -CC attach -t mp-supervise)" "$out"
+# The session is named for the Project folder: its name, then a short hash
+# of its full path, so two Projects never share one.
+S=$(printf '%s\n' "$out" | sed -n 's/^viewer \(.*\):c2a368ee runs claude attach c2a368ee$/\1/p')
+case $S in
+    mp-supervise-project-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]) named=yes ;;
+    *) named="no: '$S'" ;;
+esac
+check "open: the session is named for the Project folder" yes "$named"
+check "open: names the window and the watch command" "viewer $S:c2a368ee runs claude attach c2a368ee
+watch: tmux attach -t $S (in iTerm2: tmux -CC attach -t $S)" "$out"
 check "open: one window, named for the worker" c2a368ee "$(windows)"
 check "open: the window's own command is claude attach, in the folder, under this profile" \
     "attach c2a368ee | $project | $CLAUDE_CONFIG_DIR" "$(command cat "$fake/calls")"
@@ -84,8 +93,7 @@ check "open: the window's own command is claude attach, in the folder, under thi
 tmux set-option -g remain-on-exit on
 stop_worker c2a368ee
 check "stop: the window closes by itself" "" "$(windows)"
-check "stop: the last window closing ends the tmux session" 1 \
-    "$(tmux has-session -t =mp-supervise 2>/dev/null; echo $?)"
+check "stop: the last window closing ends the tmux session" 1 "$(alive "$S")"
 sleep 1
 check "stop: nothing re-attaches" 1 "$(grep -c '' "$fake/calls")"
 
@@ -103,10 +111,33 @@ view --id 5b8e1f04 --dir "$project" >/dev/null
 check "second worker: its own window" "c2a368ee
 5b8e1f04" "$(windows)"
 
+# --- two Projects ----------------------------------------------------------
+# Another supervisor's Project, with the same folder name: its viewer goes in
+# a session of its own, and each run's cleanup leaves the other's open.
+other="$work/other/project"
+mkdir -p "$other"
+out=$(view --id 9d0c7a31 --dir "$other")
+O=$(printf '%s\n' "$out" | sed -n 's/^viewer \(.*\):9d0c7a31 runs claude attach 9d0c7a31$/\1/p')
+case $O in
+    mp-supervise-project-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]) named=yes ;;
+    *) named="no: '$O'" ;;
+esac
+check "two Projects: the other is named for its folder too" yes "$named"
+check "two Projects: a session each" yes "$([ "$O" != "$S" ] && echo yes || echo no)"
+check "two Projects: the other's window is in its own session" 9d0c7a31 "$(windows "$O")"
+check "two Projects: this one's windows are untouched" "c2a368ee
+5b8e1f04" "$(windows)"
+
 # --- close -----------------------------------------------------------------
-check "close: removes the session" "closed mp-supervise" "$(view --close)"
-check "close: no tmux session left" 1 "$(tmux has-session -t =mp-supervise 2>/dev/null; echo $?)"
-check "close: none to remove" "no tmux session mp-supervise" "$(view --close)"
+check "close: removes this Project's session" "closed $S" "$(view --close --dir "$project")"
+check "close: no tmux session left for it" 1 "$(alive "$S")"
+check "close: the other Project's viewer stays open" 9d0c7a31 "$(windows "$O")"
+check "close: none to remove" "no tmux session $S" "$(view --close --dir "$project")"
+check "close: the other closes by its folder" "closed $O" "$(view --close --dir "$other")"
+check "close: none left for the other" 1 "$(alive "$O")"
+out=$(view --close); rc=$?
+check "close: with no folder, exit 1" 1 "$rc"
+check "close: with no folder, says so" "Error: --close needs --dir, --session or --pane" "$out"
 
 out=$(view --id c2a368ee --dir "$project" --session watch-x)
 check "session: a chosen name" "viewer watch-x:c2a368ee runs claude attach c2a368ee
@@ -119,7 +150,7 @@ out=$(view --id c2a368ee --dir "$project")
 rc=$?
 check "attach fails: exit 1" 1 "$rc"
 check "attach fails: says so" "Error: claude attach c2a368ee exited at once, so no viewer is open; watch with claude attach c2a368ee" "$out"
-check "attach fails: no session left" 1 "$(tmux has-session -t =mp-supervise 2>/dev/null; echo $?)"
+check "attach fails: no session left" 1 "$(alive "$S")"
 command rm -f "$fake/attach-fails"
 
 out=$(view --id 'c2a368ee;x' --dir "$project"); rc=$?
@@ -134,6 +165,15 @@ out=$( (PATH=/usr/bin:/bin; export PATH; sh "$scripts/view.sh" --id c2a368ee --d
 rc=$?
 check "no tmux: exit 1" 1 "$rc"
 check "no tmux: says so" "Error: tmux is not on PATH, so no viewer can open; watch with claude attach c2a368ee" "$out"
+
+# --- the --watch argument --------------------------------------------------
+# SKILL.md, not a script, reads /supervise's arguments: it refuses any
+# --watch value but the two it handles, naming both (#95).
+skill="$root/plugins/mp-ported-skills/skills/supervise/SKILL.md"
+check "--watch: SKILL.md refuses another value, naming tmux and iterm" 1 \
+    "$(grep -cF "reply with one line, \`Error: --watch takes tmux or iterm, not '<value>'\`" "$skill")"
+check "--watch: the refusal launches nothing" 1 \
+    "$(grep -c '^`--watch` takes `tmux` or `iterm` and nothing else\. Given any other value, or none, stop before any step, launch nothing' "$skill")"
 
 echo "supervise-view: $pass passed, $fail failed"
 [ "$fail" = 0 ]
