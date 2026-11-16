@@ -31,14 +31,18 @@ check() { # <name> <expected> <actual>
 # Serves repos/{owner}/{repo}/issues/<n>, .../<n>/parent (a 404 when there is
 # no parent-<n>.json) and .../<n>/sub_issues, whose second page comes only
 # with --paginate, printed as gh prints pages: one array after another.
-# `gh issue edit` and a PATCH are logged to $FAKE_GH/log.
+# `gh issue edit` and a PATCH are logged to $FAKE_GH/log. An edit.fail file
+# fails the edit as the real gh fails on a label the repo lacks, and an
+# issue-<n>.fail file fails the read of #<n>, each through its own switch.
 mkdir -p "$work/bin" "$work/gh" "$work/proj"
 cat >"$work/bin/gh" <<'EOF'
 #!/bin/sh
 path=
 for a in "$@"; do case $a in repos/*) path=$a ;; esac; done
 case "$1 $2" in
-    "issue edit") shift 2; echo "edit $*" >>"$FAKE_GH/log"; exit 0 ;;
+    "issue edit") shift 2
+        [ -f "$FAKE_GH/edit.fail" ] && { echo "could not add label: 'ready-for-human' not found" >&2; exit 1; }
+        echo "edit $*" >>"$FAKE_GH/log"; exit 0 ;;
 esac
 case " $* " in
     *" --method PATCH "*)
@@ -60,7 +64,9 @@ case $path in
         cat "$FAKE_GH/sub-$n.json"
         case " $* " in *" --paginate "*)
             if [ -f "$FAKE_GH/sub-$n.page2.json" ]; then cat "$FAKE_GH/sub-$n.page2.json"; fi ;; esac ;;
-    repos/*/issues/[0-9]*) n=${path##*/}; cat "$FAKE_GH/issue-$n.json" ;;
+    repos/*/issues/[0-9]*) n=${path##*/}
+        [ -f "$FAKE_GH/issue-$n.fail" ] && { echo 'gh: Not Found (HTTP 404)' >&2; exit 1; }
+        cat "$FAKE_GH/issue-$n.json" ;;
     *) exit 1 ;;
 esac
 EOF
@@ -78,6 +84,7 @@ issue() {
 list() { printf '%s\n' "$@" | jq -sc .; }
 reset() { command rm -f "$FAKE_GH"/*; : >"$FAKE_GH/log"; }
 run() { (cd "$work/proj" && sh "$script" "$@" </dev/null 2>&1); }
+run_err() { (cd "$work/proj" && sh "$script" "$@" </dev/null 2>&1 >/dev/null); }
 log() { command cat "$FAKE_GH/log"; }
 patch="gh api --method PATCH 'repos/{owner}/{repo}/issues/40/sub_issues/priority'"
 
@@ -155,6 +162,30 @@ out=$(run --apply 118); rc=$?
 check "sub-issues read fails: exit 1" 1 "$rc"
 check "sub-issues read fails: names the read" "Error: could not read #40's sub-issues: gh: Server Error (HTTP 500)" "$out"
 check "sub-issues read fails: writes nothing" "" "$(log)"
+
+# A failed relabel stops before the reorder, with the reorder a command.
+reset
+issue 118 ready-for-agent >"$FAKE_GH/issue-118.json"
+issue 40 ready-for-human >"$FAKE_GH/parent-118.json"
+list "$(issue 118 ready-for-agent)" "$(issue 146 ready-for-agent)" >"$FAKE_GH/sub-40.json"
+check "relabel fails: the dry run's reorder is a command" \
+"reorder: $patch -F sub_issue_id=118000 -F after_id=146000" "$(run 118 | grep '^reorder: ')"
+: >"$FAKE_GH/edit.fail"
+err=$(run_err --apply 118); rc=$?
+check "relabel fails: exit 1" 1 "$rc"
+check "relabel fails: names the relabel on stderr" \
+"Error: the relabel failed, so nothing was moved: could not add label: 'ready-for-human' not found" "$err"
+check "relabel fails: no PATCH" "" "$(grep -e 'PATCH' "$FAKE_GH/log")"
+check "relabel fails: writes nothing" "" "$(log)"
+
+# A failed read of the ticket itself.
+reset
+: >"$FAKE_GH/issue-118.fail"
+err=$(run_err 118); rc=$?
+check "ticket read fails: exit 1" 1 "$rc"
+check "ticket read fails: names the read on stderr" "Error: could not read #118: gh: Not Found (HTTP 404)" "$err"
+check "ticket read fails: prints nothing on stdout" "" "$(cd "$work/proj" && sh "$script" 118 </dev/null 2>/dev/null)"
+check "ticket read fails: writes nothing" "" "$(log)"
 
 # --- label strings from triage-labels.md ------------------------------------
 reset
