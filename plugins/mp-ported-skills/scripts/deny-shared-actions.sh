@@ -25,6 +25,11 @@
 # this hook can tell apart from the others, and those cannot be told apart
 # from each other, so they stay refused on purpose.
 #
+# Each shared part of a command is checked against its own grant (#191): a
+# chained, nested or piped part no grant covers refuses the whole command,
+# whatever a granted part before it. A grant's note is not checked; it
+# says what the grant is for (docs/adr/0005).
+#
 # Detection: Claude Code sets CLAUDE_CODE_SESSION_ATTENDED=0 in a
 # background session's own process env (seen in CLI 2.1.284 by reading
 # `env` inside a live `claude --bg` session; undocumented, so this script
@@ -507,13 +512,6 @@ deny() {
     exit 0
 }
 
-# render_part <words>: a part's words as command_segments split them,
-# joined by spaces, a substitution shown as $(...) and a tab as a space,
-# for --list's one line per part.
-render_part() {
-    printf '%s' "$1" | tr '\036\037\t' '   ' | sed "s/$classify_sub/\$(...)/g"
-}
-
 # Each part is checked on its own (#191), in the order the shell runs them,
 # and the first part no grant covers refuses the command, named in the
 # reason. A standing grant lets this exact form through. Only a form
@@ -543,7 +541,7 @@ for entry in $matches; do
     _part=${_rest#*"$match_fs"}
     refine
     if [ -n "$list_mode" ]; then
-        printf '%s\t%s\n' "$matched" "$(render_part "$_part")"
+        printf '%s\t%s\n' "$matched" "$(segment_text "$_part")"
         continue
     fi
     action=""

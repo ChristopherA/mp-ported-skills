@@ -518,6 +518,14 @@ command_segments() {
         awk -v rs="$classify_rs" '{ o = ""; for (k = 1; k <= NF; k++) o = o (k > 1 ? rs : "") $k; if (NF) print o }'
 }
 
+# segment_text <segment>: one of command_segments' lines as one line of
+# text, its words joined by spaces, a newline or tab inside a word shown as
+# a space and a substitution as $(...), so the hook's --list and actions.sh
+# print a part the same way (#191).
+segment_text() {
+    printf '%s' "$1" | tr '\036\037\t' '   ' | sed "s/$classify_sub/\$(...)/g"
+}
+
 # gh_words <args after "gh">: sets gh_sub and gh_act to the subcommand and
 # its action, passing over a repo flag (-R <repo>, -R=<repo>, -R<repo>,
 # --repo <repo>, --repo=<repo>) wherever gh takes one: before the

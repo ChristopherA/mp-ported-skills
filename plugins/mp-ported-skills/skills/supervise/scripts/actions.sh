@@ -39,6 +39,13 @@
 # #66 hook), `failed` (any other error) or `no result`. <cmd> is the
 # command's first line, with ` ...` when it has more, and ` -- push
 # <branch>` or ` -- pr <n> <action>` when the result recorded one.
+# A call with more than one shared part (#191) -- each form the hook's scan
+# names, in a chain, a nested shell or beside a piped one; a top-level gh
+# write it names none for; a push Claude Code recorded that no part names
+# -- is listed as one line per part instead, each with its own citation:
+#   command <status> <label>: <part> (part of: <cmd>)
+# where <part> is the part's words joined by spaces, so a part no grant
+# names reads as ungranted rather than taking another part's citation.
 #
 # The branch lines read DIR's remote-tracking refs without fetching, so a
 # push from another checkout of the same repo shows only after a fetch
@@ -249,6 +256,33 @@ actions_nl='
 gh_write() {
     [ -n "$(each_command gh_write_words "$1")" ]
 }
+
+# shared_parts <command>: one line per shared part the shell would run from
+# it (#191), `<form><tab><text>`: each form the hook's scan names, with its
+# refinements, in the order the shell runs them (the hook's --list), then
+# each top-level gh write it names no form for, with an empty form. Printed
+# the way segment_text prints a part, so the two lists compare by text.
+shared_parts() {
+    _sp=$(jq -cn --arg c "$1" '{permission_mode: "auto", tool_name: "Bash", tool_input: {command: $c}}' |
+        (cd "$DIR" && CLAUDE_CODE_SESSION_ATTENDED=0 MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS=1 MP_DENY_SHARED_ACTIONS_NO_PASS_ON=1 sh "$hook" --list))
+    [ -z "$_sp" ] || printf '%s\n' "$_sp"
+    _sp_named=$(printf '%s\n' "$_sp" | cut -f2-)
+    each_command gh_write_part "$1" | while IFS= read -r _sp_p; do
+        printf '%s\n' "$_sp_named" | grep -qxF -- "$_sp_p" || printf '\t%s\n' "$_sp_p"
+    done
+}
+
+# gh_write_part <word>...: the words as one line of text, when they are a
+# gh write (gh_write_words).
+gh_write_part() {
+    [ -n "$(gh_write_words "$@")" ] || return 0
+    _gp_ifs=$IFS
+    IFS=$classify_rs
+    segment_text "$*"
+    IFS=$_gp_ifs
+    echo
+}
+actions_tab=$(printf '\t')
 
 # calls <transcript>: one JSON row per Bash call worth checking: its
 # command, the op Claude Code recorded, and its report line's pieces --
@@ -524,10 +558,36 @@ if [ -n "$sid" ]; then
                 ops=$(printf '%s' "$row" | jq -r .ops)
                 status=$(printf '%s' "$row" | jq -r .status)
                 rest=$(printf '%s' "$row" | jq -r .rest)
-                action=$(action_for "$cmd" "$ops")
-                grant_label "$action" "$rest"
-                commands="${commands}command $status $GRANT_LABEL: $rest
+                parts=$(shared_parts "$cmd")
+                # A push Claude Code recorded that no part names, such as
+                # one a script beside a gh write made, is a part of its own.
+                case "$ops" in
+                    push\ * | *', push '*)
+                        printf '%s\n' "$parts" | grep -q '^git push\|^git subtree push\|^git send-pack' ||
+                            parts="$parts${parts:+$actions_nl}git push$actions_tab-- $ops" ;;
+                esac
+                if [ "$(printf '%s' "$parts" | grep -c '')" -gt 1 ]; then
+                    # Each shared part has its own line and citation (#191),
+                    # so a part no grant names does not take another's.
+                    action=""
+                    while IFS= read -r part; do
+                        form=${part%%"$actions_tab"*}
+                        text=${part#*"$actions_tab"}
+                        want=""
+                        [ -z "$form" ] || want=$(grant_action "$form")
+                        [ "$want" != push ] || action=push
+                        grant_label "$want" "$text"
+                        commands="${commands}command $status $GRANT_LABEL: $text (part of: $rest)
 "
+                    done <<EOF_PARTS
+$parts
+EOF_PARTS
+                else
+                    action=$(action_for "$cmd" "$ops")
+                    grant_label "$action" "$rest"
+                    commands="${commands}command $status $GRANT_LABEL: $rest
+"
+                fi
                 if { [ "$status" = succeeded ] || [ "$status" = "no result" ]; } && [ "$action" = push ]; then
                     worker_pushes="$worker_pushes$(push_targets "$cmd" "$(printf '%s' "$row" | jq -r .pushed)")
 "

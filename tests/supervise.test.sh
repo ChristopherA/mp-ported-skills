@@ -2383,6 +2383,50 @@ command succeeded ungranted: gh issue edit 5 --add-label --help
 command succeeded ungranted: gh issue edit 5 --add-label \"a;b\" --title t" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo7" --start "$gstart" </dev/null | grep '^command')"
 
+# A chained command with more than one shared part lists each part with
+# its own citation (#191), so a relabel beside a granted comment reads as
+# ungranted, not under the comment's grant; a gh write the hook names no
+# form for counts as a part too. One shared part beside reads keeps one
+# line, as before.
+k1='gh issue comment 131 --body-file c.md && gh issue edit 131 --remove-label ready-for-agent --add-label ready-for-human'
+k2='gh issue comment 3 -b "a; b" && gh pr edit 3 --title y'
+{
+    bash_call k1 "$k1"
+    bash_call k2 "$k2"
+    bash_call k3 'gh issue view 3; gh issue comment 3 -b x'
+} >"$cfg/projects/-work-project/$sid.jsonl"
+new_grant_repo grepo8 "## Grants
+
+- issue-comment: a capture's findings, on this repo's tickets
+"
+check "actions: each shared part of a chained command has its own citation" \
+    "command succeeded granted (issue-comment: a capture's findings, on this repo's tickets): gh issue comment 131 --body-file c.md (part of: $k1)
+command succeeded ungranted: gh issue edit 131 --remove-label ready-for-agent --add-label ready-for-human (part of: $k1)
+command succeeded granted (issue-comment: a capture's findings, on this repo's tickets): gh issue comment 3 -b a; b (part of: $k2)
+command succeeded ungranted: gh pr edit 3 --title y (part of: $k2)
+command succeeded granted (issue-comment: a capture's findings, on this repo's tickets): gh issue view 3; gh issue comment 3 -b x" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo8" --start "$gstart" </dev/null | grep '^command')"
+# A push Claude Code recorded that no part names is a part of its own.
+jq -c 'select(.message.content | any(.id == "toolu_01XdkrXwv1TnYznyvLWKGaRN" or .tool_use_id == "toolu_01XdkrXwv1TnYznyvLWKGaRN"))
+    | .message.content |= map(if .type == "tool_use" then .input.command = "gh issue comment 3 -b x && sh scripts/ship.sh" else . end)' \
+    "$transcripts/shared-actions.jsonl" >"$cfg/projects/-work-project/$sid.jsonl"
+ship="gh issue comment 3 -b x && sh scripts/ship.sh -- push 66-deny-shared-actions-to-background-workers"
+check "actions: a recorded push beside a granted comment is its own part" \
+    "command succeeded granted (issue-comment: a capture's findings, on this repo's tickets): gh issue comment 3 -b x (part of: $ship)
+command succeeded ungranted: -- push 66-deny-shared-actions-to-background-workers (part of: $ship)" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo8" --start "$gstart" </dev/null | grep '^command')"
+{
+    bash_call k1 "$k1"
+} >"$cfg/projects/-work-project/$sid.jsonl"
+new_grant_repo grepo9 '## Grants
+
+- label
+'
+check "actions: a granted relabel beside an ungranted comment cites the relabel alone" \
+    "command succeeded ungranted: gh issue comment 131 --body-file c.md (part of: $k1)
+command succeeded granted (label): gh issue edit 131 --remove-label ready-for-agent --add-label ready-for-human (part of: $k1)" \
+    "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo9" --start "$gstart" </dev/null | grep '^command' | grep 131)"
+
 # gh pr new is gh's alias for gh pr create (#120), and is read the same.
 {
     bash_call p1 'gh pr create --fill'
