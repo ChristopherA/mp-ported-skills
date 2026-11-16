@@ -131,10 +131,78 @@ check "declined: the comment names the unpushed commit" "The Distribution push w
 - $code" "$(command cat "$work/gh-body")"
 check "declined: nothing recorded as the supervisor's" "no" "$([ -f "$record" ] && echo yes || echo no)"
 
-reset OPEN '["hitl"]'
+reset OPEN '["afk"]'
 out=$(close --declined)
-check "declined, open and already hitl: no reopen, no relabel" "issue view 7 --json state,labels,url
+check "declined, never held: prints as before" "kept open https://github.com/o/r/issues/7" "$(printf '%s\n' "$out" | grep '^kept open')"
+
+# --- held, before the push is checked or asked (#203) ----------------------
+reset OPEN '["afk","bug"]'
+out=$(close --held --check)
+check "held --check: passes" "exit=0" "$(last "$out")"
+check "held --check: lists the unpushed commit" "  $code" "$(printf '%s\n' "$out" | grep '^  ')"
+check "held --check: gh not called" "no" "$([ -f "$work/gh-log" ] && echo yes || echo no)"
+
+out=$(close --held)
+check "held: exit 0" "exit=0" "$(last "$out")"
+check "held: comments, relabels, does not close" "issue view 7 --json state,labels,url
+issue comment 7 --body-file $(sed -n 's/^issue comment 7 --body-file //p' "$work/gh-log")
+issue edit 7 --remove-label afk --add-label hitl" "$(command cat "$work/gh-log")"
+check "held: the comment names the unpushed commit and the wait" "The Distribution push is waiting on the maintainer, so this ticket is held open for them (hitl) until it lands. $dist holds these commits its upstream lacks:
+
+- $code" "$(command cat "$work/gh-body")"
+check "held: prints the url" "held open https://github.com/o/r/issues/7" "$(printf '%s\n' "$out" | grep '^held open')"
+check "held: nothing recorded as the supervisor's" "no" "$([ -f "$record" ] && echo yes || echo no)"
+
+reset CLOSED '["afk"]'
+out=$(close --held)
+check "held, closed: reopens first" "issue reopen 7" "$(sed -n 2p "$work/gh-log")"
+
+reset OPEN '["afk"]'
+echo 3d2d302a >"$marker"
+out=$(close --held)
+check "held: refused while a worker holds the checkout" "exit=2" "$(last "$out")"
+check "held, marker: gh not called" "no" "$([ -f "$work/gh-log" ] && echo yes || echo no)"
+
+reset OPEN '["afk"]'
+out=$(CLAUDE_CODE_SESSION_ATTENDED=0; export CLAUDE_CODE_SESSION_ATTENDED; close --held)
+check "held: refused in a background session" "exit=1" "$(last "$out")"
+
+# --- declined on a held ticket ---------------------------------------------
+reset OPEN '["hitl","bug"]'
+out=$(close --declined)
+check "declined, held: exit 0" "exit=0" "$(last "$out")"
+check "declined, held: comments only, no reopen, no relabel" "issue view 7 --json state,labels,url
 issue comment 7 --body-file $(sed -n 's/^issue comment 7 --body-file //p' "$work/gh-log")" "$(command cat "$work/gh-log")"
+check "declined, held: says declined, no commit list" "The Distribution push was declined, so this ticket stays held for the maintainer (hitl). Its unpushed commits are listed in the comment that held it." \
+    "$(command cat "$work/gh-body")"
+
+# --- a failed push.sh --check on a held ticket -----------------------------
+printf '%s\n' 'push project main -> origin/main' 'ok marker: no worker marker' 'fail clean: the tree has changes' \
+    'ok distribution upstream: x' 'fail distribution sweep: 2 hits' '  README.md:3: hit' >"$work/check-out"
+reset OPEN '["hitl"]'
+out=$(close --failed "$work/check-out")
+check "failed, held: exit 0" "exit=0" "$(last "$out")"
+check "failed, held: comments only" "issue view 7 --json state,labels,url
+issue comment 7 --body-file $(sed -n 's/^issue comment 7 --body-file //p' "$work/gh-log")" "$(command cat "$work/gh-log")"
+check "failed, held: the comment gives the fail lines" "The Distribution push was not asked: \`push.sh --check\` failed, so this ticket stays held for the maintainer (hitl). The failed checks:
+
+\`\`\`
+fail clean: the tree has changes
+fail distribution sweep: 2 hits
+\`\`\`" "$(command cat "$work/gh-body")"
+check "failed, held: prints the url" "kept open https://github.com/o/r/issues/7" "$(printf '%s\n' "$out" | grep '^kept open')"
+
+reset OPEN '["afk"]'
+out=$(close --failed "$work/check-out")
+check "failed, never held: relabels too" "issue edit 7 --remove-label afk --add-label hitl" "$(sed -n 3p "$work/gh-log")"
+
+printf 'ok marker: fine\n' >"$work/check-ok"
+reset OPEN '["hitl"]'
+out=$(close --failed "$work/check-ok")
+check "failed, no fail lines: usage error" "exit=1" "$(last "$out")"
+check "failed, no fail lines: gh not called" "no" "$([ -f "$work/gh-log" ] && echo yes || echo no)"
+out=$(close --failed "$work/missing")
+check "failed, no such file: usage error" "exit=1" "$(last "$out")"
 
 reset OPEN '["afk"]'
 out=$(CLAUDE_CODE_SESSION_ATTENDED=0; export CLAUDE_CODE_SESSION_ATTENDED; close --declined)
@@ -154,6 +222,18 @@ g "$dist" push -q origin main 2>/dev/null
 reset OPEN '["afk"]'
 out=$(close --declined)
 check "declined after the push: refused, nothing is unpushed" "exit=2" "$(last "$out")"
+
+reset OPEN '["afk"]'
+out=$(close --held)
+check "held after the push: refused, nothing is unpushed" "exit=2" "$(last "$out")"
+check "held after the push: gh not called" "no" "$([ -f "$work/gh-log" ] && echo yes || echo no)"
+
+reset OPEN '["hitl","bug"]'
+out=$(close --pushed)
+check "pushed, held: removes hitl, then closes" "issue view 7 --json state,labels,url
+issue edit 7 --remove-label hitl
+issue close 7 --comment Closed after the Distribution push landed: $dist is even with its upstream at $code." \
+    "$(command cat "$work/gh-log")"
 
 reset OPEN '["afk"]'
 out=$(close --pushed)
@@ -218,6 +298,9 @@ check "no Distribution repo: refused" "exit=2" "$(last "$out")"
 check "usage: both outcomes" "exit=1" "$(last "$(close --pushed --declined)")"
 check "usage: no outcome" "exit=1" "$(last "$(close)")"
 check "usage: --approved with --declined" "exit=1" "$(last "$(close --declined --approved)")"
+check "usage: --approved with --held" "exit=1" "$(last "$(close --held --approved)")"
+check "usage: --held with --declined" "exit=1" "$(last "$(close --held --declined)")"
+check "usage: --failed with no file" "exit=1" "$(last "$(close --failed)")"
 out=$(sh "$scripts/close.sh" --dir "$proj" --id 2da1baa1 --ticket x7 --pushed </dev/null 2>&1; echo "exit=$?")
 check "usage: a ticket that is not a number" "exit=1" "$(last "$out")"
 

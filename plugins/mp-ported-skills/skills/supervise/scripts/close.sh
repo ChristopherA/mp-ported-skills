@@ -1,21 +1,34 @@
 #!/bin/sh
-# close.sh -- settle a stopped worker's ticket once the maintainer has
-# answered its Distribution push (#186).
+# close.sh -- hold a stopped worker's ticket while its Distribution push
+# waits, and settle it once the maintainer has answered (#186, #203).
 #
 # In a Project with a Distribution repo, a worker may not close its ticket
 # while that repo holds commits its upstream lacks: the issue-close grant
 # covers the ticket only after its work is pushed, and the hook and the
 # wrappers hold the close (classify_close_held). The worker ends on
 # `Waiting on: git -C <dist> push origin <branch>; gh issue close <N>`, and
-# Push on approval runs this after the maintainer's answer:
+# Push on approval runs this before it checks the push, then after the
+# check or the maintainer's answer:
 #
-#   --pushed    the push landed: close the ticket, with a comment naming
+#   --held      before the push is checked or asked: the ticket stays open
+#               (reopened if it was closed), is relabelled ready-for-human,
+#               and gets a comment naming the unpushed commits and that the
+#               push waits on the maintainer, so a supervisor session that
+#               ends at any later point leaves a ticket /supervise's next
+#               step does not build again
+#   --pushed    the push landed: remove ready-for-human if the ticket
+#               carries it, then close the ticket, with a comment naming
 #               the pushed commit, under the Project's issue-close grant or
 #               the maintainer's own approval of the close (--approved)
-#   --declined  the push was declined: the ticket stays open (reopened if
-#               it was closed), is relabelled ready-for-human, and gets a
-#               comment naming the unpushed commits, so /supervise's next
-#               step does not build it again
+#   --declined  the push was declined: on a held ticket, a comment says so;
+#               on one not held, it is held as --held holds it, with a
+#               comment that the push was declined
+#   --failed F  `push.sh --check` failed, its output in file F: a comment
+#               gives F's `fail` lines, and the ticket is held as above if
+#               it was not already
+#
+# A ticket is held when it is open, carries ready-for-human and not
+# ready-for-agent.
 #
 # The commands are built from the options, never from the worker's text.
 # Label strings come from DIR's docs/agents/triage-labels.md, as capturing's
@@ -25,7 +38,7 @@
 #   marker        no worker marker in the checkout
 #   distribution  DIR names a Distribution repo (distribution.sh)
 #   upstream      --pushed: the Distribution repo is even with its upstream;
-#                 --declined: it holds commits its upstream lacks
+#                 the others: it holds commits its upstream lacks
 #   grant         --pushed: the Project grants issue-close, or --approved
 #                 was given (then printed as `skip grant: ...`)
 #
@@ -36,17 +49,20 @@
 # `ID <time> issue-close <url>` to the checkout's
 # `git rev-parse --git-path mp-supervise-posted`, which actions.sh reads to
 # name the close as the supervisor's, after the push, and record.sh to keep
-# the worker's wait off the waits on a human. --declined records nothing:
-# the ticket now waits on the maintainer. Both are refused in a background
+# the worker's wait off the waits on a human. --held prints `held open
+# <url>`, --declined and --failed `kept open <url>`; they record nothing:
+# the ticket now waits on the maintainer. All are refused in a background
 # session (CLAUDE_CODE_SESSION_ATTENDED=0), as push.sh and post.sh are,
 # though --check still runs there.
 #
 # Usage:
-#   close.sh --dir DIR --id ID --ticket N (--pushed [--approved] | --declined)
+#   close.sh --dir DIR --id ID --ticket N
+#            (--held | --pushed [--approved] | --declined | --failed FILE)
 #            [--check]
 #
 # Exits 0 when every check passed (and, without --check, the commands ran);
-# 1 on a usage error or in a background session; 2 when a check failed,
+# 1 on a usage error (a --failed FILE that is missing or holds no `fail`
+# line among them) or in a background session; 2 when a check failed,
 # with nothing run; 3 when gh itself failed.
 
 set -u
@@ -58,13 +74,14 @@ DIR=""
 ID=""
 TICKET=""
 OUTCOME=""
+FAILED_FILE=""
 APPROVED=0
 CHECK=0
 
 need_value() { [ $# -ge 2 ] || { printf 'Error: %s needs a value\n' "$1" >&2; exit 1; }; }
 fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 set_outcome() {
-    [ -z "$OUTCOME" ] || [ "$OUTCOME" = "$1" ] || fail "give --pushed or --declined, not both"
+    [ -z "$OUTCOME" ] || [ "$OUTCOME" = "$1" ] || fail "give one of --held, --pushed, --declined or --failed"
     OUTCOME=$1
 }
 while [ $# -gt 0 ]; do
@@ -74,11 +91,13 @@ while [ $# -gt 0 ]; do
         --ticket)   need_value "$@"; TICKET="${2#\#}"; shift 2 ;;
         --pushed)   set_outcome pushed; shift ;;
         --declined) set_outcome declined; shift ;;
+        --held)     set_outcome held; shift ;;
+        --failed)   need_value "$@"; set_outcome failed; FAILED_FILE="$2"; shift 2 ;;
         --approved) APPROVED=1; shift ;;
         --check)    CHECK=1; shift ;;
         --help)
-            printf 'Usage: close.sh --dir DIR --id ID --ticket N (--pushed [--approved] | --declined) [--check]\n'
-            printf 'Closes a worker'\''s ticket after its Distribution push landed, or keeps it open for the maintainer after a declined one.\n'
+            printf 'Usage: close.sh --dir DIR --id ID --ticket N (--held | --pushed [--approved] | --declined | --failed FILE) [--check]\n'
+            printf 'Holds a worker'\''s ticket open for the maintainer while its Distribution push waits, and closes it once the push landed.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
@@ -87,9 +106,15 @@ done
 [ -n "$ID" ] || fail "--id is required"
 [ -n "$TICKET" ] || fail "--ticket is required"
 case $TICKET in *[!0-9]*) fail "--ticket needs an issue number, not '$TICKET'" ;; esac
-[ -n "$OUTCOME" ] || fail "--pushed or --declined is required"
+[ -n "$OUTCOME" ] || fail "one of --held, --pushed, --declined or --failed is required"
 [ "$APPROVED" = 0 ] || [ "$OUTCOME" = pushed ] || fail "--approved goes with --pushed"
 [ -d "$DIR" ] || fail "not a directory: $DIR"
+fail_lines=""
+if [ "$OUTCOME" = failed ]; then
+    [ -f "$FAILED_FILE" ] || fail "--failed needs push.sh --check's output in a file: no file $FAILED_FILE"
+    fail_lines=$(grep '^fail ' "$FAILED_FILE")
+    [ -n "$fail_lines" ] || fail "$FAILED_FILE holds no fail line, so no check failed"
+fi
 if [ "$CHECK" = 0 ] && [ "${CLAUDE_CODE_SESSION_ATTENDED:-1}" = 0 ]; then
     fail "close.sh settles a ticket for the maintainer's attended session; a background session closes only on a standing grant"
 fi
@@ -184,14 +209,23 @@ run issue view "$TICKET" --json state,labels,url
 view=$out
 url=$(printf '%s' "$view" | jq -r '.url // empty')
 [ -n "$url" ] || url=no-url
+agent=$(label_for ready-for-agent)
+human=$(label_for ready-for-human)
+# has_label <label>: the ticket carries it.
+has_label() { printf '%s' "$view" | jq -e --arg l "$1" '[.labels[].name] | index($l)' >/dev/null; }
+state=$(printf '%s' "$view" | jq -r '.state')
+held=0
+[ "$state" = CLOSED ] || ! has_label "$human" || has_label "$agent" || held=1
 
 if [ "$OUTCOME" = pushed ]; then
     printf 'Closed after the Distribution push landed: %s is even with its upstream at %s.\n' "$DIST" "$head_line" >"$body"
-    if [ "$(printf '%s' "$view" | jq -r '.state')" = CLOSED ]; then
+    if [ "$state" = CLOSED ]; then
         # Someone else closed it, so the close is not the supervisor's.
         echo "closed already: #$TICKET"
         exit 0
     fi
+    # Before the close, so a failed edit leaves the ticket held, not closed.
+    ! has_label "$human" || run issue edit "$TICKET" --remove-label "$human"
     run issue close "$TICKET" --comment "$(command cat "$body")"
     echo "closed $url"
     record=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-posted)
@@ -200,16 +234,37 @@ if [ "$OUTCOME" = pushed ]; then
     exit 0
 fi
 
-agent=$(label_for ready-for-agent)
-human=$(label_for ready-for-human)
-[ "$(printf '%s' "$view" | jq -r '.state')" != CLOSED ] || run issue reopen "$TICKET"
-{
-    printf 'The Distribution push was declined, so this ticket stays open and waits on the maintainer (%s). %s holds these commits its upstream lacks:\n\n' "$human" "$DIST"
-    printf '%s\n' "$unpushed" | sed 's/^/- /'
-} >"$body"
+# --held, --declined and --failed: the ticket stays open for the maintainer.
+[ "$state" != CLOSED ] || run issue reopen "$TICKET"
+case $OUTCOME in
+    held)
+        {
+            printf 'The Distribution push is waiting on the maintainer, so this ticket is held open for them (%s) until it lands. %s holds these commits its upstream lacks:\n\n' "$human" "$DIST"
+            printf '%s\n' "$unpushed" | sed 's/^/- /'
+        } >"$body" ;;
+    declined)
+        if [ "$held" = 1 ]; then
+            printf 'The Distribution push was declined, so this ticket stays held for the maintainer (%s). Its unpushed commits are listed in the comment that held it.\n' "$human" >"$body"
+        else
+            {
+                printf 'The Distribution push was declined, so this ticket stays open and waits on the maintainer (%s). %s holds these commits its upstream lacks:\n\n' "$human" "$DIST"
+                printf '%s\n' "$unpushed" | sed 's/^/- /'
+            } >"$body"
+        fi ;;
+    failed)
+        {
+            printf 'The Distribution push was not asked: `push.sh --check` failed, so this ticket stays held for the maintainer (%s). The failed checks:\n\n```\n' "$human"
+            printf '%s\n' "$fail_lines"
+            printf '```\n'
+        } >"$body" ;;
+esac
 run issue comment "$TICKET" --body-file "$body"
 set --
-printf '%s' "$view" | jq -e --arg l "$agent" '[.labels[].name] | index($l)' >/dev/null && set -- "$@" --remove-label "$agent"
-printf '%s' "$view" | jq -e --arg l "$human" '[.labels[].name] | index($l)' >/dev/null || set -- "$@" --add-label "$human"
+! has_label "$agent" || set -- "$@" --remove-label "$agent"
+has_label "$human" || set -- "$@" --add-label "$human"
 [ $# = 0 ] || run issue edit "$TICKET" "$@"
-echo "kept open $url"
+if [ "$OUTCOME" = held ]; then
+    echo "held open $url"
+else
+    echo "kept open $url"
+fi
