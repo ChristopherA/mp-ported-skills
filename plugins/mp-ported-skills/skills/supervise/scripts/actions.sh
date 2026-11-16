@@ -87,7 +87,8 @@
 # each push by worker id and upstream branch. One pushed under the
 # `checked-push` grant, with no question (#188), is labelled
 #   branch <b> pushed by the supervisor under checked-push (<citation>):
-#   <old>..<new>; holds the worker's commits; checks: <ok lines>
+#   <old>..<new>; holds the worker's commits; checks: <ok lines, and a
+#   private repo's `skip ... sweep: private repo` line>
 # and a Distribution repo's (`distribution:<remote/branch>`), whose branches
 # are not in DIR, is listed from the record the same way.
 #

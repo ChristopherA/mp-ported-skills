@@ -34,11 +34,11 @@
 #                 indented. CMD is shell code: give one command, since the
 #                 range is appended to its last one. A repo with nothing to
 #                 push is not swept: `ok sweep: nothing to push`. Nor is a
-#                 repo whose upstream remote is a github.com repo that `gh
-#                 repo view` reports PRIVATE, since nothing in it goes
-#                 public (#210): `skip sweep: private repo`. A remote not on
-#                 GitHub, or a visibility read that fails or prints nothing,
-#                 is swept. With --no-sweep, `skip sweep: --no-sweep given,
+#                 repo whose upstream remote pushes only to github.com repos
+#                 that `gh repo view` reports PRIVATE, since nothing in it
+#                 goes public (#210): `skip sweep: private repo`. A push URL
+#                 not on GitHub, or a visibility read that fails or prints
+#                 nothing, is swept. With --no-sweep, `skip sweep: --no-sweep given,
 #                 the range was not swept`, and no visibility read
 #   test          the --test command in the Project, or the --dist-test
 #                 command in the Distribution repo, run there with sh -c,
@@ -208,9 +208,11 @@ fi
 
 failed=0
 prose_failed=0
-# The ok lines of the repo being checked, joined by "; ", for the record.
+# The ok lines, and a private repo's skip line, of the repo being checked,
+# joined by "; ", for the record.
 rchecks=""
 ok() { printf 'ok %s%s\n' "$label" "$1"; rchecks="${rchecks:+$rchecks; }ok $label$1"; }
+skip() { printf 'skip %s%s\n' "$label" "$1"; rchecks="${rchecks:+$rchecks; }skip $label$1"; }
 bad() { printf 'fail %s%s\n' "$label" "$1"; failed=1; }
 
 # prose_files <repo> <up> <tip>: the paths the range adds, changes or
@@ -240,20 +242,36 @@ github_slug() {
         sed 's/\.git$//'
 }
 
-# repo_private <repo> <remote>: returns 0 only when GitHub reports the
-# remote's repo PRIVATE (#210). The URL is the remote's configured one, read
-# before git's insteadOf rewrites it, since that is the repo it names. A
-# remote not on GitHub, a failed or empty read, or any other visibility
-# returns 1, so a read that goes wrong never makes the sweep quieter.
+# repo_private <repo> <remote>: returns 0 only when every URL the remote
+# pushes to is a github.com repo that GitHub reports PRIVATE (#210). The
+# URLs are the ones `git push` uses: each pushurl, or each url without one,
+# after git's insteadOf and pushInsteadOf rewrites. A rewrite to a path on
+# this machine publishes nothing, so there the configured URL names the
+# repo, as it does in this script's tests. A destination not on GitHub, a
+# failed or empty read, or any other visibility returns 1, so a read that
+# goes wrong never makes the sweep quieter.
 repo_private() {
-    rp_url=$(git -C "$1" config --get "remote.$2.url") || return 1
-    rp_slug=$(github_slug "$rp_url")
-    case $rp_slug in
-        (*/*) ;;
-        (*) return 1 ;;
-    esac
-    rp_vis=$(gh repo view "$rp_slug" --json visibility --jq .visibility </dev/null 2>/dev/null) || return 1
-    [ "$rp_vis" = PRIVATE ]
+    rp_raw=$(git -C "$1" config --get-all "remote.$2.pushurl") ||
+        rp_raw=$(git -C "$1" config --get-all "remote.$2.url") || return 1
+    rp_dest=$(git -C "$1" remote get-url --push --all "$2" 2>/dev/null) || return 1
+    rp_n=$(printf '%s\n' "$rp_raw" | grep -c '^')
+    [ "$rp_n" -gt 0 ] && [ "$rp_n" = "$(printf '%s\n' "$rp_dest" | grep -c '^')" ] || return 1
+    rp_i=0
+    while [ "$rp_i" -lt "$rp_n" ]; do
+        rp_i=$((rp_i + 1))
+        rp_url=$(printf '%s\n' "$rp_dest" | sed -n "${rp_i}p")
+        case $rp_url in
+            (/* | file://*) rp_url=$(printf '%s\n' "$rp_raw" | sed -n "${rp_i}p") ;;
+        esac
+        rp_slug=$(github_slug "$rp_url")
+        case $rp_slug in
+            (?*/?*) ;;
+            (*) return 1 ;;
+        esac
+        # Named with its host, so GH_HOST cannot point the read elsewhere.
+        rp_vis=$(gh repo view "github.com/$rp_slug" --json visibility --jq .visibility </dev/null 2>/dev/null) || return 1
+        [ "$rp_vis" = PRIVATE ] || return 1
+    done
 }
 
 # check_repo <repo> <start> <label> <test>: print the repo's push line, commits and
@@ -359,8 +377,7 @@ check_repo() {
         ok "sweep: nothing to push"
     elif repo_private "$repo" "$remote"; then
         # The sweep guards text that goes public, and none of this does.
-        echo "skip ${label}sweep: private repo"
-        rchecks="${rchecks:+$rchecks; }skip ${label}sweep: private repo"
+        skip "sweep: private repo"
     else
         swept=$(CDPATH= cd -- "$repo" && sh -c "$SWEEP"' --range "$1"' sh "$up..$tip" </dev/null 2>&1)
         rc=$?

@@ -577,7 +577,7 @@ dist_test_refused "project test fails, dist passes" "fail project test: $suite_c
 command rm -f "$work/suite-fail"
 
 # --- a private repo is not swept (#210) ------------------------------------
-# The fake gh answers `gh repo view <owner>/<repo> --json visibility --jq
+# The fake gh answers `gh repo view github.com/<owner>/<repo> --json visibility --jq
 # .visibility` from $work/vis/<owner>_<repo>, and logs each call to
 # $work/gh-log. With no such file it exits 1 and prints nothing, as a failed
 # read does; a file holding EMPTY prints nothing and exits 0. Any other call
@@ -587,7 +587,8 @@ cat >"$work/ghbin/gh" <<EOF
 #!/bin/sh
 printf '%s\n' "\$*" >>"$work/gh-log"
 [ "\$1 \$2" = "repo view" ] && [ "\$4 \$5 \$6 \$7" = "--json visibility --jq .visibility" ] && [ \$# = 7 ] || exit 1
-f="$work/vis/\$(printf '%s' "\$3" | tr / _)"
+case \$3 in (github.com/*) ;; (*) exit 1 ;; esac
+f="$work/vis/\$(printf '%s' "\${3#github.com/}" | tr / _)"
 [ -f "\$f" ] || exit 1
 v=\$(command cat "\$f")
 [ "\$v" = EMPTY ] || printf '%s\n' "\$v"
@@ -620,8 +621,8 @@ check "private project: exits 0" "0" "$?"
 check "private project: its sweep is skipped, the Distribution repo's runs" "skip project sweep: private repo
 ok distribution sweep: clean over $(dshort "$dist_start")..$(dshort "$dist_head")" "$(printf '%s\n' "$out" | grep ' sweep: ')"
 check "private project: only the Distribution repo is swept" "$dist" "$(swept_in)"
-check "private project: each repo's visibility read" "repo view o/proj$n --json visibility --jq .visibility
-repo view o/dist$n --json visibility --jq .visibility" "$(gh_log)"
+check "private project: each repo's visibility read" "repo view github.com/o/proj$n --json visibility --jq .visibility
+repo view github.com/o/dist$n --json visibility --jq .visibility" "$(gh_log)"
 out=$(gdpush --sweep "$sweep")
 check "private project push: exits 0" "0" "$?"
 check "private project push: both pushed" "$head $dist_head" "$(git -C "$remote" rev-parse main) $(git -C "$dist_remote" rev-parse main)"
@@ -642,9 +643,9 @@ for form in "https://github.com/o/solo.git" "https://github.com/o/solo" "git@git
     on_github "$project" "$remote" "$form" PRIVATE
     out=$(gpush --check --sweep "$sweep")
     check "private repo $form: skipped" "0 skip sweep: private repo" "$? $(printf '%s\n' "$out" | grep 'sweep: ')"
-    check "private repo $form: read as o/solo" "repo view o/solo --json visibility --jq .visibility" "$(gh_log)"
+    check "private repo $form: not swept" "not swept" "$(swept_in)"
+    check "private repo $form: read as o/solo" "repo view github.com/o/solo --json visibility --jq .visibility" "$(gh_log)"
 done
-check "private repo: not swept" "not swept" "$(swept_in)"
 out=$(gpush --sweep "$sweep")
 check "private repo push: exits 0" "0" "$?"
 check "private repo push: pushed" "$head" "$(git -C "$remote" rev-parse main)"
@@ -669,7 +670,7 @@ for vis in unread EMPTY INTERNAL public; do
     fi
     out=$(gpush --check --sweep "$sweep")
     check "visibility $vis: swept" "0 ok sweep: clean over $(short "$start")..$(short "$head")" "$? $(printf '%s\n' "$out" | grep 'sweep: ')"
-    check "visibility $vis: read once" "repo view o/v$n --json visibility --jq .visibility" "$(gh_log)"
+    check "visibility $vis: read once" "repo view github.com/o/v$n --json visibility --jq .visibility" "$(gh_log)"
 done
 
 # A remote not on github.com is swept with no gh call: the scratch remote's
@@ -684,6 +685,46 @@ for url in "" "https://gitlab.com/o/r.git" "git@github.example.com:o/r.git" "htt
     check "not GitHub ${url:-local}: no gh call" "no gh call" "$(gh_log)"
     command rm -f "$work/vis/o_r"
 done
+
+# The sweep follows where the push goes: a public pushurl, a pushurl or a
+# pushInsteadOf rewrite off GitHub, or one private and one public pushurl,
+# each beside a private url, is swept. A rewrite to a path on this machine
+# reads the configured URL, as on_github's fixtures do.
+for case in public-pushurl gitlab-pushurl pushinsteadof two-pushurls; do
+    new_project
+    on_github "$project" "$remote" "https://github.com/o/pv$n.git" PRIVATE
+    case $case in
+        (public-pushurl)
+            repo_git "$project" config remote.origin.pushurl "https://github.com/o/pub$n.git"
+            printf 'PUBLIC\n' >"$work/vis/o_pub$n" ;;
+        (gitlab-pushurl)
+            repo_git "$project" config remote.origin.pushurl "https://gitlab.com/o/pv$n.git" ;;
+        (pushinsteadof)
+            repo_git "$project" config url.https://gitlab.com/o/.pushInsteadOf https://github.com/o/ ;;
+        (two-pushurls)
+            repo_git "$project" config remote.origin.pushurl "https://github.com/o/pv$n.git"
+            repo_git "$project" config --add remote.origin.pushurl "https://github.com/o/pub$n.git"
+            printf 'PUBLIC\n' >"$work/vis/o_pub$n" ;;
+    esac
+    out=$(gpush --check --sweep "$sweep")
+    check "push destination $case: swept" "0 ok sweep: clean over $(short "$start")..$(short "$head")" "$? $(printf '%s\n' "$out" | grep 'sweep: ')"
+done
+# Every push URL private: skipped.
+new_project
+on_github "$project" "$remote" "https://github.com/o/pa$n.git" PRIVATE
+repo_git "$project" config remote.origin.pushurl "https://github.com/o/pa$n.git"
+repo_git "$project" config --add remote.origin.pushurl "https://github.com/o/pb$n.git"
+printf 'PRIVATE\n' >"$work/vis/o_pb$n"
+out=$(gpush --check --sweep "$sweep")
+check "two private pushurls: skipped" "0 skip sweep: private repo" "$? $(printf '%s\n' "$out" | grep 'sweep: ')"
+check "two private pushurls: both read" "repo view github.com/o/pa$n --json visibility --jq .visibility
+repo view github.com/o/pb$n --json visibility --jq .visibility" "$(gh_log)"
+# GH_HOST cannot point the read at another host: the repo is named with its
+# host, and the fake refuses one without it.
+new_project
+on_github "$project" "$remote" "https://github.com/o/gh$n.git" PRIVATE
+out=$( (export GH_HOST=ghe.example.com; gpush --check --sweep "$sweep") )
+check "GH_HOST set: still read on github.com" "skip sweep: private repo" "$(printf '%s\n' "$out" | grep 'sweep: ')"
 
 # --no-sweep and an empty range make no visibility read.
 new_project
