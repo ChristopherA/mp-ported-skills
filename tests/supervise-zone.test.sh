@@ -137,6 +137,23 @@ check "compact: a 1M model exits 0" "0" "$rc"
 check "compact: a [1m] model id is a 1M window" "compact point 533% of zone (80% of a 1000k window)
 capture due at 100% of zone, forced at 108%" \
     "$(compact 'claude-sonnet-5[1m]')"
+# The models #226's triage probe read at a 1M contextWindow, plain and dated.
+for m in claude-sonnet-5 claude-sonnet-5-5 claude-haiku-5-5 claude-sonnet-5-20261001; do
+    out=$(compact "$m"); rc=$?
+    check "compact: $m is a 1M window, with no note" "compact point 533% of zone (80% of a 1000k window)
+capture due at 100% of zone, forced at 108%" "$out"
+    check "compact: $m exits 0" "0" "$rc"
+done
+check "compact: claude-sonnet-5 holds a 225k zone" "compact point 355% of zone (80% of a 1000k window)
+capture due at 100% of zone, forced at 108%" \
+    "$( (export MP_SMART_ZONE_K=225; compact claude-sonnet-5) )"
+check "compact: claude-sonnet-5's dated form does not take in an unobserved claude-sonnet-5-6" "note: the context window of model claude-sonnet-5-6 is not known, so the smallest, 200k, is used" \
+    "$(compact claude-sonnet-5-6 | sed -n 1p)"
+check "compact: a 200k model is not matched by a 1M one's prefix" "note: the context window of model claude-sonnet-4-5 is not known, so the smallest, 200k, is used" \
+    "$(compact claude-sonnet-4-5 | sed -n 1p)"
+check "compact: an alias is an unknown window, and the note asks for the full id" "note: the context window of model opus is not known, so the smallest, 200k, is used; give the full model id (claude-...), since an alias names no fixed window
+compact point 106% of zone (80% of a 200k window)
+capture due at 64% of zone, forced at 72%" "$(compact opus)"
 out=$(compact claude-made-up-1); rc=$?
 check "compact: an unknown window is read as 200k, and says so" "note: the context window of model claude-made-up-1 is not known, so the smallest, 200k, is used
 compact point 106% of zone (80% of a 200k window)

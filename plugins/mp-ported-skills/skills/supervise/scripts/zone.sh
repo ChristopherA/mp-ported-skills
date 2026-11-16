@@ -53,7 +53,8 @@
 # or refuses, exit 1, when the force point plus ZONE_MARGIN_K reaches it: the
 # session could compact before a poll saw it due. A model whose window is
 # not known, or an empty MODEL, is read as the smallest window, 200k, with a
-# `note:` line on stderr saying so.
+# `note:` line on stderr saying so; for an alias (no claude- prefix) the
+# note also says to give the full model id.
 #
 # Usage:
 #   zone.sh (--id ID | --session SESSION | --transcript FILE) [--due [--model MODEL] [--pid PID]]
@@ -162,7 +163,13 @@ if [ -n "$HAS_COMPACT" ]; then
     elif [ -z "$COMPACT" ]; then
         printf "note: the worker's model is not known, so the smallest context window, %sk, is used\n" "$window_k" >&2
     else
-        printf 'note: the context window of model %s is not known, so the smallest, %sk, is used\n' "$COMPACT" "$window_k" >&2
+        # An id without the claude- prefix is an alias (opus, sonnet), which
+        # compact.sh leaves out of its table: say to pass the full id.
+        case $COMPACT in
+            claude-*) hint= ;;
+            *) hint='; give the full model id (claude-...), since an alias names no fixed window' ;;
+        esac
+        printf 'note: the context window of model %s is not known, so the smallest, %sk, is used%s\n' "$COMPACT" "$window_k" "$hint" >&2
     fi
     point="$((window_k * override / zone_k))% of zone ($override% of a ${window_k}k window)"
     # The force point's tokens plus the margin, against the window's share,
