@@ -576,6 +576,127 @@ printf '%s\n' "$project" >"$work/suite-fail"
 dist_test_refused "project test fails, dist passes" "fail project test: $suite_cmd"
 command rm -f "$work/suite-fail"
 
+# --- a private repo is not swept (#210) ------------------------------------
+# The fake gh answers `gh repo view <owner>/<repo> --json visibility --jq
+# .visibility` from $work/vis/<owner>_<repo>, and logs each call to
+# $work/gh-log. With no such file it exits 1 and prints nothing, as a failed
+# read does; a file holding EMPTY prints nothing and exits 0. Any other call
+# fails.
+mkdir -p "$work/ghbin" "$work/vis"
+cat >"$work/ghbin/gh" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >>"$work/gh-log"
+[ "\$1 \$2" = "repo view" ] && [ "\$4 \$5 \$6 \$7" = "--json visibility --jq .visibility" ] && [ \$# = 7 ] || exit 1
+f="$work/vis/\$(printf '%s' "\$3" | tr / _)"
+[ -f "\$f" ] || exit 1
+v=\$(command cat "\$f")
+[ "\$v" = EMPTY ] || printf '%s\n' "\$v"
+EOF
+chmod +x "$work/ghbin/gh"
+check "visibility: the fake gh is found first" "$work/ghbin/gh" "$(PATH="$work/ghbin:$PATH"; command -v gh)"
+gpush() { (PATH="$work/ghbin:$PATH"; export PATH; push "$@"); }
+gdpush() { (PATH="$work/ghbin:$PATH"; export PATH; dpush "$@"); }
+# on_github <repo> <local remote> <url> [visibility]: origin's URL reads
+# <url>, while git's insteadOf still takes fetch and push to the local bare
+# remote; the repo's visibility is [visibility], or unreadable without it.
+on_github() {
+    repo_git "$1" config remote.origin.url "$3"
+    repo_git "$1" config "url.$2.insteadOf" "$3"
+    slug=$(printf '%s\n' "$3" | sed -e 's#^.*github\.com[:/]##' -e 's#\.git$##' | tr / _)
+    command rm -f "$work/vis/$slug"
+    [ $# -lt 4 ] || printf '%s\n' "$4" >"$work/vis/$slug"
+    command rm -f "$work/gh-log"
+}
+gh_log() { if [ -f "$work/gh-log" ]; then command cat "$work/gh-log"; else echo "no gh call"; fi; }
+swept_in() { if [ -f "$work/sweep-log" ]; then cut -d ' ' -f 1 "$work/sweep-log"; else echo "not swept"; fi; }
+
+# A private Project with a public Distribution repo: only the public one is
+# swept, and both push.
+new_dist 1
+on_github "$project" "$remote" "https://github.com/o/proj$n.git" PRIVATE
+on_github "$dist" "$dist_remote" "git@github.com:o/dist$n.git" PUBLIC
+out=$(gdpush --check --sweep "$sweep")
+check "private project: exits 0" "0" "$?"
+check "private project: its sweep is skipped, the Distribution repo's runs" "skip project sweep: private repo
+ok distribution sweep: clean over $(dshort "$dist_start")..$(dshort "$dist_head")" "$(printf '%s\n' "$out" | grep ' sweep: ')"
+check "private project: only the Distribution repo is swept" "$dist" "$(swept_in)"
+check "private project: each repo's visibility read" "repo view o/proj$n --json visibility --jq .visibility
+repo view o/dist$n --json visibility --jq .visibility" "$(gh_log)"
+out=$(gdpush --sweep "$sweep")
+check "private project push: exits 0" "0" "$?"
+check "private project push: both pushed" "$head $dist_head" "$(git -C "$remote" rev-parse main) $(git -C "$dist_remote" rev-parse main)"
+
+# A public Project with a private Distribution repo.
+new_dist 1
+on_github "$project" "$remote" "ssh://git@github.com/o/proj$n.git" PUBLIC
+on_github "$dist" "$dist_remote" "https://github.com/o/dist$n" PRIVATE
+out=$(gdpush --check --sweep "$sweep")
+check "private dist: exits 0" "0" "$?"
+check "private dist: the Project is swept, the Distribution repo skipped" "ok project sweep: clean over $(short "$start")..$(short "$head")
+skip distribution sweep: private repo" "$(printf '%s\n' "$out" | grep ' sweep: ')"
+check "private dist: only the Project is swept" "$project" "$(swept_in)"
+
+# A single private repo, in each URL form GitHub gives.
+for form in "https://github.com/o/solo.git" "https://github.com/o/solo" "git@github.com:o/solo.git" "git@github.com:o/solo" "ssh://git@github.com/o/solo.git" "ssh://git@github.com/o/solo"; do
+    new_project
+    on_github "$project" "$remote" "$form" PRIVATE
+    out=$(gpush --check --sweep "$sweep")
+    check "private repo $form: skipped" "0 skip sweep: private repo" "$? $(printf '%s\n' "$out" | grep 'sweep: ')"
+    check "private repo $form: read as o/solo" "repo view o/solo --json visibility --jq .visibility" "$(gh_log)"
+done
+check "private repo: not swept" "not swept" "$(swept_in)"
+out=$(gpush --sweep "$sweep")
+check "private repo push: exits 0" "0" "$?"
+check "private repo push: pushed" "$head" "$(git -C "$remote" rev-parse main)"
+
+# A public repo is swept as before, and a hit still pushes nothing.
+new_project
+on_github "$project" "$remote" "https://github.com/o/pub$n.git" PUBLIC
+touch "$work/sweep-hit"
+out=$(gpush --sweep "$sweep")
+check "public repo hit: exits 2" "2" "$?"
+check "public repo hit: the sweep fails" "fail sweep: exit 1 over $(short "$start")..$(short "$head")" "$(printf '%s\n' "$out" | grep '^fail')"
+check "public repo hit: nothing pushed" "$start" "$(git -C "$remote" rev-parse main)"
+command rm -f "$work/sweep-hit"
+
+# A failed read, an empty one, or any other visibility is swept.
+for vis in unread EMPTY INTERNAL public; do
+    new_project
+    if [ "$vis" = unread ]; then
+        on_github "$project" "$remote" "https://github.com/o/v$n.git"
+    else
+        on_github "$project" "$remote" "https://github.com/o/v$n.git" "$vis"
+    fi
+    out=$(gpush --check --sweep "$sweep")
+    check "visibility $vis: swept" "0 ok sweep: clean over $(short "$start")..$(short "$head")" "$? $(printf '%s\n' "$out" | grep 'sweep: ')"
+    check "visibility $vis: read once" "repo view o/v$n --json visibility --jq .visibility" "$(gh_log)"
+done
+
+# A remote not on github.com is swept with no gh call: the scratch remote's
+# own path, another host, and a GitHub-looking name on another host.
+for url in "" "https://gitlab.com/o/r.git" "git@github.example.com:o/r.git" "https://github.com.evil.example/o/r.git" "https://github.com/o/r/extra.git"; do
+    new_project
+    command rm -f "$work/gh-log"
+    [ -z "$url" ] || on_github "$project" "$remote" "$url"
+    printf 'PRIVATE\n' >"$work/vis/o_r"
+    out=$(gpush --check --sweep "$sweep")
+    check "not GitHub ${url:-local}: swept" "0 ok sweep: clean over $(short "$start")..$(short "$head")" "$? $(printf '%s\n' "$out" | grep 'sweep: ')"
+    check "not GitHub ${url:-local}: no gh call" "no gh call" "$(gh_log)"
+    command rm -f "$work/vis/o_r"
+done
+
+# --no-sweep and an empty range make no visibility read.
+new_project
+on_github "$project" "$remote" "https://github.com/o/ns$n.git" PRIVATE
+out=$(gpush --check --no-sweep)
+check "private, --no-sweep: its own skip line" "skip sweep: --no-sweep given, the range was not swept" "$(printf '%s\n' "$out" | grep 'sweep: ')"
+check "private, --no-sweep: no gh call" "no gh call" "$(gh_log)"
+new_dist
+on_github "$project" "$remote" "https://github.com/o/empty$n.git" PRIVATE
+out=$(gdpush --check --sweep "$sweep")
+check "private, nothing to push: as before" "ok project sweep: nothing to push" "$(printf '%s\n' "$out" | grep 'project sweep: ')"
+check "private, nothing to push: no gh call" "no gh call" "$(gh_log)"
+
 # --- --checked: the checked push under a checked-push grant (#188) ---------
 printf '# Supervision\n\n## Grants\n\n- checked-push: code-only pushes\n' >"$work/grants"
 pushed_record() { command cat "$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-pushed)"; }
@@ -598,7 +719,7 @@ out=$(push --checked --check --sweep "$sweep")
 check "checked, no --test: refused" "1 Error: --checked needs --test: a checked push counts on the suite passing" \
     "$? $(printf '%s\n' "$out" | tail -n 1)"
 out=$(push --checked --check --no-sweep --test "$suite_cmd")
-check "checked, --no-sweep: refused" "1 Error: --checked needs --sweep: a checked push is not read by anyone, so its range is swept" \
+check "checked, --no-sweep: refused" "1 Error: --checked needs --sweep: a checked push is not read by anyone, so each public repo's range is swept" \
     "$? $(printf '%s\n' "$out" | tail -n 1)"
 
 # All ok, code only: the check passes with a prose line, and the push lands
@@ -741,6 +862,22 @@ end" "$(printf '%s\n' "$out" | sed 's/ (checked-push.*//')"
 new_dist
 out=$(dpush --checked --check --sweep "$sweep" --test "$suite_cmd" --dist-test "$suite_cmd")
 check "checked dist only: the Project's prose line" "0 ok project prose: nothing to push" "$? $(printf '%s\n' "$out" | grep '^ok project prose')"
+
+# A private Project still needs --sweep, and its record shows the skip
+# (#210).
+new_dist 1
+on_github "$project" "$remote" "https://github.com/o/cproj$n.git" PRIVATE
+on_github "$dist" "$dist_remote" "https://github.com/o/cdist$n.git" PUBLIC
+out=$(gdpush --checked --check --no-sweep --test "$suite_cmd" --dist-test "$suite_cmd")
+check "checked private, --no-sweep: refused" "1 Error: --checked needs --sweep: a checked push is not read by anyone, so each public repo's range is swept" \
+    "$? $(printf '%s\n' "$out" | tail -n 1)"
+out=$(gdpush --checked --sweep "$sweep" --test "$suite_cmd" --dist-test "$suite_cmd")
+check "checked private push: exits 0" "0" "$?"
+check "checked private push: both pushed" "$head $dist_head" "$(git -C "$remote" rev-parse main) $(git -C "$dist_remote" rev-parse main)"
+check "checked private push: the Project's record holds the skip" "skip project sweep: private repo" \
+    "$(pushed_record | grep -v '^[^ ]* distribution:' | awk -F "$TAB" '{ print $3 }' | tr ';' '\n' | sed 's/^ //' | grep 'sweep')"
+check "checked private push: the Distribution repo's record holds its sweep" "ok distribution sweep: clean over $(dshort "$dist_start")..$(dshort "$dist_head")" \
+    "$(pushed_record | grep '^[^ ]* distribution:' | awk -F "$TAB" '{ print $3 }' | tr ';' '\n' | sed 's/^ //' | grep 'sweep')"
 command rm -f "$work/grants"
 
 echo "supervise-push: $pass passed, $fail failed"

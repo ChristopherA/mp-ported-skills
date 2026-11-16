@@ -13,12 +13,14 @@
 # repo checked and pushed too (#141): the same checks over its current
 # branch, from DIST_START, the commit the worker started from there (the
 # snapshot's `dist head` line). Every check runs in both repos before
-# anything is pushed, and a failure in either pushes neither. A repo with
+# anything is pushed, but for the sweep, which skips a private repo, and a
+# failure in either pushes neither. A repo with
 # nothing to push is passed over, as long as the other has something. Each
 # line then names its repo after its first word: `push project ...`,
 # `commit distribution ...`, `ok project marker: ...`.
 #
-# Checks, each printed as `ok <check>: ...` or `fail <check>: ...`:
+# Checks, each printed as `ok <check>: ...` or `fail <check>: ...`, or a
+# skipped sweep as `skip <check>: ...`:
 #   marker        no worker marker in the checkout (the worker was stopped
 #                 and release.sh run)
 #   tree          no uncommitted or untracked paths
@@ -31,7 +33,13 @@
 #                 UP..HEAD` appended, exits 0; on a hit its output follows,
 #                 indented. CMD is shell code: give one command, since the
 #                 range is appended to its last one. A repo with nothing to
-#                 push is not swept: `ok sweep: nothing to push`
+#                 push is not swept: `ok sweep: nothing to push`. Nor is a
+#                 repo whose upstream remote is a github.com repo that `gh
+#                 repo view` reports PRIVATE, since nothing in it goes
+#                 public (#210): `skip sweep: private repo`. A remote not on
+#                 GitHub, or a visibility read that fails or prints nothing,
+#                 is swept. With --no-sweep, `skip sweep: --no-sweep given,
+#                 the range was not swept`, and no visibility read
 #   test          the --test command in the Project, or the --dist-test
 #                 command in the Distribution repo, run there with sh -c,
 #                 exits 0: `ok test: CMD`. On a failure, `fail test: CMD`
@@ -71,7 +79,8 @@
 # --sweep, --test, and --dist-test with a Distribution repo, since the push
 # goes unread on the strength of those checks; it adds the prose check, and
 # records each push with ` checked-push`, a tab, the grant's citation, a
-# tab, and that repo's check lines joined by `; `, after the time.
+# tab, and that repo's `ok` lines and private-repo `skip` line joined by
+# `; `, after the time.
 #
 # Usage:
 #   push.sh --dir DIR --id ID --start SHA [--dist-start SHA] (--sweep CMD | --no-sweep)
@@ -183,7 +192,7 @@ fi
 
 CITATION=""
 if [ "$CHECKED" = 1 ]; then
-    [ "$NO_SWEEP" = 0 ] || fail "--checked needs --sweep: a checked push is not read by anyone, so its range is swept"
+    [ "$NO_SWEEP" = 0 ] || fail "--checked needs --sweep: a checked push is not read by anyone, so each public repo's range is swept"
     [ -n "$TEST" ] || fail "--checked needs --test: a checked push counts on the suite passing"
     [ -z "$DIST" ] || [ -n "$DIST_TEST" ] ||
         fail "--checked needs --dist-test: $DIR names Distribution repo $DIST, and a checked push counts on its suite passing"
@@ -219,6 +228,32 @@ prose_files() {
 # version_parts <version>: "major minor patch", or empty when not X.Y.Z.
 version_parts() {
     printf '%s\n' "$1" | sed -n 's/^\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\)$/\1 \2 \3/p'
+}
+
+# github_slug <url>: "owner/repo" when <url> is a github.com repo in one of
+# the forms GitHub gives (git@github.com:, ssh://git@github.com/,
+# https://github.com/, each with or without .git), else nothing. Any other
+# host, GitHub Enterprise included, is not GitHub.
+github_slug() {
+    printf '%s\n' "$1" |
+        sed -n -E 's#^(git@github\.com:|ssh://git@github\.com/|https://github\.com/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)$#\2#p' |
+        sed 's/\.git$//'
+}
+
+# repo_private <repo> <remote>: returns 0 only when GitHub reports the
+# remote's repo PRIVATE (#210). The URL is the remote's configured one, read
+# before git's insteadOf rewrites it, since that is the repo it names. A
+# remote not on GitHub, a failed or empty read, or any other visibility
+# returns 1, so a read that goes wrong never makes the sweep quieter.
+repo_private() {
+    rp_url=$(git -C "$1" config --get "remote.$2.url") || return 1
+    rp_slug=$(github_slug "$rp_url")
+    case $rp_slug in
+        (*/*) ;;
+        (*) return 1 ;;
+    esac
+    rp_vis=$(gh repo view "$rp_slug" --json visibility --jq .visibility </dev/null 2>/dev/null) || return 1
+    [ "$rp_vis" = PRIVATE ]
 }
 
 # check_repo <repo> <start> <label> <test>: print the repo's push line, commits and
@@ -322,6 +357,10 @@ check_repo() {
     elif [ "$ahead" = 0 ]; then
         # An empty range has nothing to sweep, and a sweep may refuse one.
         ok "sweep: nothing to push"
+    elif repo_private "$repo" "$remote"; then
+        # The sweep guards text that goes public, and none of this does.
+        echo "skip ${label}sweep: private repo"
+        rchecks="${rchecks:+$rchecks; }skip ${label}sweep: private repo"
     else
         swept=$(CDPATH= cd -- "$repo" && sh -c "$SWEEP"' --range "$1"' sh "$up..$tip" </dev/null 2>&1)
         rc=$?
