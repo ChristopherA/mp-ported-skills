@@ -122,7 +122,7 @@ check "open, other window: names the window that holds the pane" "viewer iterm p
 close: view.sh --close --pane 'F1C3A2B4-0D6E 28142 1'" "$out"
 check "open, other window: checks the pane there" "classify --session F1C3A2B4-0D6E --window 28142 --tab 1" "$(calls | grep '^classify')"
 # A match on part of the id is another pane, not this one.
-echo "F1C3A2B4-0D6E-9 28142 1 zsh" >"$fake/find"
+echo "F1C3A2B4-0D6E-9 28142 1" >"$fake/find"
 out=$(view --iterm --id $id --dir "$project"); rc=$?
 check "open, only a longer id matches: the pane is gone" "Error: claude attach $id exited at once, so no viewer is open; watch with claude attach $id" "$out"
 check "open, only a longer id matches: nothing classified or closed" 0 "$(calls | grep -c '^classify\|^close')"
@@ -152,7 +152,7 @@ calls >/dev/null
 touch "$fake/find-none"
 out=$(view --iterm --id $id --dir "$project"); rc=$?
 check "split, send fails, pane gone: exit 1" 1 "$rc"
-check "split, send fails, pane gone: no pane is open" "Error: no iTerm2 pane opened (pane-send.sh: no pane with session F1C3A2B4-0D6E in tab 2 of window 4242 (closed, or wrong coordinates)); watch with claude attach $id" "$out"
+check "split, send fails, pane gone: says the pane has closed" "Error: claude attach did not start in the pane iTerm2 split (pane-send.sh: no pane with session F1C3A2B4-0D6E in tab 2 of window 4242 (closed, or wrong coordinates)), and the pane has closed; watch with claude attach $id" "$out"
 check "split, send fails, pane gone: closes nothing" 0 "$(calls | grep -c '^close')"
 command rm -f "$fake/find-none"
 touch "$fake/find-fails"
@@ -193,7 +193,7 @@ check "close, already gone: exit 0" 0 "$rc"
 check "close, already gone: says so" "pane F1C3A2B4-0D6E already closed" "$out"
 check "close, already gone: closes nothing" 0 "$(calls | grep -c '^close')"
 command rm -f "$fake/find-none"
-echo "F1C3A2B4-0D6E-9 28142 1 zsh" >"$fake/find"
+echo "F1C3A2B4-0D6E-9 28142 1" >"$fake/find"
 out=$(view --close --pane 'F1C3A2B4-0D6E 4242 2'); rc=$?
 check "close, only a longer id matches: already closed" "pane F1C3A2B4-0D6E already closed" "$out"
 check "close, only a longer id matches: closes nothing" 0 "$(calls | grep -c '^close')"

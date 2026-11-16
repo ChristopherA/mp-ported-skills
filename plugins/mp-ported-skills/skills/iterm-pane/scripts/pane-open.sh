@@ -96,6 +96,8 @@ APPLESCRIPT
     exit 1
 fi
 
+# Printed before the command is typed, so a caller learns of a split pane
+# even when typing into it fails (supervise's view.sh closes it, #200).
 printf "%s\n" "$RESULT"
 
 if [ -n "$COMMAND" ]; then

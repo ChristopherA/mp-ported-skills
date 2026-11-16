@@ -524,6 +524,24 @@ check "open --command: prints the coordinates" 'NEW-1 7 2' "$(out)"
 check "open --command: typed into the new pane" 1 \
     "$(sent | grep -c 'tell session id "NEW-1" of tab 2 of window id 7 to write text "ls -la"')"
 
+# The split worked and typing the command failed: the coordinates are still
+# printed first, which supervise's view.sh reads to close the pane (#200).
+command cat > "$work/osa-send-fails" <<'EOF'
+#!/bin/sh
+case "$*" in
+    *'write text'*) printf '%s\n' "execution error: iTerm got an error: Can't get session id \"NEW-1\". (-1728)" >&2; exit 1 ;;
+esac
+command cat "$FAKE_OSA_OUT"
+EOF
+chmod +x "$work/osa-send-fails"
+reset; answer 'NEW-1 7 2'
+( mkdir -p "$work/bin2" && command cp -f "$work/osa-send-fails" "$work/bin2/osascript" &&
+  PATH="$work/bin2:$PATH" && export PATH && run pane-open.sh --command 'ls -la'
+  printf '%s\n' "$rc" > "$work/rc" )
+check "open --command, send fails: exit 1" 1 "$(command cat "$work/rc")"
+check "open --command, send fails: the coordinates come first" 'NEW-1 7 2' "$(out)"
+check "open --command, send fails: then why" 'pane-send.sh: no pane with session NEW-1 in tab 2 of window 7 (closed, or wrong coordinates)' "$(err)"
+
 reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
 run pane-open.sh
 check "open, iTerm2 fails: exit 1" 1 "$rc"

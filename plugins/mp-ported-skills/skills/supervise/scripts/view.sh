@@ -155,8 +155,9 @@ pane_locate() {
 
 if [ -n "$CLOSE" ] && [ -n "$PANE" ]; then
     pane_coords "$PANE" || fail "--pane needs 'SESSION WINDOW TAB', not '$PANE'"
-    [ -f "$panes/pane-close.sh" ] && [ -f "$panes/pane-find.sh" ] ||
-        fail "no iterm-pane scripts in ${panes:-the iterm-pane skill}"
+    for s in pane-find.sh pane-close.sh; do
+        [ -f "$panes/$s" ] || fail "no iterm-pane scripts in ${panes:-the iterm-pane skill}"
+    done
     pane_locate
     case $? in
         0) pane_close || fail "iTerm2 could not close pane $PANE_SESSION"
@@ -204,14 +205,13 @@ if [ -n "$ITERM" ]; then
         # first line of coordinates means a pane is open with no viewer in it.
         if pane_coords "$(printf '%s\n' "$coords" | head -n 1)"; then
             why=$(printf '%s\n' "$coords" | sed -n '2p' | sed 's/^Error: //')
-            why=${why:-pane-open.sh failed}
+            split="claude attach did not start in the pane iTerm2 split (${why:-pane-open.sh failed})"
             pane_locate
             case $? in
-                0) pane_close &&
-                       fail_watch "claude attach did not start in the pane iTerm2 split ($why), so the pane was closed"
-                   fail_watch "claude attach did not start in the pane iTerm2 split ($why), and it could not be closed: view.sh --close --pane '$PANE_SESSION $PANE_WINDOW $PANE_TAB'" ;;
-                1) fail_watch "no iTerm2 pane opened ($why)" ;;
-                *) fail_watch "claude attach did not start in the pane iTerm2 split ($why), and iTerm2 could not say where pane $PANE_SESSION is ($pane_why), so it may still be open" ;;
+                0) pane_close && fail_watch "$split, so the pane was closed"
+                   fail_watch "$split, and it could not be closed: view.sh --close --pane '$PANE_SESSION $PANE_WINDOW $PANE_TAB'" ;;
+                1) fail_watch "$split, and the pane has closed" ;;
+                *) fail_watch "$split, and iTerm2 could not say where pane $PANE_SESSION is ($pane_why), so it may still be open" ;;
             esac
         fi
         why=$(printf '%s\n' "$coords" | head -n 1 | sed 's/^Error: //')
