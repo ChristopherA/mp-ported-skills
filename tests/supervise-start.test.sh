@@ -59,7 +59,7 @@ check "SKILL.md gives the claude-supervise function" yes \
 # Under bash, not sh: a function name with a hyphen is fine in zsh and bash
 # but refused by POSIX sh, which macOS /bin/sh enforces.
 args_of() { # <args to the function...> -- claude's arguments, one per line
-    bash -c 'claude() { printf "%s\n" "$@"; }; eval "$1"; shift; claude-supervise "$@"' \
+    env -u BASH_ENV bash -c 'claude() { printf "%s\n" "$@"; }; eval "$1"; shift; claude-supervise "$@"' \
         _ "$fn" "$@"
 }
 nl='
@@ -87,8 +87,14 @@ check "the app route says why same-dir" yes \
     "$(contains "$skill" 'saves its spawn mode for the folder')"
 check "the app route says the file takes the exclude list" yes \
     "$(contains "$skill" '`claudeMdExcludes`')"
-check "the app route no longer puts the deny in the folder's settings" no \
-    "$(contains "$skill" 'put the deny in the settings of the folder the server runs in')"
+check "the app route says auto-compact stays off" yes \
+    "$(contains "$skill" 'Auto-compact stays off')"
+check "the folder route stays until the server's first call is read" yes \
+    "$(contains "$skill" 'Until that reading shows the four tools gone, the measured route stays')"
+check "the folder route gives the same tools as a settings deny" yes \
+    "$(contains "$skill" "\"permissions\": {\"deny\": [$quoted]}\` (57,752")"
+check "the folder route says to git-ignore the settings file" yes \
+    "$(contains "$skill" 'Add the file to `.gitignore` when git does not already ignore it')"
 
 check "the research records the start command's first call" yes \
     "$(has_line "$research" '### A supervisor started without its unused tools (#229)')"
