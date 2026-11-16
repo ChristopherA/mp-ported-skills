@@ -41,7 +41,9 @@
 # only where to start: iTerm2 can report a split in another window than the
 # one that holds it (#200). When pane-open.sh split a pane but could not type
 # the command into it, the pane is closed where it is, or its coordinates are
-# named when it cannot be.
+# named when it cannot be. The same holds for a pane whose TTY (pane-tty.sh)
+# runs no `claude attach ID`, as when the typed line never ran as written and
+# the shell waits at a prompt (#146).
 #
 # Usage:
 #   view.sh --id ID --dir DIR [--session NAME]
@@ -211,7 +213,7 @@ if [ -n "$ITERM" ]; then
     # reopened.
     sh_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
     line="cd $(sh_quote "$DIR") && exec env CLAUDE_CONFIG_DIR=$(sh_quote "$CLAUDE_CONFIG_DIR") $(sh_quote "$claude") attach $ID"
-    for s in pane-open.sh pane-find.sh pane-classify.sh pane-close.sh; do
+    for s in pane-open.sh pane-find.sh pane-classify.sh pane-close.sh pane-tty.sh; do
         [ -f "$panes/$s" ] || fail_watch "no iterm-pane scripts in ${panes:-the iterm-pane skill}, so no pane can open"
     done
     if ! coords=$(sh "$panes/pane-open.sh" --direction vertical --command "$line" </dev/null 2>&1); then
@@ -247,6 +249,22 @@ if [ -n "$ITERM" ]; then
     if [ "$state" = gone ] || [ "$state" = shell ]; then
         [ "$state" = gone ] || pane_close
         fail_watch "claude attach $ID exited at once, so no viewer is open"
+    fi
+    # A live screen is not yet a viewer: a line that never ran as typed (a key
+    # landed ahead of it, #146) leaves the shell at a prompt that reads as a
+    # program running, such as zsh's `[nyae]?`. So a process on the pane's TTY
+    # must run claude attach for this id. When iTerm2 cannot name the TTY, the
+    # screen check stands.
+    tty=$(sh "$panes/pane-tty.sh" "$PANE_SESSION" </dev/null 2>/dev/null) || tty=""
+    if [ -n "$tty" ] && ! ps -t "$tty" -o args= 2>/dev/null |
+        awk -v id="$ID" '{ for (i = 1; i < NF; i++) if ($i == "attach" && $(i + 1) == id) f = 1 } END { exit !f }'; then
+        notrun="claude attach $ID is not running in the pane (its shell holds it, at a prompt)"
+        pane_shut
+        case $? in
+            0) fail_watch "$notrun, so the pane was closed" ;;
+            1) fail_watch "$notrun, and the pane has closed" ;;
+            *) fail_watch "$notrun, and it could not be closed: view.sh --close --pane '$PANE_SESSION $PANE_WINDOW $PANE_TAB'" ;;
+        esac
     fi
     echo "viewer iterm pane $PANE_SESSION $PANE_WINDOW $PANE_TAB runs claude attach $ID"
     echo "close: view.sh --close --pane '$PANE_SESSION $PANE_WINDOW $PANE_TAB'"

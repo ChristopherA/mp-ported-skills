@@ -63,6 +63,11 @@ fi
 # session's coordinates. `w` is a reference by place in the window list,
 # which the split can reorder, so the window's id is read when the session is
 # found: read after the split, it named another window (#200).
+#
+# The split gives the new pane keyboard focus, so a key the user types before
+# the command is typed would land in the new pane ahead of it (#146). The
+# caller's pane is selected again in the same script, right after the split.
+# A failed select does not fail the open: the pane is already split.
 ERR=$(mktemp)
 trap 'command rm -f "$ERR"' EXIT
 if ! RESULT=$(osascript 2>"$ERR" <<APPLESCRIPT
@@ -88,6 +93,9 @@ tell application "iTerm2"
     tell foundSession
         set newSession to (split ${DIRECTION}ly ${PROFILE_CLAUSE})
     end tell
+    try
+        tell foundSession to select
+    end try
     return (id of newSession) & " " & foundWindowId & " " & foundTabNum
 end tell
 APPLESCRIPT

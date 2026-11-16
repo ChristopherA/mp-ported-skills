@@ -503,6 +503,16 @@ check "open: splits vertically by default" 1 "$(sent | grep -c 'split vertically
 check "open: reads the window's id when it finds the pane" 1 "$(sent | grep -c 'set foundWindowId to id of w$')"
 check "open: returns the id read then" 1 "$(sent | grep -c 'return (id of newSession) & " " & foundWindowId & " " & foundTabNum')"
 check "open: never reads a window id after the split" 0 "$(sent | grep -c 'id of foundWindow)')"
+# The split gives the new pane keyboard focus, so a key the user types before
+# the command is typed would land ahead of it (#146). Focus goes back to the
+# caller's pane in the same script as the split, and a failed select does not
+# fail the open, since the pane is already split.
+check "open: selects the caller's pane right after the split" "split
+try
+tell foundSession to select
+end try
+return" "$(sent | sed 's/^ *//' | awk '/^set newSession to \(split/ { on = 1; print "split"; next }
+    on && /^return/ { print "return"; exit } on && !/^end tell$/ { print }')"
 
 reset; answer 'NEW-1 7 2'
 run pane-open.sh --direction horizontal

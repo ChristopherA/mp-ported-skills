@@ -94,6 +94,22 @@ cat >"$panes/pane-close.sh" <<EOF
 echo "close \$*" >>"$fake/calls"
 [ ! -f "$fake/close-fails" ] || exit 1
 EOF
+# pane-tty.sh: the pane's TTY, or nothing when iTerm2 cannot say (tty-none).
+cat >"$panes/pane-tty.sh" <<EOF
+#!/bin/sh
+echo "tty \$*" >>"$fake/calls"
+[ -f "$fake/tty-none" ] || printf /dev/ttys042
+EOF
+# ps -t: the processes on the pane's TTY, from the procs file, or by default
+# the login shell exec'd into claude attach for the test's id.
+cat >"$work/bin/ps" <<EOF
+#!/bin/sh
+echo "ps \$*" >>"$fake/calls"
+[ "\$1 \$2" = "-t /dev/ttys042" ] || exit 1
+if [ -f "$fake/procs" ]; then command cat "$fake/procs"; exit 0; fi
+echo "$work/bin/claude attach c2a368ee"
+EOF
+chmod +x "$work/bin/ps"
 cat >"$work/bin/claude" <<'EOF'
 #!/bin/sh
 echo "fake claude: never run by view.sh" >&2
@@ -119,7 +135,9 @@ close: view.sh --close --pane 'F1C3A2B4-0D6E 4242 2'" "$out"
 check "open: splits this session's pane with claude attach under this profile, then checks it" \
     "open --direction vertical --command cd '$project' && exec env CLAUDE_CONFIG_DIR='$work/config it'\\''s' '$work/bin/claude' attach $id
 find --session F1C3A2B4-0D6E
-classify --session F1C3A2B4-0D6E --window 4242 --tab 2" "$(calls)"
+classify --session F1C3A2B4-0D6E --window 4242 --tab 2
+tty F1C3A2B4-0D6E
+ps -t /dev/ttys042 -o args=" "$(calls)"
 
 # pane-open.sh named the wrong window: the pane is reported, and checked,
 # where iTerm2 holds it (#200).
@@ -191,6 +209,35 @@ out=$(view --iterm --id $id --dir "$project"); rc=$?
 check "attach fails, pane at a shell: exit 1" 1 "$rc"
 check "attach fails, pane at a shell: closes the pane" "close --session F1C3A2B4-0D6E --window 4242 --tab 2 --force" "$(calls | grep '^close')"
 command rm -f "$fake/state"
+
+# The #123 run: a key typed during the split turned the line into `ocd ...`,
+# and zsh stopped at its correction prompt. The screen ends in `[nyae]?`,
+# which reads as a program running, so only the pane's TTY tells: no process
+# there runs claude attach for this id (#146).
+printf '%s\n' '/usr/bin/login -fpl someone /Applications/iTerm.app/Contents/MacOS/ShellLauncher --launch_shell' '-zsh' >"$fake/procs"
+out=$(view --iterm --id $id --dir "$project"); rc=$?
+check "attach never started, pane at a prompt: exit 1" 1 "$rc"
+check "attach never started, pane at a prompt: says so" "Error: claude attach $id is not running in the pane (its shell holds it, at a prompt), so the pane was closed; watch with claude attach $id" "$out"
+check "attach never started, pane at a prompt: closes the pane" "close --session F1C3A2B4-0D6E --window 4242 --tab 2 --force" "$(calls | grep '^close')"
+touch "$fake/close-fails"
+out=$(view --iterm --id $id --dir "$project"); rc=$?
+check "attach never started, close fails: exit 1" 1 "$rc"
+check "attach never started, close fails: names the pane to close" "Error: claude attach $id is not running in the pane (its shell holds it, at a prompt), and it could not be closed: view.sh --close --pane 'F1C3A2B4-0D6E 4242 2'; watch with claude attach $id" "$out"
+command rm -f "$fake/close-fails"
+calls >/dev/null
+# A viewer for another worker's id is not this one's.
+printf '%s\n' '-zsh' "$work/bin/claude attach c2a368ef" >"$fake/procs"
+out=$(view --iterm --id $id --dir "$project"); rc=$?
+check "attach for another id: exit 1" 1 "$rc"
+command rm -f "$fake/procs"
+calls >/dev/null
+# iTerm2 cannot name the pane's TTY: the screen check stands.
+touch "$fake/tty-none"
+out=$(view --iterm --id $id --dir "$project"); rc=$?
+check "no TTY for the pane: exit 0" 0 "$rc"
+check "no TTY for the pane: reports the viewer" "viewer iterm pane F1C3A2B4-0D6E 4242 2 runs claude attach $id" "$(printf '%s\n' "$out" | head -n 1)"
+check "no TTY for the pane: no ps read" 0 "$(calls | grep -c '^ps')"
+command rm -f "$fake/tty-none"
 
 # --- close -----------------------------------------------------------------
 out=$(view --close --pane 'F1C3A2B4-0D6E 4242 2'); rc=$?

@@ -18,6 +18,7 @@ It prints the new pane's coordinates, `SESSION_ID WINDOW_ID TAB_NUM`, for exampl
 - `--direction` names the **divider**, not where the pane goes: `vertical` (the default) puts the new pane to the right, `horizontal` puts it below. When the user asks for a pane "below" or "underneath", pass `horizontal`.
 - `--command "cmd"` types a first command into the new pane. `--profile "Name"` uses an iTerm2 profile.
 - It splits the pane on this session's TTY, so it lands in the right window whichever one is in front.
+- Keyboard focus stays on this session's pane, so what the user is typing never lands in the new pane ahead of the command. When the user must type in the pane (a password, a sudo prompt), tell them to click it first.
 
 ## Launch a Claude Code session
 
