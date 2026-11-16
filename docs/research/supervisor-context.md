@@ -121,9 +121,9 @@ The full read (By step) cost 3,215 on #166 (2 comments), 11,579 on #185 (14 comm
 
 | Section | Bytes in `SKILL.md` | File | Read |
 |---|---|---|---|
-| Starting this session: the start command, `claude-supervise`, the Claude app server and the folder deny | 4,088 | `starting.md`, 4,256 | by the maintainer before a session starts, at no step; `SKILL.md` keeps a 2-line stub naming it |
+| Starting this session: the start command, `claude-supervise`, the Claude app server and the folder deny | 4,088 | `starting.md`, 4,264 | by the maintainer before a session starts, at no step; `SKILL.md` keeps a 316-byte paragraph naming it |
 | Policy's Distribution repo bullet, and the Launch paragraph's Distribution repo checks | 2,314 and 789 | `distribution.md`, 3,236 | step 1, when the snapshot prints a `dist head` line; Policy keeps a 415-byte bullet |
-| The Launch paragraph's account of what `launch.sh` sets, confirms and checks | 3,081 | `launch.md`, 3,954 | step 2, when `launch.sh` exits 1 or 2 or prints a line that does not say enough; `SKILL.md` keeps a 1,182-byte summary |
+| The Launch paragraph's account of what `launch.sh` sets, confirms and checks | 3,081 | `launch.md`, 4,134 | step 2, when `launch.sh` exits 1 or 2 or prints a line that does not say enough; `SKILL.md` keeps a 1,182-byte summary |
 
 After the move, `SKILL.md` is 47,900 bytes. The Capture section's routes for blocks other than `done` stayed: `tests/supervise-relabel-route.test.sh` and `zone-capture.md` read them in `SKILL.md`, and a clean run with an ungranted push reaches them.
 
@@ -134,7 +134,7 @@ Measured as in #262's terminal check: an interactive `claude --disallowedTools A
 | Base, 0.8.143 | 60,110 | 87,137 and 87,177 |
 | After the move | 51,094 | 83,786 and 83,786 |
 
-The move takes 3,351 to 3,391 tokens off a supervisor's first call, 1.5 points of a 225k zone, at 2.7 characters a token of skill text. A run that reaches `distribution.md` or `launch.md` pays it back by about 1.1k or 1.4k when it reads the file.
+The move takes 3,351 to 3,391 tokens off a supervisor's first call, 1.5 points of a 225k zone, at 2.7 characters a token of skill text. A run that reaches `distribution.md` (3,236 bytes) or `launch.md` (4,134 bytes) pays part of it back when it reads the file; those reads were not measured.
 
 ## By step
 

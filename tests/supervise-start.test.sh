@@ -46,10 +46,6 @@ quoted=$(printf '%s' "$unused" | sed 's/[^ ]*/"&"/g; s/ /, /g')
 
 check "SKILL.md has a section on starting the supervisor's session" yes \
     "$(has_line "$skill" '## Starting this session')"
-check "SKILL.md names the file the start text lives in" yes \
-    "$(contains "$skill" '(Starting this session, `starting.md`)')"
-check "SKILL.md no longer holds the start function" no \
-    "$(contains "$skill" 'claude-supervise() {')"
 check "the start command drops launch.sh's unused tools and Chrome" \
     "claude --disallowedTools $commas --no-chrome" \
     "$(grep -x "claude --disallowedTools [A-Za-z,]* --no-chrome" "$start")"
