@@ -563,7 +563,7 @@ if [ -n "$sid" ]; then
                 # one a script beside a gh write made, is a part of its own.
                 case "$ops" in
                     push\ * | *', push '*)
-                        printf '%s\n' "$parts" | grep -q '^git push\|^git subtree push\|^git send-pack' ||
+                        printf '%s\n' "$parts" | grep -qE '^git (push|subtree push|send-pack)' ||
                             parts="$parts${parts:+$actions_nl}git push$actions_tab-- $ops" ;;
                 esac
                 if [ "$(printf '%s' "$parts" | grep -c '')" -gt 1 ]; then

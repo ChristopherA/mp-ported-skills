@@ -516,8 +516,11 @@ check "an unlink in a second gh issue edit is not the sub-issue grant" "deny" \
 # link, which no one grant covers, in either order.
 check "a label edit before a link is not the sub-issue grant" "deny" \
     "$(decision 0 auto 'gh issue edit 5 --add-label x; gh issue edit 6 --parent 40' "$granted")"
-check "a label edit beside a link names label and other fields" "yes" \
-    "$(reason 0 auto 'gh issue edit 5 --add-label x; gh issue edit 6 --parent 40' "$granted" | grep -q "'gh issue edit (label and other fields)'" && echo yes)"
+# Under sub-issue alone, the reason names the part no grant covers, the
+# label edit (#191); with both grants the pair still refuses, as label and
+# other fields, below.
+check "a label edit beside a link names the ungranted label part" "yes" \
+    "$(reason 0 auto 'gh issue edit 5 --add-label x; gh issue edit 6 --parent 40' "$granted" | grep -q "'gh issue edit (label)'" && echo yes)"
 check "a link before a label edit is not the sub-issue grant" "deny" \
     "$(decision 0 auto 'gh issue edit 6 --parent 40; gh issue edit 5 --add-label x' "$granted")"
 check "a title after a label edit and a link is not the sub-issue grant" "deny" \
@@ -670,6 +673,8 @@ check "a piped create --parent stays refused under every grant" "deny" \
     "$(decision 0 auto "echo 'gh issue create --title t --parent 40' | sh" "$granted")"
 check "a create --parent goes through under every grant" "" \
     "$(decision 0 auto 'gh issue create --title t --parent 40' "$granted")"
+check "a label edit beside a link still refuses with both grants, as label and other fields" "yes" \
+    "$(reason 0 auto 'gh issue edit 5 --add-label x; gh issue edit 6 --parent 40' "$granted" | grep -q "'gh issue edit (label and other fields)'" && echo yes)"
 # Each part a command runs is checked against its own grant (#191): a
 # granted part first no longer carries an ungranted one behind it, in a
 # sequence, a nested shell or a piped one.
@@ -710,8 +715,29 @@ check "--list names each part of a chained command" \
 gh issue edit (label)${tab}gh issue edit 131 --remove-label ready-for-agent --add-label ready-for-human" \
     "$(list 'gh issue comment 131 --body-file c.md && gh issue edit 131 --remove-label ready-for-agent --add-label ready-for-human' "$granted")"
 check "--list prints nothing for a command with no shared part" "" "$(list 'gh issue view 3; git status' "$granted")"
-check "--list keeps a quoted word whole" "gh issue comment${tab}gh issue comment 3 -b a b" \
-    "$(list "gh issue comment 3 -b 'a b'" "$granted")"
+check "--list keeps a quoted word whole, in quotes" "gh issue comment${tab}gh issue comment 3 -b 'a; b'" \
+    "$(list "gh issue comment 3 -b 'a; b'" "$granted")"
+# Each part is named from its own words: another part's flag is not its.
+check "--list: an edit-last comment does not rename the plain one beside it" \
+    "gh issue comment${tab}gh issue comment 5 --body x
+gh issue comment (edit)${tab}gh issue comment 6 --edit-last" \
+    "$(list 'gh issue comment 5 --body x; gh issue comment 6 --edit-last' "$granted")"
+check "--list: a title edit does not rename the label edit beside it" \
+    "gh issue edit (label)${tab}gh issue edit 5 --add-label x
+gh issue edit (other fields)${tab}gh issue edit 6 --title t" \
+    "$(list 'gh issue edit 5 --add-label x; gh issue edit 6 --title t' "$granted")"
+check "--list: a create --parent does not rename the plain create beside it" \
+    "gh issue create${tab}gh issue create -t t
+gh issue create (sub-issue link)${tab}gh issue create -t u --parent 4" \
+    "$(list 'gh issue create -t t; gh issue create -t u --parent 4' "$granted")"
+check "the refusal names the edit, not the granted comment before it" \
+    "A background session in auto mode cannot run 'gh issue edit (other fields)' on its own" \
+    "$(reason 0 auto 'gh issue comment 3 -b x; gh issue edit 6 --title t' "$granted" | sed 's/ (#66).*//')"
+# Text the lexer cannot read falls back to the quote-blind split, where a
+# quoted separator cuts --edit-last off its comment; the whole-command pass
+# still refuses it.
+check "a fallback split cannot hide --edit-last from the granted comment" "deny" \
+    "$(decision 0 auto 'gh issue comment 3 --body "a; b" --edit-last; echo "' "$granted")"
 command rm -rf "$granted" "$remote" "$ungranted"
 
 # A command that is not a shared action goes through.

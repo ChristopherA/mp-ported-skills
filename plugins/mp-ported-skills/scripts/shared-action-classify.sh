@@ -519,11 +519,21 @@ command_segments() {
 }
 
 # segment_text <segment>: one of command_segments' lines as one line of
-# text, its words joined by spaces, a newline or tab inside a word shown as
-# a space and a substitution as $(...), so the hook's --list and actions.sh
-# print a part the same way (#191).
+# text, its words joined by spaces, a word holding anything but plain word
+# characters in single quotes, a newline or tab inside a word shown as a
+# space and a substitution as $(...), so the hook's --list and actions.sh
+# print a part the same way (#191), and a quoted `;` reads as quoted.
 segment_text() {
-    printf '%s' "$1" | tr '\036\037\t' '   ' | sed "s/$classify_sub/\$(...)/g"
+    printf '%s' "$1" | tr '\036\037\t' '\n  ' | awk -v mk="$classify_sub" '
+        {
+            w = $0
+            if (w == "" || (w != mk && w ~ /[^A-Za-z0-9_.\/:=@%+,-]/)) {
+                gsub(/\047/, "\047\\\047\047", w)
+                w = "\047" w "\047"
+            }
+            out = out (NR > 1 ? " " : "") w
+        }
+        END { gsub(mk, "$(...)", out); printf "%s", out }'
 }
 
 # gh_words <args after "gh">: sets gh_sub and gh_act to the subcommand and

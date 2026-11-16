@@ -2394,6 +2394,7 @@ k2='gh issue comment 3 -b "a; b" && gh pr edit 3 --title y'
     bash_call k1 "$k1"
     bash_call k2 "$k2"
     bash_call k3 'gh issue view 3; gh issue comment 3 -b x'
+    bash_call k4 'gh issue comment 5 --body x; gh issue comment 6 --edit-last'
 } >"$cfg/projects/-work-project/$sid.jsonl"
 new_grant_repo grepo8 "## Grants
 
@@ -2402,9 +2403,11 @@ new_grant_repo grepo8 "## Grants
 check "actions: each shared part of a chained command has its own citation" \
     "command succeeded granted (issue-comment: a capture's findings, on this repo's tickets): gh issue comment 131 --body-file c.md (part of: $k1)
 command succeeded ungranted: gh issue edit 131 --remove-label ready-for-agent --add-label ready-for-human (part of: $k1)
-command succeeded granted (issue-comment: a capture's findings, on this repo's tickets): gh issue comment 3 -b a; b (part of: $k2)
+command succeeded granted (issue-comment: a capture's findings, on this repo's tickets): gh issue comment 3 -b 'a; b' (part of: $k2)
 command succeeded ungranted: gh pr edit 3 --title y (part of: $k2)
-command succeeded granted (issue-comment: a capture's findings, on this repo's tickets): gh issue view 3; gh issue comment 3 -b x" \
+command succeeded granted (issue-comment: a capture's findings, on this repo's tickets): gh issue view 3; gh issue comment 3 -b x
+command succeeded granted (issue-comment: a capture's findings, on this repo's tickets): gh issue comment 5 --body x (part of: gh issue comment 5 --body x; gh issue comment 6 --edit-last)
+command succeeded ungranted: gh issue comment 6 --edit-last (part of: gh issue comment 5 --body x; gh issue comment 6 --edit-last)" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo8" --start "$gstart" </dev/null | grep '^command')"
 # A push Claude Code recorded that no part names is a part of its own.
 jq -c 'select(.message.content | any(.id == "toolu_01XdkrXwv1TnYznyvLWKGaRN" or .tool_use_id == "toolu_01XdkrXwv1TnYznyvLWKGaRN"))

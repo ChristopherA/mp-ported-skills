@@ -394,15 +394,17 @@ if [ -n "$piped" ]; then
         matched="gh (piped into a shell)"
     fi
     classify_dir=$cwd
-    scan_part=$(printf '%s' "$cmd" | tr '\n' '\037')
+    scan_part=$(printf '%s' "$cmd" | tr ' \n' '\036\036')
     scan_collect
 fi
 
 [ -n "$matches" ] || exit 0
 
-# refine: names matched, one part's form, as its grant is looked up, from
-# what the scan alone could not tell. Sets matched and classify_dir.
+# refine <text>: names matched, one part's form, as its grant is looked up,
+# from what the scan alone could not tell, read in text: the part's own
+# words, or the whole command. Sets matched and classify_dir.
 refine() {
+refine_text=$1
 # A push in a Project's Distribution repo is named as one, and granted by
 # the Project as distribution-push (#141).
 classify_distribution
@@ -412,7 +414,7 @@ classify_distribution
 # deleting a comment is not the comment grant's (#113), so look for the
 # flag in the whole command.
 if [ "$matched" = "gh issue comment" ]; then
-    words=$(printf '%s' "$cmd" | tr -c 'A-Za-z0-9_-' '\n')
+    words=$(printf '%s' "$refine_text" | tr -c 'A-Za-z0-9_-' '\n')
     if printf '%s\n' "$words" | grep -qx -- --delete-last; then
         matched="gh issue comment (delete)"
     elif printf '%s\n' "$words" | grep -qx -- --edit-last; then
@@ -435,7 +437,7 @@ case "$matched" in
     # classify_gh decides from the words after its gh, so the hook and the
     # wrappers share one rule for another field (`-tT` included).
     first=$matched
-    parts=$(command_parts "$cmd")
+    parts=$(command_parts "$refine_text")
     IFS='
 '
     set -f
@@ -478,7 +480,7 @@ esac
 case "$matched" in
 "gh issue create" | "gh issue create (sub-issue link)")
     first=$matched
-    parts=$(command_parts "$cmd")
+    parts=$(command_parts "$refine_text")
     IFS='
 '
     set -f
@@ -530,38 +532,55 @@ deny() {
 list_mode=""
 [ "${1:-}" != --list ] || list_mode=yes
 grant_sh="${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}/skills/supervise/scripts/grant.sh"
-IFS=$nl
-set -f
-for entry in $matches; do
+
+# check_parts <part | whole>: each entry in matches, refined from its own
+# words (part) or from the whole command (whole), printed for --list, or
+# refused at the first one no grant covers.
+check_parts() {
+    IFS=$nl
+    set -f
+    for entry in $matches; do
+        IFS=$oldIFS
+        set +f
+        matched=${entry%%"$match_fs"*}
+        _rest=${entry#*"$match_fs"}
+        classify_dir=${_rest%%"$match_fs"*}
+        _part=${_rest#*"$match_fs"}
+        if [ "$1" = part ]; then refine "$(segment_text "$_part")"; else refine "$cmd"; fi
+        if [ -n "$list_mode" ]; then
+            printf '%s\t%s\n' "$matched" "$(segment_text "$_part")"
+            continue
+        fi
+        action=""
+        [ -n "${MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS:-}" ] || action=$(grant_action "$matched")
+        # A grant is read from the repo the part acts on: `git -C <dir>`'s,
+        # the folder a `cd` before it went to, or the session's working
+        # directory; for a push in a Distribution repo, its Project's (#141).
+        grant_dir=$cwd
+        case "$matched" in git*) grant_dir=$classify_dir ;; esac
+        # shellcheck disable=SC2086
+        if [ -n "$action" ] && classify_granted "$grant_sh" "$grant_dir" $action; then
+            # A granted close waits while the Project's Distribution repo
+            # holds unpushed commits (#186): the grant covers the ticket
+            # after its work is pushed, and that push is Push on approval's.
+            if [ "$action" = issue-close ]; then
+                classify_close_held "$grant_dir"
+                [ -z "$classify_held" ] || deny "$(classify_close_held_reason "$classify_held" "$classify_held_repo")"
+            fi
+            continue
+        fi
+        deny "A background session in auto mode cannot run '$matched' on its own (#66): main has no branch protection, and the auto-mode classifier makes a judgment call here, not a rule. Route this through a standing grant in docs/agents/supervision.md (#58), driven by the supervisor, or leave it for the maintainer's own interactive session."
+    done
     IFS=$oldIFS
     set +f
-    matched=${entry%%"$match_fs"*}
-    _rest=${entry#*"$match_fs"}
-    classify_dir=${_rest%%"$match_fs"*}
-    _part=${_rest#*"$match_fs"}
-    refine
-    if [ -n "$list_mode" ]; then
-        printf '%s\t%s\n' "$matched" "$(segment_text "$_part")"
-        continue
-    fi
-    action=""
-    [ -n "${MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS:-}" ] || action=$(grant_action "$matched")
-    # A grant is read from the repo the part acts on: `git -C <dir>`'s, the
-    # folder a `cd` before it went to, or the session's working directory;
-    # for a push in a Distribution repo, its Project's (#141).
-    grant_dir=$cwd
-    case "$matched" in git*) grant_dir=$classify_dir ;; esac
-    # shellcheck disable=SC2086
-    if [ -n "$action" ] && classify_granted "$grant_sh" "$grant_dir" $action; then
-        # A granted close waits while the Project's Distribution repo holds
-        # unpushed commits (#186): the grant covers the ticket after its
-        # work is pushed, and that push is Push on approval's.
-        if [ "$action" = issue-close ]; then
-            classify_close_held "$grant_dir"
-            [ -z "$classify_held" ] || deny "$(classify_close_held_reason "$classify_held" "$classify_held_repo")"
-        fi
-        continue
-    fi
-    deny "A background session in auto mode cannot run '$matched' on its own (#66): main has no branch protection, and the auto-mode classifier makes a judgment call here, not a rule. Route this through a standing grant in docs/agents/supervision.md (#58), driven by the supervisor, or leave it for the maintainer's own interactive session."
-done
+}
+
+# Each part is refined from its own words first, so the reason names the
+# part no grant covers. When every part is granted, the whole command is
+# read again: when command_segments falls back to its quote-blind split, a
+# quoted separator can cut a flag (`--body "a; b" --edit-last`) off the part
+# it belongs to, and only the whole text still holds it. That pass only
+# ever refuses more.
+check_parts part
+[ -n "$list_mode" ] || check_parts whole
 exit 0
