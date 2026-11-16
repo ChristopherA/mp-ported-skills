@@ -84,7 +84,9 @@ issue() {
 list() { printf '%s\n' "$@" | jq -sc .; }
 reset() { command rm -f "$FAKE_GH"/*; : >"$FAKE_GH/log"; }
 run() { (cd "$work/proj" && sh "$script" "$@" </dev/null 2>&1); }
-run_err() { (cd "$work/proj" && sh "$script" "$@" </dev/null 2>&1 >/dev/null); }
+# run_stdout and run_stderr capture one stream alone, the other discarded.
+run_stdout() { (cd "$work/proj" && sh "$script" "$@" </dev/null 2>/dev/null); }
+run_stderr() { (cd "$work/proj" && sh "$script" "$@" </dev/null 2>&1 >/dev/null); }
 log() { command cat "$FAKE_GH/log"; }
 patch="gh api --method PATCH 'repos/{owner}/{repo}/issues/40/sub_issues/priority'"
 
@@ -171,20 +173,20 @@ list "$(issue 118 ready-for-agent)" "$(issue 146 ready-for-agent)" >"$FAKE_GH/su
 check "relabel fails: the dry run's reorder is a command" \
 "reorder: $patch -F sub_issue_id=118000 -F after_id=146000" "$(run 118 | grep '^reorder: ')"
 : >"$FAKE_GH/edit.fail"
-err=$(run_err --apply 118); rc=$?
+err=$(run_stderr --apply 118); rc=$?
 check "relabel fails: exit 1" 1 "$rc"
 check "relabel fails: names the relabel on stderr" \
 "Error: the relabel failed, so nothing was moved: could not add label: 'ready-for-human' not found" "$err"
-check "relabel fails: no PATCH" "" "$(grep -e 'PATCH' "$FAKE_GH/log")"
+check "relabel fails: no PATCH" "" "$(grep -e '^api --method PATCH ' "$FAKE_GH/log")"
 check "relabel fails: writes nothing" "" "$(log)"
 
 # A failed read of the ticket itself.
 reset
 : >"$FAKE_GH/issue-118.fail"
-err=$(run_err 118); rc=$?
+err=$(run_stderr 118); rc=$?
 check "ticket read fails: exit 1" 1 "$rc"
 check "ticket read fails: names the read on stderr" "Error: could not read #118: gh: Not Found (HTTP 404)" "$err"
-check "ticket read fails: prints nothing on stdout" "" "$(cd "$work/proj" && sh "$script" 118 </dev/null 2>/dev/null)"
+check "ticket read fails: prints nothing on stdout" "" "$(run_stdout 118)"
 check "ticket read fails: writes nothing" "" "$(log)"
 
 # --- label strings from triage-labels.md ------------------------------------
