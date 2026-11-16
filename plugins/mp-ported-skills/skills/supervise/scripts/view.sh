@@ -164,6 +164,16 @@ pane_shut() {
     [ $? -eq 1 ] && return 1
     return 2
 }
+# A pane opened with no viewer in it: closes it, and fails with the reason
+# given and what became of the pane.
+pane_shut_fail() {
+    pane_shut
+    case $? in
+        0) fail_watch "$1, so the pane was closed" ;;
+        1) fail_watch "$1, and the pane has closed" ;;
+        *) fail_watch "$1, and it could not be closed: view.sh --close --pane '$PANE_SESSION $PANE_WINDOW $PANE_TAB'" ;;
+    esac
+}
 
 if [ -n "$CLOSE" ] && [ -n "$PANE" ]; then
     pane_coords "$PANE" || fail "--pane needs 'SESSION WINDOW TAB', not '$PANE'"
@@ -224,12 +234,7 @@ if [ -n "$ITERM" ]; then
             split="claude attach did not start in the pane iTerm2 split (${why:-pane-open.sh failed})"
             pane_locate
             case $? in
-                0) pane_shut
-                   case $? in
-                       0) fail_watch "$split, so the pane was closed" ;;
-                       1) fail_watch "$split, and the pane has closed" ;;
-                       *) fail_watch "$split, and it could not be closed: view.sh --close --pane '$PANE_SESSION $PANE_WINDOW $PANE_TAB'" ;;
-                   esac ;;
+                0) pane_shut_fail "$split" ;;
                 1) fail_watch "$split, and the pane has closed" ;;
                 *) fail_watch "$split, and iTerm2 could not say where pane $PANE_SESSION is ($pane_why), so it may still be open" ;;
             esac
@@ -253,18 +258,13 @@ if [ -n "$ITERM" ]; then
     # A live screen is not yet a viewer: a line that never ran as typed (a key
     # landed ahead of it, #146) leaves the shell at a prompt that reads as a
     # program running, such as zsh's `[nyae]?`. So a process on the pane's TTY
-    # must run claude attach for this id. When iTerm2 cannot name the TTY, the
-    # screen check stands.
+    # must run claude attach for this id. When iTerm2 cannot name the TTY, or
+    # ps cannot list it, the screen check stands.
     tty=$(sh "$panes/pane-tty.sh" "$PANE_SESSION" </dev/null 2>/dev/null) || tty=""
-    if [ -n "$tty" ] && ! ps -t "$tty" -o args= 2>/dev/null |
+    if [ -n "$tty" ] && procs=$(ps -t "$tty" -o args= </dev/null 2>/dev/null) &&
+        ! printf '%s\n' "$procs" |
         awk -v id="$ID" '{ for (i = 1; i < NF; i++) if ($i == "attach" && $(i + 1) == id) f = 1 } END { exit !f }'; then
-        notrun="claude attach $ID is not running in the pane (its shell holds it, at a prompt)"
-        pane_shut
-        case $? in
-            0) fail_watch "$notrun, so the pane was closed" ;;
-            1) fail_watch "$notrun, and the pane has closed" ;;
-            *) fail_watch "$notrun, and it could not be closed: view.sh --close --pane '$PANE_SESSION $PANE_WINDOW $PANE_TAB'" ;;
-        esac
+        pane_shut_fail "claude attach $ID is not running in the pane (its shell holds it, at a prompt)"
     fi
     echo "viewer iterm pane $PANE_SESSION $PANE_WINDOW $PANE_TAB runs claude attach $ID"
     echo "close: view.sh --close --pane '$PANE_SESSION $PANE_WINDOW $PANE_TAB'"

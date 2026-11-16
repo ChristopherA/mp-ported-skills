@@ -106,6 +106,7 @@ cat >"$work/bin/ps" <<EOF
 #!/bin/sh
 echo "ps \$*" >>"$fake/calls"
 [ "\$1 \$2" = "-t /dev/ttys042" ] || exit 1
+if [ -f "$fake/ps-fails" ]; then echo "ps: operation not permitted" >&2; exit 1; fi
 if [ -f "$fake/procs" ]; then command cat "$fake/procs"; exit 0; fi
 echo "$work/bin/claude attach c2a368ee"
 EOF
@@ -119,6 +120,7 @@ chmod +x "$work/bin/claude" "$panes"/*.sh
 PATH="$work/bin:$PATH"
 export PATH
 [ "$(command -v claude)" = "$work/bin/claude" ] || { echo "FAIL the fake claude is not first on PATH"; exit 1; }
+[ "$(command -v ps)" = "$work/bin/ps" ] || { echo "FAIL the fake ps is not first on PATH"; exit 1; }
 
 project="$work/project"
 mkdir -p "$project"
@@ -229,6 +231,16 @@ calls >/dev/null
 printf '%s\n' '-zsh' "$work/bin/claude attach c2a368ef" >"$fake/procs"
 out=$(view --iterm --id $id --dir "$project"); rc=$?
 check "attach for another id: exit 1" 1 "$rc"
+check "attach for another id: says so" "Error: claude attach $id is not running in the pane (its shell holds it, at a prompt), so the pane was closed; watch with claude attach $id" "$out"
+check "attach for another id: closes the pane" "close --session F1C3A2B4-0D6E --window 4242 --tab 2 --force" "$(calls | grep '^close')"
+# ps cannot list the TTY: that is no sign the viewer failed, so the screen
+# check stands and the pane is kept.
+touch "$fake/ps-fails"
+out=$(view --iterm --id $id --dir "$project"); rc=$?
+check "ps fails: exit 0" 0 "$rc"
+check "ps fails: reports the viewer" "viewer iterm pane F1C3A2B4-0D6E 4242 2 runs claude attach $id" "$(printf '%s\n' "$out" | head -n 1)"
+check "ps fails: closes nothing" 0 "$(calls | grep -c '^close')"
+command rm -f "$fake/ps-fails"
 command rm -f "$fake/procs"
 calls >/dev/null
 # iTerm2 cannot name the pane's TTY: the screen check stands.
