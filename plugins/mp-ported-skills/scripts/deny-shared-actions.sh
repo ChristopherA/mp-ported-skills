@@ -109,28 +109,44 @@ oldIFS=$IFS
 nl='
 '
 
-# scan_nested <text> [base]: scan text a shell runs as a command of its
-# own (`sh -c`'s argument, a here-string into a shell, eval's words), in a
-# subshell, so a cd inside it moves only that scan. It sets matched,
-# classify_dir and piped from it, and with `base`, for eval, which runs in
-# this shell, takes its folder too when the outer scan follows a cd.
-scan_nested() {
-    _sn=$(scan "$(printf '%s' "$1" | tr '\037' '\n')"
-        printf '%s\036%s\036%s\036%s\036' "$matched" "${classify_dir:-}" "$piped" "$classify_base")
-    _sn_mode=${2:-} _sn_ifs=$IFS
-    IFS=$classify_rs
-    set -f
-    # shellcheck disable=SC2086
-    set -- $_sn
-    IFS=$_sn_ifs
-    [ -z "${1:-}" ] || { matched=$1; classify_dir=${2:-}; }
-    [ -z "${3:-}" ] || piped=yes
-    [ "${follow_cd:-}" != yes ] || [ "$_sn_mode" != base ] || classify_base=${4:-$classify_base}
+# matches holds one line per refused form the scan found, in the order the
+# shell runs them (#191): the form, the folder its grant is read from
+# (classify_dir), and the simple command's words as command_segments split
+# them, separated by match_fs. Each is checked against its own grant below,
+# so a granted part cannot carry an ungranted one through.
+match_fs=$(printf '\034')
+matches=""
+# scan_collect: adds matched, when set, to matches, with the words of the
+# simple command it came from (scan_part), and clears it for the next one.
+scan_collect() {
+    [ -n "$matched" ] || return 0
+    matches="$matches$matched$match_fs${classify_dir:-}$match_fs$scan_part$nl"
+    matched=""
 }
 
-# scan <text>: sets matched (and classify_dir) for the first refused form a
-# command in text runs, and piped when a shell in it reads commands this
-# scan cannot see, checked below against the whole command.
+# scan_nested <text> [base]: scan text a shell runs as a command of its
+# own (`sh -c`'s argument, a here-string into a shell, eval's words), in a
+# subshell, so a cd inside it moves only that scan. It adds its matches to
+# matches and sets piped from it, and with `base`, for eval, which runs in
+# this shell, takes its folder too when the outer scan follows a cd.
+scan_nested() {
+    _sn=$(matches=""
+        scan "$(printf '%s' "$1" | tr '\037' '\n')"
+        printf '%s\036%s\036%s.' "$piped" "$classify_base" "$matches")
+    # A match's words hold \036 too, so the matches are all that follows
+    # the second one, up to the dot that keeps their last newline.
+    _sn_piped=${_sn%%"$classify_rs"*}
+    _sn=${_sn#*"$classify_rs"}
+    _sn_base=${_sn%%"$classify_rs"*}
+    _sn=${_sn#*"$classify_rs"}
+    [ -z "$_sn_piped" ] || piped=yes
+    matches="$matches${_sn%.}"
+    [ "${follow_cd:-}" != yes ] || [ "${2:-}" != base ] || classify_base=${_sn_base:-$classify_base}
+}
+
+# scan <text>: adds to matches each refused form a command in text runs,
+# and sets piped when a shell in it reads commands this scan cannot see,
+# checked below against the whole command.
 scan() {
     _segs=$(command_segments "$1")
     # A cd is followed only in a command of plain sequences (`;`, `&&`,
@@ -144,7 +160,9 @@ scan() {
     IFS=$nl
     set -f
     for seg in $_segs; do
-        [ -n "$matched" ] && break
+        # Every part is scanned, not only up to the first match (#191).
+        scan_collect
+        scan_part=$seg
         IFS=$classify_rs
         # shellcheck disable=SC2086
         set -- $seg
@@ -341,6 +359,7 @@ scan() {
             ;;
         esac
     done
+    scan_collect
     set +f
     IFS=$oldIFS
 }
@@ -354,8 +373,9 @@ scan "$cmd"
 
 # A shell reading commands from a pipe (`echo git push | sh`) runs text
 # this scan saw only as another command's arguments, so check the whole
-# command for the words of a refused form.
-if [ -z "$matched" ] && [ -n "$piped" ]; then
+# command for the words of a refused form, beside any part the scan named:
+# a granted part cannot vouch for what the piped shell runs (#191).
+if [ -n "$piped" ]; then
     words=$(printf '%s' "$cmd" | tr -c 'A-Za-z0-9_-' '\n')
     has() { printf '%s\n' "$words" | grep -qx -- "$1"; }
     # A gh issue edit sets a field with any flag but a repo or help flag
@@ -368,10 +388,16 @@ if [ -z "$matched" ] && [ -n "$piped" ]; then
         has delete || has transfer || has reopen || has pin || has unpin || has lock || has unlock || has develop; }; }; }; then
         matched="gh (piped into a shell)"
     fi
+    classify_dir=$cwd
+    scan_part=$(printf '%s' "$cmd" | tr '\n' '\037')
+    scan_collect
 fi
 
-[ -n "$matched" ] || exit 0
+[ -n "$matches" ] || exit 0
 
+# refine: names matched, one part's form, as its grant is looked up, from
+# what the scan alone could not tell. Sets matched and classify_dir.
+refine() {
 # A push in a Project's Distribution repo is named as one, and granted by
 # the Project as distribution-push (#141).
 classify_distribution
@@ -472,39 +498,72 @@ case "$matched" in
     matched=$first
     ;;
 esac
+}
 
-# A standing grant lets this exact form through. Only a form grant.sh can
-# name maps to an action; the other gh api forms and the piped-into-a-shell
-# fallback stay refused, since a grant names an action, not an arbitrary
-# command. MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS, set by actions.sh's own
-# probe of whether a past command matches a refused form at all, skips this
-# so a grant added since cannot make that probe stop naming it -- the
-# variable can only ever make this hook refuse more, never less.
-# A name can need two actions (gh issue create --parent; #218): it goes
-# through only when every one is granted.
-action=""
-[ -n "${MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS:-}" ] || action=$(grant_action "$matched")
-# A grant is read from the repo the command acts on: `git -C <dir>`'s, the
-# folder a `cd` before it went to, or the session's working directory; for a
-# push in a Distribution repo, its Project's (#141).
-grant_dir=$cwd
-case "$matched" in git*) grant_dir=$classify_dir ;; esac
-if [ -n "$action" ]; then
-    grant_sh="${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}/skills/supervise/scripts/grant.sh"
+# deny <reason>: prints the deny decision and exits.
+deny() {
+    jq -cn --arg reason "$1" \
+        '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
+    exit 0
+}
+
+# render_part <words>: a part's words as command_segments split them,
+# joined by spaces, a substitution shown as $(...) and a tab as a space,
+# for --list's one line per part.
+render_part() {
+    printf '%s' "$1" | tr '\036\037\t' '   ' | sed "s/$classify_sub/\$(...)/g"
+}
+
+# Each part is checked on its own (#191), in the order the shell runs them,
+# and the first part no grant covers refuses the command, named in the
+# reason. A standing grant lets this exact form through. Only a form
+# grant.sh can name maps to an action; the other gh api forms and the
+# piped-into-a-shell fallback stay refused, since a grant names an action,
+# not an arbitrary command. MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS, set by
+# actions.sh's own probe of whether a past command matches a refused form
+# at all, skips this so a grant added since cannot make that probe stop
+# naming it -- the variable can only ever make this hook refuse more, never
+# less. A name can need two actions (gh issue create --parent; #218): it
+# goes through only when every one is granted.
+#
+# --list, which only actions.sh passes (hooks.json runs the hook with no
+# arguments), prints each part's refined form and words, a tab between, one
+# line each, and decides nothing, so actions.sh cites each part's grant.
+list_mode=""
+[ "${1:-}" != --list ] || list_mode=yes
+grant_sh="${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}/skills/supervise/scripts/grant.sh"
+IFS=$nl
+set -f
+for entry in $matches; do
+    IFS=$oldIFS
+    set +f
+    matched=${entry%%"$match_fs"*}
+    _rest=${entry#*"$match_fs"}
+    classify_dir=${_rest%%"$match_fs"*}
+    _part=${_rest#*"$match_fs"}
+    refine
+    if [ -n "$list_mode" ]; then
+        printf '%s\t%s\n' "$matched" "$(render_part "$_part")"
+        continue
+    fi
+    action=""
+    [ -n "${MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS:-}" ] || action=$(grant_action "$matched")
+    # A grant is read from the repo the part acts on: `git -C <dir>`'s, the
+    # folder a `cd` before it went to, or the session's working directory;
+    # for a push in a Distribution repo, its Project's (#141).
+    grant_dir=$cwd
+    case "$matched" in git*) grant_dir=$classify_dir ;; esac
     # shellcheck disable=SC2086
-    if classify_granted "$grant_sh" "$grant_dir" $action; then
+    if [ -n "$action" ] && classify_granted "$grant_sh" "$grant_dir" $action; then
         # A granted close waits while the Project's Distribution repo holds
         # unpushed commits (#186): the grant covers the ticket after its
         # work is pushed, and that push is Push on approval's.
-        [ "$action" = issue-close ] && classify_close_held "$grant_dir"
-        if [ "$action" = issue-close ] && [ -n "$classify_held" ]; then
-            jq -cn --arg reason "$(classify_close_held_reason "$classify_held" "$classify_held_repo")" \
-                '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
-            exit 0
+        if [ "$action" = issue-close ]; then
+            classify_close_held "$grant_dir"
+            [ -z "$classify_held" ] || deny "$(classify_close_held_reason "$classify_held" "$classify_held_repo")"
         fi
-        exit 0
+        continue
     fi
-fi
-
-jq -cn --arg reason "A background session in auto mode cannot run '$matched' on its own (#66): main has no branch protection, and the auto-mode classifier makes a judgment call here, not a rule. Route this through a standing grant in docs/agents/supervision.md (#58), driven by the supervisor, or leave it for the maintainer's own interactive session." \
-    '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
+    deny "A background session in auto mode cannot run '$matched' on its own (#66): main has no branch protection, and the auto-mode classifier makes a judgment call here, not a rule. Route this through a standing grant in docs/agents/supervision.md (#58), driven by the supervisor, or leave it for the maintainer's own interactive session."
+done
+exit 0

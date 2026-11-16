@@ -670,6 +670,48 @@ check "a piped create --parent stays refused under every grant" "deny" \
     "$(decision 0 auto "echo 'gh issue create --title t --parent 40' | sh" "$granted")"
 check "a create --parent goes through under every grant" "" \
     "$(decision 0 auto 'gh issue create --title t --parent 40' "$granted")"
+# Each part a command runs is checked against its own grant (#191): a
+# granted part first no longer carries an ungranted one behind it, in a
+# sequence, a nested shell or a piped one.
+grant_with issue-comment issue-create
+for c in 'gh issue comment 1 -b x; gh pr create' \
+    'gh issue create -t x; gh issue delete 23 --yes' \
+    'gh issue comment 3 -b x; gh issue delete 23 --yes' \
+    'gh issue comment 3 -b x && gh issue create --parent 40 -t y' \
+    'gh issue create -t x; gh issue edit 3 --title y' \
+    'gh issue comment 3 -b x && gh issue edit 3 --add-label y' \
+    'gh issue comment 3 -b x; git push' \
+    'gh issue comment 3 -b x; sh -c "gh pr merge 5"' \
+    'sh -c "gh issue comment 3 -b x; gh pr merge 5"' \
+    'gh issue comment 3 -b x; echo gh pr create | sh' \
+    'gh issue comment 3 -b x; gh issue comment 4 --delete-last'; do
+    check "a granted part does not carry: $c" "deny" "$(decision 0 auto "$c" "$granted")"
+done
+for form in 'delete 23 --yes' 'transfer 23 o/r' 'reopen 23' 'pin 23' 'unpin 23' 'lock 23' 'unlock 23' 'develop 23'; do
+    check "gh issue $form behind a granted comment is refused" "deny" \
+        "$(decision 0 auto "gh issue comment 3 -b x && gh issue $form" "$granted")"
+done
+check "the refusal names the part no grant covers" \
+    "A background session in auto mode cannot run 'gh pr create' on its own" \
+    "$(reason 0 auto 'gh issue comment 1 -b x; gh pr create' "$granted" | sed 's/ (#66).*//')"
+check "two granted parts go through" "" \
+    "$(decision 0 auto 'gh issue comment 3 -b x && gh issue create -t y' "$granted")"
+check "a granted part beside a read goes through" "" \
+    "$(decision 0 auto 'gh issue view 3; gh issue comment 3 -b x; gh issue list' "$granted")"
+# --list, which only actions.sh passes, prints each part's form and words,
+# a tab between, in the order the shell runs them.
+list() { # <command> [<cwd>]
+    jq -cn --arg cmd "$1" '{permission_mode:"auto",tool_name:"Bash",tool_input:{command:$cmd}}' |
+        (cd "${2:-.}" && CLAUDE_CODE_SESSION_ATTENDED=0 MP_DENY_SHARED_ACTIONS_IGNORE_GRANTS=1 sh "$CLAUDE_PLUGIN_ROOT/scripts/deny-shared-actions.sh" --list)
+}
+tab=$(printf '\t')
+check "--list names each part of a chained command" \
+    "gh issue comment${tab}gh issue comment 131 --body-file c.md
+gh issue edit (label)${tab}gh issue edit 131 --remove-label ready-for-agent --add-label ready-for-human" \
+    "$(list 'gh issue comment 131 --body-file c.md && gh issue edit 131 --remove-label ready-for-agent --add-label ready-for-human' "$granted")"
+check "--list prints nothing for a command with no shared part" "" "$(list 'gh issue view 3; git status' "$granted")"
+check "--list keeps a quoted word whole" "gh issue comment${tab}gh issue comment 3 -b a b" \
+    "$(list "gh issue comment 3 -b 'a b'" "$granted")"
 command rm -rf "$granted" "$remote" "$ungranted"
 
 # A command that is not a shared action goes through.
