@@ -36,6 +36,13 @@
 # sdk-cli), whose TTY is the server's own pane. --close --pane closes the
 # pane whatever runs there, so call it only once the worker is stopped.
 #
+# A pane is found by its session id in every window (pane-find.sh), both
+# after the open and at --close, and the window named in its coordinates is
+# only where to start: iTerm2 can report a split in another window than the
+# one that holds it (#200). When pane-open.sh split a pane but could not type
+# the command into it, the pane is closed where it is, or its coordinates are
+# named when it cannot be.
+#
 # Usage:
 #   view.sh --id ID --dir DIR [--session NAME]
 #   view.sh --close (--dir DIR | --session NAME)
@@ -54,7 +61,8 @@
 # or for --close `closed NAME` or `no tmux session NAME`. With --iterm:
 # `viewer iterm pane SESSION WINDOW TAB runs claude attach ID` and the
 # command to close it, or for --close `closed pane SESSION` or `pane SESSION
-# already closed`. Exits 0 opened or closed; 1 not.
+# already closed`, the second only when no window holds the pane. Exits 0
+# opened or closed; 1 not, which includes iTerm2 not saying where the pane is.
 
 set -u
 
@@ -125,16 +133,37 @@ pane_coords() {
 }
 pane_state() { sh "$panes/pane-classify.sh" --session "$PANE_SESSION" --window "$PANE_WINDOW" --tab "$PANE_TAB" </dev/null 2>/dev/null; }
 pane_close() { sh "$panes/pane-close.sh" --session "$PANE_SESSION" --window "$PANE_WINDOW" --tab "$PANE_TAB" --force </dev/null >/dev/null; }
+# Finds the pane whose session id is PANE_SESSION in any window, and sets
+# PANE_WINDOW and PANE_TAB to where it is. pane-find.sh matches part of an
+# id, so only a line for the whole id counts. Returns 1 when no window holds
+# it, 2 when iTerm2 could not be asked, with the reason in pane_why.
+pane_locate() {
+    pane_why=""
+    if found=$(sh "$panes/pane-find.sh" --session "$PANE_SESSION" </dev/null 2>&1); then
+        found=$(printf '%s\n' "$found" | awk -v s="$PANE_SESSION" '$1 == s && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ { print $2, $3; exit }')
+        [ -n "$found" ] || return 1
+        PANE_WINDOW=${found% *} PANE_TAB=${found#* }
+        return 0
+    fi
+    case $found in
+        'Error: no session found matching'* | 'Error: no iTerm2 sessions found'*) return 1 ;;
+    esac
+    pane_why=$(printf '%s\n' "$found" | head -n 1 | sed 's/^Error: //')
+    pane_why=${pane_why:-pane-find.sh failed}
+    return 2
+}
 
 if [ -n "$CLOSE" ] && [ -n "$PANE" ]; then
     pane_coords "$PANE" || fail "--pane needs 'SESSION WINDOW TAB', not '$PANE'"
-    [ -f "$panes/pane-close.sh" ] || fail "no iterm-pane scripts in ${panes:-the iterm-pane skill}"
-    if [ "$(pane_state)" = gone ]; then
-        echo "pane $PANE_SESSION already closed"
-    else
-        pane_close || fail "iTerm2 could not close pane $PANE_SESSION"
-        echo "closed pane $PANE_SESSION"
-    fi
+    [ -f "$panes/pane-close.sh" ] && [ -f "$panes/pane-find.sh" ] ||
+        fail "no iterm-pane scripts in ${panes:-the iterm-pane skill}"
+    pane_locate
+    case $? in
+        0) pane_close || fail "iTerm2 could not close pane $PANE_SESSION"
+           echo "closed pane $PANE_SESSION" ;;
+        1) echo "pane $PANE_SESSION already closed" ;;
+        *) fail "iTerm2 could not say where pane $PANE_SESSION is ($pane_why), so it may still be open" ;;
+    esac
     exit 0
 fi
 
@@ -167,17 +196,36 @@ if [ -n "$ITERM" ]; then
     # reopened.
     sh_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
     line="cd $(sh_quote "$DIR") && exec env CLAUDE_CONFIG_DIR=$(sh_quote "$CLAUDE_CONFIG_DIR") $(sh_quote "$claude") attach $ID"
-    [ -f "$panes/pane-open.sh" ] || fail_watch "no iterm-pane scripts in ${panes:-the iterm-pane skill}, so no pane can open"
+    for s in pane-open.sh pane-find.sh pane-classify.sh pane-close.sh; do
+        [ -f "$panes/$s" ] || fail_watch "no iterm-pane scripts in ${panes:-the iterm-pane skill}, so no pane can open"
+    done
     if ! coords=$(sh "$panes/pane-open.sh" --direction vertical --command "$line" </dev/null 2>&1); then
+        # pane-open.sh prints the coordinates once the split is made, so a
+        # first line of coordinates means a pane is open with no viewer in it.
+        if pane_coords "$(printf '%s\n' "$coords" | head -n 1)"; then
+            why=$(printf '%s\n' "$coords" | sed -n '2p' | sed 's/^Error: //')
+            why=${why:-pane-open.sh failed}
+            pane_locate
+            case $? in
+                0) pane_close &&
+                       fail_watch "claude attach did not start in the pane iTerm2 split ($why), so the pane was closed"
+                   fail_watch "claude attach did not start in the pane iTerm2 split ($why), and it could not be closed: view.sh --close --pane '$PANE_SESSION $PANE_WINDOW $PANE_TAB'" ;;
+                1) fail_watch "no iTerm2 pane opened ($why)" ;;
+                *) fail_watch "claude attach did not start in the pane iTerm2 split ($why), and iTerm2 could not say where pane $PANE_SESSION is ($pane_why), so it may still be open" ;;
+            esac
+        fi
         why=$(printf '%s\n' "$coords" | head -n 1 | sed 's/^Error: //')
         fail_watch "no iTerm2 pane opened (${why:-pane-open.sh failed})"
     fi
     pane_coords "$(printf '%s\n' "$coords" | head -n 1)" ||
         fail_watch "pane-open.sh printed no pane coordinates"
     # claude attach for an id it cannot open exits at once; iTerm2 then
-    # closes the pane, or leaves it at a shell or ended.
+    # closes the pane, or leaves it at a shell or ended. The pane is read
+    # where iTerm2 holds it; when iTerm2 cannot say, the printed coordinates
+    # stand.
     sleep "$wait"
-    state=$(pane_state)
+    pane_locate
+    if [ $? = 1 ]; then state=gone; else state=$(pane_state); fi
     if [ "$state" = gone ] || [ "$state" = shell ]; then
         [ "$state" = gone ] || pane_close
         fail_watch "claude attach $ID exited at once, so no viewer is open"

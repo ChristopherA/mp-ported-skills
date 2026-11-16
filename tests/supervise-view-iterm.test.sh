@@ -2,10 +2,13 @@
 # supervise-view-iterm.test.sh -- tests for view.sh's iTerm2 mode, which
 # opens a split pane running `claude attach <id>` for `--watch iterm` (#102).
 #
-# MP_PANE_DIR points view.sh at fake pane-open.sh, pane-classify.sh and
-# pane-close.sh, so no pane opens and iTerm2 is never driven. The fakes record
-# their arguments; pane-classify.sh prints what the test wrote to its state
-# file. Touches nothing outside its own mktemp directory.
+# MP_PANE_DIR points view.sh at fake pane-open.sh, pane-find.sh,
+# pane-classify.sh and pane-close.sh, so no pane opens and iTerm2 is never
+# driven. The fakes record their arguments; pane-classify.sh prints what the
+# test wrote to its state file, and pane-find.sh what it wrote to its find
+# file. The last section runs the real iterm-pane scripts on a stubbed
+# osascript instead, as the 2026-10-17 run met them (#200). Touches nothing
+# outside its own mktemp directory.
 #
 # Usage: sh tests/supervise-view-iterm.test.sh
 
@@ -47,6 +50,31 @@ if [ -f "$fake/open-fails" ]; then
     exit 1
 fi
 echo "F1C3A2B4-0D6E 4242 2"
+# A pane split, then the command could not be typed into it (#200).
+if [ -f "$fake/send-fails" ]; then
+    echo "pane-send.sh: no pane with session F1C3A2B4-0D6E in tab 2 of window 4242 (closed, or wrong coordinates)" >&2
+    exit 1
+fi
+EOF
+# pane-find.sh: by default the pane is where pane-open.sh said; the find file
+# moves it, and find-fails makes iTerm2 unreachable.
+cat >"$panes/pane-find.sh" <<EOF
+#!/bin/sh
+echo "find \$*" >>"$fake/calls"
+if [ -f "$fake/find-fails" ]; then
+    echo "Error: could not list iTerm2 sessions: execution error: iTerm got an error (-600)" >&2
+    exit 1
+fi
+if [ -f "$fake/find" ]; then
+    command cat "$fake/find"
+    exit 0
+fi
+if [ -f "$fake/find-none" ]; then
+    echo "Error: no session found matching '\$2'" >&2
+    echo "Hint: pass a substring of the session id pane-open.sh printed" >&2
+    exit 1
+fi
+echo "F1C3A2B4-0D6E 4242 2"
 EOF
 cat >"$panes/pane-classify.sh" <<EOF
 #!/bin/sh
@@ -56,6 +84,7 @@ EOF
 cat >"$panes/pane-close.sh" <<EOF
 #!/bin/sh
 echo "close \$*" >>"$fake/calls"
+[ ! -f "$fake/close-fails" ] || exit 1
 EOF
 cat >"$work/bin/claude" <<'EOF'
 #!/bin/sh
@@ -81,7 +110,57 @@ check "open: names the pane and how to close it" "viewer iterm pane F1C3A2B4-0D6
 close: view.sh --close --pane 'F1C3A2B4-0D6E 4242 2'" "$out"
 check "open: splits this session's pane with claude attach under this profile, then checks it" \
     "open --direction vertical --command cd '$project' && exec env CLAUDE_CONFIG_DIR='$work/config it'\\''s' '$work/bin/claude' attach $id
+find --session F1C3A2B4-0D6E
 classify --session F1C3A2B4-0D6E --window 4242 --tab 2" "$(calls)"
+
+# pane-open.sh named the wrong window: the pane is reported, and checked,
+# where iTerm2 holds it (#200).
+echo "F1C3A2B4-0D6E 28142 1" >"$fake/find"
+out=$(view --iterm --id $id --dir "$project"); rc=$?
+check "open, other window: exit 0" 0 "$rc"
+check "open, other window: names the window that holds the pane" "viewer iterm pane F1C3A2B4-0D6E 28142 1 runs claude attach $id
+close: view.sh --close --pane 'F1C3A2B4-0D6E 28142 1'" "$out"
+check "open, other window: checks the pane there" "classify --session F1C3A2B4-0D6E --window 28142 --tab 1" "$(calls | grep '^classify')"
+# A match on part of the id is another pane, not this one.
+echo "F1C3A2B4-0D6E-9 28142 1 zsh" >"$fake/find"
+out=$(view --iterm --id $id --dir "$project"); rc=$?
+check "open, only a longer id matches: the pane is gone" "Error: claude attach $id exited at once, so no viewer is open; watch with claude attach $id" "$out"
+check "open, only a longer id matches: nothing classified or closed" 0 "$(calls | grep -c '^classify\|^close')"
+command rm -f "$fake/find"
+# iTerm2 cannot list its panes: the printed coordinates stand.
+touch "$fake/find-fails"
+out=$(view --iterm --id $id --dir "$project"); rc=$?
+check "open, find fails: exit 0" 0 "$rc"
+check "open, find fails: keeps pane-open.sh's coordinates" "viewer iterm pane F1C3A2B4-0D6E 4242 2 runs claude attach $id" "$(printf '%s\n' "$out" | head -n 1)"
+command rm -f "$fake/find-fails"
+calls >/dev/null
+
+# --- a pane split, but claude attach was never typed into it (#200) ----------
+touch "$fake/send-fails"
+echo "F1C3A2B4-0D6E 28142 1" >"$fake/find"
+out=$(view --iterm --id $id --dir "$project"); rc=$?
+check "split, send fails: exit 1" 1 "$rc"
+check "split, send fails: says so, and that the pane was closed" "Error: claude attach did not start in the pane iTerm2 split (pane-send.sh: no pane with session F1C3A2B4-0D6E in tab 2 of window 4242 (closed, or wrong coordinates)), so the pane was closed; watch with claude attach $id" "$out"
+check "split, send fails: finds the pane by its id and closes it where it is" "find --session F1C3A2B4-0D6E
+close --session F1C3A2B4-0D6E --window 28142 --tab 1 --force" "$(calls | grep -v '^open')"
+touch "$fake/close-fails"
+out=$(view --iterm --id $id --dir "$project"); rc=$?
+check "split, send and close fail: exit 1" 1 "$rc"
+check "split, send and close fail: names the pane's real coordinates" "Error: claude attach did not start in the pane iTerm2 split (pane-send.sh: no pane with session F1C3A2B4-0D6E in tab 2 of window 4242 (closed, or wrong coordinates)), and it could not be closed: view.sh --close --pane 'F1C3A2B4-0D6E 28142 1'; watch with claude attach $id" "$out"
+command rm -f "$fake/close-fails" "$fake/find"
+calls >/dev/null
+touch "$fake/find-none"
+out=$(view --iterm --id $id --dir "$project"); rc=$?
+check "split, send fails, pane gone: exit 1" 1 "$rc"
+check "split, send fails, pane gone: no pane is open" "Error: no iTerm2 pane opened (pane-send.sh: no pane with session F1C3A2B4-0D6E in tab 2 of window 4242 (closed, or wrong coordinates)); watch with claude attach $id" "$out"
+check "split, send fails, pane gone: closes nothing" 0 "$(calls | grep -c '^close')"
+command rm -f "$fake/find-none"
+touch "$fake/find-fails"
+out=$(view --iterm --id $id --dir "$project"); rc=$?
+check "split, send and find fail: exit 1" 1 "$rc"
+check "split, send and find fail: names the pane and why it was not found" "Error: claude attach did not start in the pane iTerm2 split (pane-send.sh: no pane with session F1C3A2B4-0D6E in tab 2 of window 4242 (closed, or wrong coordinates)), and iTerm2 could not say where pane F1C3A2B4-0D6E is (could not list iTerm2 sessions: execution error: iTerm got an error (-600)), so it may still be open; watch with claude attach $id" "$out"
+check "split, send and find fail: closes nothing" 0 "$(calls | grep -c '^close')"
+command rm -f "$fake/find-fails" "$fake/send-fails"
 
 # claude attach exits at once: iTerm2 closed the pane, or it fell back to a shell.
 echo gone >"$fake/state"
@@ -99,14 +178,38 @@ command rm -f "$fake/state"
 out=$(view --close --pane 'F1C3A2B4-0D6E 4242 2'); rc=$?
 check "close: exit 0" 0 "$rc"
 check "close: says so" "closed pane F1C3A2B4-0D6E" "$out"
-check "close: closes the pane without asking what runs there" "classify --session F1C3A2B4-0D6E --window 4242 --tab 2
+check "close: finds the pane and closes it without asking what runs there" "find --session F1C3A2B4-0D6E
 close --session F1C3A2B4-0D6E --window 4242 --tab 2 --force" "$(calls)"
-echo gone >"$fake/state"
+# The coordinates name another window than the one holding the pane (#200).
+echo "F1C3A2B4-0D6E 28142 1" >"$fake/find"
+out=$(view --close --pane 'F1C3A2B4-0D6E 34630 1'); rc=$?
+check "close, other window: exit 0" 0 "$rc"
+check "close, other window: says so" "closed pane F1C3A2B4-0D6E" "$out"
+check "close, other window: closes the pane where it is" "close --session F1C3A2B4-0D6E --window 28142 --tab 1 --force" "$(calls | grep '^close')"
+command rm -f "$fake/find"
+touch "$fake/find-none"
 out=$(view --close --pane 'F1C3A2B4-0D6E 4242 2'); rc=$?
 check "close, already gone: exit 0" 0 "$rc"
 check "close, already gone: says so" "pane F1C3A2B4-0D6E already closed" "$out"
 check "close, already gone: closes nothing" 0 "$(calls | grep -c '^close')"
-command rm -f "$fake/state"
+command rm -f "$fake/find-none"
+echo "F1C3A2B4-0D6E-9 28142 1 zsh" >"$fake/find"
+out=$(view --close --pane 'F1C3A2B4-0D6E 4242 2'); rc=$?
+check "close, only a longer id matches: already closed" "pane F1C3A2B4-0D6E already closed" "$out"
+check "close, only a longer id matches: closes nothing" 0 "$(calls | grep -c '^close')"
+command rm -f "$fake/find"
+touch "$fake/find-fails"
+out=$(view --close --pane 'F1C3A2B4-0D6E 4242 2'); rc=$?
+check "close, find fails: exit 1" 1 "$rc"
+check "close, find fails: does not call the pane closed" "Error: iTerm2 could not say where pane F1C3A2B4-0D6E is (could not list iTerm2 sessions: execution error: iTerm got an error (-600)), so it may still be open" "$out"
+check "close, find fails: closes nothing" 0 "$(calls | grep -c '^close')"
+command rm -f "$fake/find-fails"
+touch "$fake/close-fails"
+out=$(view --close --pane 'F1C3A2B4-0D6E 4242 2'); rc=$?
+check "close, close fails: exit 1" 1 "$rc"
+check "close, close fails: says so" "Error: iTerm2 could not close pane F1C3A2B4-0D6E" "$out"
+command rm -f "$fake/close-fails"
+calls >/dev/null
 out=$(view --close --pane 'F1C3A2B4-0D6E 4242'); rc=$?
 check "close, bad pane: exit 1" 1 "$rc"
 check "close, bad pane: says so" "Error: --pane needs 'SESSION WINDOW TAB', not 'F1C3A2B4-0D6E 4242'" "$out"
@@ -148,6 +251,56 @@ check "iterm with a tmux session name: says so" "Error: --session names a tmux s
 out=$( (MP_PANE_DIR="$work/none"; export MP_PANE_DIR; view --iterm --id $id --dir "$project") ); rc=$?
 check "no pane scripts: exit 1" 1 "$rc"
 check "no pane scripts: says so" "Error: no iterm-pane scripts in $work/none, so no pane can open; watch with claude attach $id" "$out"
+
+# --- the real iterm-pane scripts, on a stubbed osascript (#200) --------------
+# The 2026-10-17 run: the split pane is in window 28142, pane-open.sh named
+# window 34630, so typing claude attach into it failed. The stub answers the
+# split with the wrong window, refuses any command aimed at window 34630 as
+# iTerm2 does (-1728), lists the pane in 28142, and records what it is sent.
+# A fake ps gives pane-open.sh a TTY to walk to.
+osa="$work/osa"
+mkdir -p "$osa/bin"
+cat >"$osa/bin/osascript" <<EOF
+#!/bin/sh
+s=""
+for a in "\$@"; do [ "\$a" = -e ] || s="\$s\$a
+"; done
+[ -t 0 ] || s="\$s\$(command cat)"
+printf '%s\n--\n' "\$s" >>"$osa/log"
+case \$s in
+    *'split vertically'*) echo "D54E62AC-F574 34630 1" ;;
+    *'"W:"'*) [ -f "$osa/gone" ] || printf 'W:28142 T:1 S:SUPERVISOR-1 Name:claude\nW:28142 T:1 S:D54E62AC-F574 Name:-zsh\n' ;;
+    *'window id 28142'*) ;;
+    *) echo "execution error: iTerm got an error: Can't get session id \"D54E62AC-F574\". (-1728)" >&2; exit 1 ;;
+esac
+EOF
+cat >"$osa/bin/ps" <<'EOF'
+#!/bin/sh
+case "$*" in
+    *tty=*)  echo ttys009 ;;
+    *ppid=*) echo 1 ;;
+esac
+EOF
+chmod +x "$osa/bin/osascript" "$osa/bin/ps"
+real() { (PATH="$osa/bin:$PATH" MP_PANE_DIR="$root/plugins/mp-ported-skills/skills/iterm-pane/scripts" &&
+    export PATH MP_PANE_DIR &&
+    [ "$(command -v osascript)" = "$osa/bin/osascript" ] && view "$@"); }
+sent() { command cat "$osa/log" 2>/dev/null; command rm -f "$osa/log"; }
+out=$(real --iterm --id $id --dir "$project"); rc=$?
+check "stubbed osascript, wrong window: exit 1" 1 "$rc"
+check "stubbed osascript, wrong window: the pane was closed" "Error: claude attach did not start in the pane iTerm2 split (pane-send.sh: no pane with session D54E62AC-F574 in tab 1 of window 34630 (closed, or wrong coordinates)), so the pane was closed; watch with claude attach $id" "$out"
+check "stubbed osascript, wrong window: closed in the window that holds it" 1 \
+    "$(sent | grep -c 'tell session id "D54E62AC-F574" of tab 1 of window id 28142 to close')"
+out=$(real --close --pane 'D54E62AC-F574 34630 1'); rc=$?
+check "stubbed osascript, close in the wrong window: exit 0" 0 "$rc"
+check "stubbed osascript, close in the wrong window: closes it" "closed pane D54E62AC-F574" "$out"
+check "stubbed osascript, close in the wrong window: closed where it is" 1 \
+    "$(sent | grep -c 'tell session id "D54E62AC-F574" of tab 1 of window id 28142 to close')"
+touch "$osa/gone"
+out=$(real --close --pane 'D54E62AC-F574 28142 1'); rc=$?
+check "stubbed osascript, no window holds it: already closed" "pane D54E62AC-F574 already closed" "$out"
+check "stubbed osascript, no window holds it: closes nothing" 0 "$(sent | grep -c ' to close')"
+command rm -f "$osa/gone"
 
 echo "supervise-view-iterm: $pass passed, $fail failed"
 [ "$fail" = 0 ]

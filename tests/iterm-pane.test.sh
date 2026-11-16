@@ -497,6 +497,12 @@ check "open: prints the new pane's coordinates" 'NEW-1 7 2' "$(out)"
 check "open: exit 0" 0 "$rc"
 check "open: finds the caller's pane by its TTY" 1 "$(sent | grep -c 'set targetTTY to "/dev/ttys001"')"
 check "open: splits vertically by default" 1 "$(sent | grep -c 'split vertically with default profile')"
+# A window from `repeat with w in windows` is a reference by its place in
+# the window list, which the split can reorder, so its id is read when the
+# pane is found, not after the split (#200).
+check "open: reads the window's id when it finds the pane" 1 "$(sent | grep -c 'set foundWindowId to id of w$')"
+check "open: returns the id read then" 1 "$(sent | grep -c 'return (id of newSession) & " " & foundWindowId & " " & foundTabNum')"
+check "open: never reads a window id after the split" 0 "$(sent | grep -c 'id of foundWindow)')"
 
 reset; answer 'NEW-1 7 2'
 run pane-open.sh --direction horizontal

@@ -60,21 +60,23 @@ else
 fi
 
 # Find the iTerm2 session on the caller's TTY, split it, and return the new
-# session's coordinates.
+# session's coordinates. `w` is a reference by place in the window list,
+# which the split can reorder, so the window's id is read when the session is
+# found: read after the split, it named another window (#200).
 ERR=$(mktemp)
 trap 'command rm -f "$ERR"' EXIT
 if ! RESULT=$(osascript 2>"$ERR" <<APPLESCRIPT
 tell application "iTerm2"
     set targetTTY to "${CALLER_TTY}"
     set foundSession to missing value
-    set foundWindow to missing value
+    set foundWindowId to missing value
     set foundTabNum to 1
     repeat with w in windows
         repeat with ti from 1 to count of tabs of w
             repeat with s in sessions of (tab ti of w)
                 if tty of s is targetTTY then
                     set foundSession to s
-                    set foundWindow to w
+                    set foundWindowId to id of w
                     set foundTabNum to ti
                 end if
             end repeat
@@ -86,7 +88,7 @@ tell application "iTerm2"
     tell foundSession
         set newSession to (split ${DIRECTION}ly ${PROFILE_CLAUSE})
     end tell
-    return (id of newSession) & " " & (id of foundWindow) & " " & foundTabNum
+    return (id of newSession) & " " & foundWindowId & " " & foundTabNum
 end tell
 APPLESCRIPT
 ); then
