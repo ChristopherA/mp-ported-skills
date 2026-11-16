@@ -41,7 +41,8 @@ mkdir -p "$CLAUDE_CONFIG_DIR"
 # --- fake gh ---------------------------------------------------------------
 # Logs each call's arguments on one line to gh-log, a comment's body to
 # gh-body, and answers `issue view` with $work/state ("OPEN" or "CLOSED")
-# and $work/labels (a JSON array of names).
+# and $work/labels (a JSON array of names), or, asked for comments, with
+# $work/comments (a JSON array of bodies).
 mkdir -p "$work/bin"
 cat >"$work/bin/gh" <<EOF
 #!/bin/sh
@@ -55,6 +56,10 @@ for a in "\$@"; do
 done
 case "\$1 \$2" in
     "issue view")
+        case "\$*" in *comments*)
+            jq -n --argjson c "\$(command cat "$work/comments")" '{comments: [\$c[] | {body: .}]}'
+            exit 0 ;;
+        esac
         jq -n --arg s "\$(command cat "$work/state")" --argjson l "\$(command cat "$work/labels")" \
             '{state: \$s, labels: [\$l[] | {name: .}], url: "https://github.com/o/r/issues/7"}' ;;
     "issue close" | "issue reopen" | "issue edit") ;;
@@ -100,7 +105,9 @@ reset() { # <state> <labels json>
     command rm -f "$work/gh-log" "$work/gh-body" "$record" "$marker"
     printf '%s' "$1" >"$work/state"
     printf '%s' "$2" >"$work/labels"
+    printf '%s' "${3:-[]}" >"$work/comments"
 }
+hold_comment='["The Distribution push is waiting on the maintainer, so this ticket is held open for them (hitl) until it lands. x holds these commits its upstream lacks:\n\n- abc x"]'
 
 # --- the Distribution repo holds an unpushed commit ------------------------
 g "$dist" -c commit.gpgsign=false commit -q --allow-empty -m 'Add the parser'
@@ -135,6 +142,15 @@ reset OPEN '["afk"]'
 out=$(close --declined)
 check "declined, never held: prints as before" "kept open https://github.com/o/r/issues/7" "$(printf '%s\n' "$out" | grep '^kept open')"
 
+reset OPEN '["hitl"]' '["an unrelated note"]'
+out=$(close --declined)
+check "declined, already hitl but never held: no reopen, no relabel" "issue view 7 --json state,labels,url
+issue view 7 --json comments
+issue comment 7 --body-file $(sed -n 's/^issue comment 7 --body-file //p' "$work/gh-log")" "$(command cat "$work/gh-log")"
+check "declined, already hitl but never held: lists the commits as before" "The Distribution push was declined, so this ticket stays open and waits on the maintainer (hitl). $dist holds these commits its upstream lacks:
+
+- $code" "$(command cat "$work/gh-body")"
+
 # --- held, before the push is checked or asked (#203) ----------------------
 reset OPEN '["afk","bug"]'
 out=$(close --held --check)
@@ -157,6 +173,13 @@ reset CLOSED '["afk"]'
 out=$(close --held)
 check "held, closed: reopens first" "issue reopen 7" "$(sed -n 2p "$work/gh-log")"
 
+reset OPEN '["hitl"]' "$hold_comment"
+out=$(close --held)
+check "held twice: exit 0" "exit=0" "$(last "$out")"
+check "held twice: no second comment" "issue view 7 --json state,labels,url
+issue view 7 --json comments" "$(command cat "$work/gh-log")"
+check "held twice: says so" "held already https://github.com/o/r/issues/7" "$(printf '%s\n' "$out" | grep '^held already')"
+
 reset OPEN '["afk"]'
 echo 3d2d302a >"$marker"
 out=$(close --held)
@@ -168,10 +191,11 @@ out=$(CLAUDE_CODE_SESSION_ATTENDED=0; export CLAUDE_CODE_SESSION_ATTENDED; close
 check "held: refused in a background session" "exit=1" "$(last "$out")"
 
 # --- declined on a held ticket ---------------------------------------------
-reset OPEN '["hitl","bug"]'
+reset OPEN '["hitl","bug"]' "$hold_comment"
 out=$(close --declined)
 check "declined, held: exit 0" "exit=0" "$(last "$out")"
 check "declined, held: comments only, no reopen, no relabel" "issue view 7 --json state,labels,url
+issue view 7 --json comments
 issue comment 7 --body-file $(sed -n 's/^issue comment 7 --body-file //p' "$work/gh-log")" "$(command cat "$work/gh-log")"
 check "declined, held: says declined, no commit list" "The Distribution push was declined, so this ticket stays held for the maintainer (hitl). Its unpushed commits are listed in the comment that held it." \
     "$(command cat "$work/gh-body")"
@@ -179,10 +203,11 @@ check "declined, held: says declined, no commit list" "The Distribution push was
 # --- a failed push.sh --check on a held ticket -----------------------------
 printf '%s\n' 'push project main -> origin/main' 'ok marker: no worker marker' 'fail clean: the tree has changes' \
     'ok distribution upstream: x' 'fail distribution sweep: 2 hits' '  README.md:3: hit' >"$work/check-out"
-reset OPEN '["hitl"]'
+reset OPEN '["hitl"]' "$hold_comment"
 out=$(close --failed "$work/check-out")
 check "failed, held: exit 0" "exit=0" "$(last "$out")"
 check "failed, held: comments only" "issue view 7 --json state,labels,url
+issue view 7 --json comments
 issue comment 7 --body-file $(sed -n 's/^issue comment 7 --body-file //p' "$work/gh-log")" "$(command cat "$work/gh-log")"
 check "failed, held: the comment gives the fail lines" "The Distribution push was not asked: \`push.sh --check\` failed, so this ticket stays held for the maintainer (hitl). The failed checks:
 
@@ -228,12 +253,14 @@ out=$(close --held)
 check "held after the push: refused, nothing is unpushed" "exit=2" "$(last "$out")"
 check "held after the push: gh not called" "no" "$([ -f "$work/gh-log" ] && echo yes || echo no)"
 
-reset OPEN '["hitl","bug"]'
+reset OPEN '["hitl","bug"]' "$hold_comment"
 out=$(close --pushed)
-check "pushed, held: removes hitl, then closes" "issue view 7 --json state,labels,url
-issue edit 7 --remove-label hitl
-issue close 7 --comment Closed after the Distribution push landed: $dist is even with its upstream at $code." \
+check "pushed, held: closes, then removes hitl" "issue view 7 --json state,labels,url
+issue close 7 --comment Closed after the Distribution push landed: $dist is even with its upstream at $code.
+issue edit 7 --remove-label hitl" \
     "$(command cat "$work/gh-log")"
+check "pushed, held: recorded for actions.sh" "2da1baa1 issue-close https://github.com/o/r/issues/7" \
+    "$(awk '{ print $1, $3, $4 }' "$record")"
 
 reset OPEN '["afk"]'
 out=$(close --pushed)

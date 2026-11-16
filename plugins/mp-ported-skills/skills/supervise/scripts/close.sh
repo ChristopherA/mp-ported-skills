@@ -15,9 +15,10 @@
 #               and gets a comment naming the unpushed commits and that the
 #               push waits on the maintainer, so a supervisor session that
 #               ends at any later point leaves a ticket /supervise's next
-#               step does not build again
-#   --pushed    the push landed: remove ready-for-human if the ticket
-#               carries it, then close the ticket, with a comment naming
+#               step does not build again; on a ticket already held it
+#               prints `held already <url>` and runs nothing more
+#   --pushed    the push landed: close the ticket, then remove
+#               ready-for-human if it carries it, with a comment naming
 #               the pushed commit, under the Project's issue-close grant or
 #               the maintainer's own approval of the close (--approved)
 #   --declined  the push was declined: on a held ticket, a comment says so;
@@ -28,7 +29,8 @@
 #               it was not already
 #
 # A ticket is held when it is open, carries ready-for-human and not
-# ready-for-agent.
+# ready-for-agent, and has the comment --held posts (hold_lead below); the
+# comments are read only when the labels already say held.
 #
 # The commands are built from the options, never from the worker's text.
 # Label strings come from DIR's docs/agents/triage-labels.md, as capturing's
@@ -214,8 +216,13 @@ human=$(label_for ready-for-human)
 # has_label <label>: the ticket carries it.
 has_label() { printf '%s' "$view" | jq -e --arg l "$1" '[.labels[].name] | index($l)' >/dev/null; }
 state=$(printf '%s' "$view" | jq -r '.state')
+# The first words of the comment --held posts, which mark the ticket held.
+hold_lead='The Distribution push is waiting on the maintainer, so this ticket is held open'
 held=0
-[ "$state" = CLOSED ] || ! has_label "$human" || has_label "$agent" || held=1
+if [ "$OUTCOME" != pushed ] && [ "$state" != CLOSED ] && has_label "$human" && ! has_label "$agent"; then
+    run issue view "$TICKET" --json comments
+    ! printf '%s' "$out" | jq -e --arg l "$hold_lead" 'any(.comments[].body; startswith($l))' >/dev/null || held=1
+fi
 
 if [ "$OUTCOME" = pushed ]; then
     printf 'Closed after the Distribution push landed: %s is even with its upstream at %s.\n' "$DIST" "$head_line" >"$body"
@@ -224,22 +231,27 @@ if [ "$OUTCOME" = pushed ]; then
         echo "closed already: #$TICKET"
         exit 0
     fi
-    # Before the close, so a failed edit leaves the ticket held, not closed.
-    ! has_label "$human" || run issue edit "$TICKET" --remove-label "$human"
     run issue close "$TICKET" --comment "$(command cat "$body")"
     echo "closed $url"
     record=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-posted)
     printf '%s %s %s %s\n' "$ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" issue-close "$url" >>"$record" ||
         echo "note the close was not recorded in $record, so record.sh will count the worker's wait for it as a human's"
+    # After the close, so a failed close leaves the ticket held, not
+    # unlabelled; a closed ticket left ready-for-human is built by nothing.
+    ! has_label "$human" || run issue edit "$TICKET" --remove-label "$human"
     exit 0
 fi
 
 # --held, --declined and --failed: the ticket stays open for the maintainer.
+if [ "$OUTCOME" = held ] && [ "$held" = 1 ]; then
+    echo "held already $url"
+    exit 0
+fi
 [ "$state" != CLOSED ] || run issue reopen "$TICKET"
 case $OUTCOME in
     held)
         {
-            printf 'The Distribution push is waiting on the maintainer, so this ticket is held open for them (%s) until it lands. %s holds these commits its upstream lacks:\n\n' "$human" "$DIST"
+            printf '%s for them (%s) until it lands. %s holds these commits its upstream lacks:\n\n' "$hold_lead" "$human" "$DIST"
             printf '%s\n' "$unpushed" | sed 's/^/- /'
         } >"$body" ;;
     declined)
