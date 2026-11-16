@@ -57,13 +57,21 @@ if [ -f "$fake/send-fails" ]; then
 fi
 EOF
 # pane-find.sh: by default the pane is where pane-open.sh said; the find file
-# moves it, and find-fails makes iTerm2 unreachable.
+# moves it, and find-fails makes iTerm2 unreachable. find-then lists the pane
+# once, then turns on the switch it names (find-none, find-fails) for later
+# calls, as a pane that closes by itself during the call reads.
 cat >"$panes/pane-find.sh" <<EOF
 #!/bin/sh
 echo "find \$*" >>"$fake/calls"
 if [ -f "$fake/find-fails" ]; then
     echo "Error: could not list iTerm2 sessions: execution error: iTerm got an error (-600)" >&2
     exit 1
+fi
+if [ -f "$fake/find-then" ]; then
+    touch "$fake/\$(command cat "$fake/find-then")"
+    command rm -f "$fake/find-then"
+    echo "F1C3A2B4-0D6E 4242 2"
+    exit 0
 fi
 if [ -f "$fake/find" ]; then
     command cat "$fake/find"
@@ -208,7 +216,23 @@ touch "$fake/close-fails"
 out=$(view --close --pane 'F1C3A2B4-0D6E 4242 2'); rc=$?
 check "close, close fails: exit 1" 1 "$rc"
 check "close, close fails: says so" "Error: iTerm2 could not close pane F1C3A2B4-0D6E" "$out"
-command rm -f "$fake/close-fails"
+check "close, close fails: looks for the pane again after the failed close" "find --session F1C3A2B4-0D6E
+close --session F1C3A2B4-0D6E --window 4242 --tab 2 --force
+find --session F1C3A2B4-0D6E" "$(calls)"
+# The pane closes by itself between the lookup and the close (#198).
+echo find-none >"$fake/find-then"
+out=$(view --close --pane 'F1C3A2B4-0D6E 4242 2'); rc=$?
+check "close, pane closes during the call: exit 0" 0 "$rc"
+check "close, pane closes during the call: already closed" "pane F1C3A2B4-0D6E already closed" "$out"
+check "close, pane closes during the call: looks again after the failed close" "find --session F1C3A2B4-0D6E
+close --session F1C3A2B4-0D6E --window 4242 --tab 2 --force
+find --session F1C3A2B4-0D6E" "$(calls)"
+command rm -f "$fake/find-none" "$fake/find-then"
+echo find-fails >"$fake/find-then"
+out=$(view --close --pane 'F1C3A2B4-0D6E 4242 2'); rc=$?
+check "close, close fails, second lookup fails: exit 1" 1 "$rc"
+check "close, close fails, second lookup fails: keeps the error" "Error: iTerm2 could not close pane F1C3A2B4-0D6E" "$out"
+command rm -f "$fake/close-fails" "$fake/find-fails" "$fake/find-then"
 calls >/dev/null
 out=$(view --close --pane 'F1C3A2B4-0D6E 4242'); rc=$?
 check "close, bad pane: exit 1" 1 "$rc"

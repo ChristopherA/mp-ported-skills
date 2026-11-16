@@ -41,4 +41,4 @@ It removes only that Project's session, and prints `closed <session>`, or `no tm
 sh "${CLAUDE_SKILL_DIR}/scripts/view.sh" --close --pane '<session> <window> <tab>' </dev/null
 ```
 
-It finds the pane by its session id in every window, so it closes the pane even when the coordinates name another window. It prints `closed pane <session>`, or `pane <session> already closed` when no window holds it, as when iTerm2 closed it with the viewer. Exit 1 when iTerm2 cannot say where the pane is: the pane may still be open, so report it. It closes the pane whatever runs there, so never call it while the worker runs.
+It finds the pane by its session id in every window, so it closes the pane even when the coordinates name another window. It prints `closed pane <session>`, or `pane <session> already closed` when no window holds it, as when iTerm2 closed it with the viewer, before the call or during it. Exit 1 when iTerm2 cannot say where the pane is, or cannot close a pane it still holds: the pane may still be open, so report it. It closes the pane whatever runs there, so never call it while the worker runs.

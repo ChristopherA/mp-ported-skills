@@ -160,8 +160,16 @@ if [ -n "$CLOSE" ] && [ -n "$PANE" ]; then
     done
     pane_locate
     case $? in
-        0) pane_close || fail "iTerm2 could not close pane $PANE_SESSION"
-           echo "closed pane $PANE_SESSION" ;;
+        # A pane can close by itself between the lookup and the close, as a
+        # viewer does when its worker stops (#198), so a failed close looks
+        # again, and reads only a pane no window holds as closed.
+        0) if pane_close; then
+               echo "closed pane $PANE_SESSION"
+           else
+               pane_locate
+               [ $? -eq 1 ] || fail "iTerm2 could not close pane $PANE_SESSION"
+               echo "pane $PANE_SESSION already closed"
+           fi ;;
         1) echo "pane $PANE_SESSION already closed" ;;
         *) fail "iTerm2 could not say where pane $PANE_SESSION is ($pane_why), so it may still be open" ;;
     esac
