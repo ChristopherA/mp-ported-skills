@@ -18,9 +18,30 @@ No step of this skill, `capturing` or `resuming` calls `Artifact`, `Workflow`, `
 claude --disallowedTools Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome
 ```
 
-Then type `/mp-ported-skills:supervise ...` in it. The command leaves plugins alone, since which ones a profile holds is the profile's; one the supervisor never uses can be turned off for the session with `--settings '{"enabledPlugins":{"<plugin>@<marketplace>":false}}'`.
+Then type `/mp-ported-skills:supervise ...` in it, or give the command as `claude`'s first positional prompt, after the flags: an interactive session started that way runs it as the skill, not as plain text (Claude Code 2.1.325, #262). Keep `--disallowedTools` away from the prompt, since a list option reads the next bare word into its list. For a start that takes one word to type, the maintainer can copy this function into their own shell setup (zsh or bash; POSIX `sh` refuses the hyphen):
 
-From the Claude app, a session gets only what its `claude remote-control` server was started with, and the server takes `--no-chrome` but no tool deny (Claude Code 2.1.316). Start the server with `--no-chrome`, and put the deny in the settings of the folder the server runs in, `.claude/settings.local.json`: `"permissions": {"deny": ["Artifact", "Workflow", "ScheduleWakeup", "SendFeedback"]}`. It holds for every session started in that folder, the maintainer's own included, until removed. Add the file to `.gitignore` when git does not already ignore it: an untracked file makes the tree dirty, and `launch.sh` refuses a dirty tree.
+```sh
+claude-supervise() {
+    claude --disallowedTools Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome \
+        "/mp-ported-skills:supervise ${*:-. --loop --model claude-opus-5-5 --effort medium}"
+}
+```
+
+`claude-supervise` alone runs the loop on the Project in the current folder with an Opus worker at medium effort; any arguments replace that command's, as `claude-supervise ../app --loop 2`. It calls `claude` by name, so a wrapper the maintainer's shell defines for `claude` still runs. The command leaves plugins alone, since which ones a profile holds is the profile's; one the supervisor never uses can be turned off for the session with `--settings '{"enabledPlugins":{"<plugin>@<marketplace>":false}}'`.
+
+From the Claude app, a session gets only what its `claude remote-control` server was started with. Keep a server for supervising, started in the Project folder with a settings file it hands to every session it spawns:
+
+```sh
+claude remote-control --spawn same-dir --no-chrome --permission-mode auto --settings <file>
+```
+
+with the deny in `<file>`:
+
+```json
+{"permissions": {"deny": ["Artifact", "Workflow", "ScheduleWakeup", "SendFeedback"]}}
+```
+
+Keep the file outside the Project folder, where sessions cannot write it, as the server's help asks; the server reads it once, at start, so restart the server after changing it. Pass `--spawn same-dir`: a supervisor runs from the main checkout (Policy, below), and the server saves its spawn mode for the folder, so one started there once with `--spawn worktree` gives later sessions a worktree each. Pass `--permission-mode auto`: with `--settings`, the server no longer turns on auto mode or auto-compact for its sessions. The deny is the one `launch.sh` and the terminal start leave out, and the file is ordinary settings, so a supervisor exclude list (#230) joins it as `claudeMdExcludes`. The server passed the file, auto mode and `--no-chrome` to the session it spawned (Claude Code 2.1.325, #262); that the session's first call drops the four tools as the `--settings` probe in `docs/research/supervisor-context.md` did is the maintainer's check from the app. This replaces putting the deny in the folder's `.claude/settings.local.json`, which took the tools from every session in the folder, the maintainer's own included: remove that deny where it was set.
 
 ## Policy
 
