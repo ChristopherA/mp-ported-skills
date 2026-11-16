@@ -163,6 +163,16 @@ check "split, send fails, pane gone: exit 1" 1 "$rc"
 check "split, send fails, pane gone: says the pane has closed" "Error: claude attach did not start in the pane iTerm2 split (pane-send.sh: no pane with session F1C3A2B4-0D6E in tab 2 of window 4242 (closed, or wrong coordinates)), and the pane has closed; watch with claude attach $id" "$out"
 check "split, send fails, pane gone: closes nothing" 0 "$(calls | grep -c '^close')"
 command rm -f "$fake/find-none"
+# The pane closes by itself between the lookup and the close (#198).
+touch "$fake/close-fails"
+echo find-none >"$fake/find-then"
+out=$(view --iterm --id $id --dir "$project"); rc=$?
+check "split, send fails, pane closes during the close: exit 1" 1 "$rc"
+check "split, send fails, pane closes during the close: says the pane has closed" "Error: claude attach did not start in the pane iTerm2 split (pane-send.sh: no pane with session F1C3A2B4-0D6E in tab 2 of window 4242 (closed, or wrong coordinates)), and the pane has closed; watch with claude attach $id" "$out"
+check "split, send fails, pane closes during the close: looks again after the failed close" "find --session F1C3A2B4-0D6E
+close --session F1C3A2B4-0D6E --window 4242 --tab 2 --force
+find --session F1C3A2B4-0D6E" "$(calls | grep -v '^open')"
+command rm -f "$fake/close-fails" "$fake/find-none" "$fake/find-then"
 touch "$fake/find-fails"
 out=$(view --iterm --id $id --dir "$project"); rc=$?
 check "split, send and find fail: exit 1" 1 "$rc"

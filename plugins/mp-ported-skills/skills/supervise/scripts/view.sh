@@ -152,6 +152,16 @@ pane_locate() {
     pane_why=${pane_why:-pane-find.sh failed}
     return 2
 }
+# Closes the pane pane_locate found. A pane can close by itself between the
+# lookup and the close, as a viewer does when its worker stops (#198), so a
+# failed close looks again. Returns 1 when no window holds it then, 2 when it
+# may still be open.
+pane_shut() {
+    pane_close && return 0
+    pane_locate
+    [ $? -eq 1 ] && return 1
+    return 2
+}
 
 if [ -n "$CLOSE" ] && [ -n "$PANE" ]; then
     pane_coords "$PANE" || fail "--pane needs 'SESSION WINDOW TAB', not '$PANE'"
@@ -160,16 +170,12 @@ if [ -n "$CLOSE" ] && [ -n "$PANE" ]; then
     done
     pane_locate
     case $? in
-        # A pane can close by itself between the lookup and the close, as a
-        # viewer does when its worker stops (#198), so a failed close looks
-        # again, and reads only a pane no window holds as closed.
-        0) if pane_close; then
-               echo "closed pane $PANE_SESSION"
-           else
-               pane_locate
-               [ $? -eq 1 ] || fail "iTerm2 could not close pane $PANE_SESSION"
-               echo "pane $PANE_SESSION already closed"
-           fi ;;
+        0) pane_shut
+           case $? in
+               0) echo "closed pane $PANE_SESSION" ;;
+               1) echo "pane $PANE_SESSION already closed" ;;
+               *) fail "iTerm2 could not close pane $PANE_SESSION" ;;
+           esac ;;
         1) echo "pane $PANE_SESSION already closed" ;;
         *) fail "iTerm2 could not say where pane $PANE_SESSION is ($pane_why), so it may still be open" ;;
     esac
@@ -216,8 +222,12 @@ if [ -n "$ITERM" ]; then
             split="claude attach did not start in the pane iTerm2 split (${why:-pane-open.sh failed})"
             pane_locate
             case $? in
-                0) pane_close && fail_watch "$split, so the pane was closed"
-                   fail_watch "$split, and it could not be closed: view.sh --close --pane '$PANE_SESSION $PANE_WINDOW $PANE_TAB'" ;;
+                0) pane_shut
+                   case $? in
+                       0) fail_watch "$split, so the pane was closed" ;;
+                       1) fail_watch "$split, and the pane has closed" ;;
+                       *) fail_watch "$split, and it could not be closed: view.sh --close --pane '$PANE_SESSION $PANE_WINDOW $PANE_TAB'" ;;
+                   esac ;;
                 1) fail_watch "$split, and the pane has closed" ;;
                 *) fail_watch "$split, and iTerm2 could not say where pane $PANE_SESSION is ($pane_why), so it may still be open" ;;
             esac
