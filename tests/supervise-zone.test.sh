@@ -149,7 +149,7 @@ capture due at 100% of zone, forced at 108%" \
     "$( (export MP_SMART_ZONE_K=225; compact claude-sonnet-5) )"
 check "compact: claude-sonnet-5's dated form does not take in an unobserved claude-sonnet-5-6" "note: the context window of model claude-sonnet-5-6 is not known, so the smallest, 200k, is used" \
     "$(compact claude-sonnet-5-6 | sed -n 1p)"
-check "compact: a 200k model is not matched by a 1M one's prefix" "note: the context window of model claude-sonnet-4-5 is not known, so the smallest, 200k, is used" \
+check "compact: a 200k model of the same family stays unknown" "note: the context window of model claude-sonnet-4-5 is not known, so the smallest, 200k, is used" \
     "$(compact claude-sonnet-4-5 | sed -n 1p)"
 check "compact: an alias is an unknown window, and the note asks for the full id" "note: the context window of model opus is not known, so the smallest, 200k, is used; give the full model id (claude-...), since an alias names no fixed window
 compact point 106% of zone (80% of a 200k window)

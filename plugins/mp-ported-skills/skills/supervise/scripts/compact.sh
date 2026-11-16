@@ -28,9 +28,9 @@ compact_pct() {
 # modelUsage.<id>.contextWindow 1000000 for each, and 200000 for
 # claude-haiku-4-5). Each entry also matches its dated `-*` form; for
 # claude-sonnet-5 that is `-20*` alone, so an unobserved claude-sonnet-5-6
-# is not read as 1M. An alias
-# (opus, sonnet) is not listed: it moves to a new model when one ships, so
-# the table holds only ids whose window was observed.
+# is not read as 1M. An alias (opus, sonnet) is not listed: it moves to a
+# new model when one ships, so the table holds only ids whose window was
+# observed.
 compact_window_k() {
     case $1 in
         *'[1m]' | claude-opus-5-5 | claude-opus-5-5-* | claude-fable-5-1 | claude-fable-5-1-* | \
