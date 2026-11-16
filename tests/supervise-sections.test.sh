@@ -44,7 +44,9 @@ loop.md|## Loop
 routine-answers.md|## Routine answers
 watching.md|## Watching
 report-states.md|- **`moved`**
-stop-refused.md|whether to run it again'
+stop-refused.md|whether to run it again
+distribution.md|one path line, relative to the Project repo
+launch.md|which carries a line telling the worker to read each file once'
 
 printf '%s\n' "$moved" | while IFS='|' read -r file heading; do
     if [ -f "$dir/$file" ]; then e=yes; else e=no; fi
@@ -64,6 +66,13 @@ while IFS=: read -r name got; do
     esac
 done < "${TMPDIR:-/tmp}/supervise-sections.$$"
 command rm -f "${TMPDIR:-/tmp}/supervise-sections.$$"
+
+# The start text is the maintainer's, read before a session starts and at
+# no step, so SKILL.md only names where it lives (#231).
+check "starting.md exists" yes "$([ -f "$dir/starting.md" ] && echo yes || echo no)"
+check "SKILL.md names starting.md" yes \
+    "$(contains "$skill" '(Starting this session, `starting.md`)')"
+check "the start function left SKILL.md" no "$(contains "$skill" 'claude-supervise() {')"
 
 # Every file SKILL.md or a moved file tells the reader to read is there.
 missing=

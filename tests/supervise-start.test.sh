@@ -1,5 +1,5 @@
 #!/bin/sh
-# supervise-start.test.sh -- checks that supervise's SKILL.md gives the
+# supervise-start.test.sh -- checks that supervise's starting.md gives the
 # maintainer a start command for a supervisor session that leaves out the
 # tools no supervisor step calls, the same ones launch.sh leaves out of a
 # worker (#229), and a route for a session started from the Claude app.
@@ -16,6 +16,9 @@ set -u
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 dir="$root/plugins/mp-ported-skills/skills/supervise"
 skill="$dir/SKILL.md"
+# The start text is read before a session starts, never at a step, so it
+# lives beside SKILL.md (#231).
+start="$dir/starting.md"
 launch="$dir/scripts/launch.sh"
 research="$root/docs/research/supervisor-context.md"
 
@@ -43,18 +46,22 @@ quoted=$(printf '%s' "$unused" | sed 's/[^ ]*/"&"/g; s/ /, /g')
 
 check "SKILL.md has a section on starting the supervisor's session" yes \
     "$(has_line "$skill" '## Starting this session')"
+check "SKILL.md names the file the start text lives in" yes \
+    "$(contains "$skill" '(Starting this session, `starting.md`)')"
+check "SKILL.md no longer holds the start function" no \
+    "$(contains "$skill" 'claude-supervise() {')"
 check "the start command drops launch.sh's unused tools and Chrome" \
     "claude --disallowedTools $commas --no-chrome" \
-    "$(grep -x "claude --disallowedTools [A-Za-z,]* --no-chrome" "$skill")"
+    "$(grep -x "claude --disallowedTools [A-Za-z,]* --no-chrome" "$start")"
 check "the section says why each tool is left out" yes \
-    "$(contains "$skill" 'publish a page, run a workflow, schedule a `/loop` wakeup, draft feedback or drive a browser')"
+    "$(contains "$start" 'publish a page, run a workflow, schedule a `/loop` wakeup, draft feedback or drive a browser')"
 check "the section names the saving's source" yes \
-    "$(contains "$skill" '`docs/research/supervisor-context.md`')"
+    "$(contains "$start" '`docs/research/supervisor-context.md`')"
 # The terminal route: a shell function the maintainer copies. Run the
-# function as written in SKILL.md, against a fake claude that prints its
+# function as written in starting.md, against a fake claude that prints its
 # arguments one per line, so the check reads what claude would receive.
-fn=$(sed -n '/^claude-supervise() {$/,/^}$/p' "$skill")
-check "SKILL.md gives the claude-supervise function" yes \
+fn=$(sed -n '/^claude-supervise() {$/,/^}$/p' "$start")
+check "starting.md gives the claude-supervise function" yes \
     "$([ -n "$fn" ] && echo yes || echo no)"
 # Under bash, not sh: a function name with a hyphen is fine in zsh and bash
 # but refused by POSIX sh, which macOS /bin/sh enforces.
@@ -73,28 +80,28 @@ check "the function's arguments replace the default command's" \
 check "the function calls claude by name, so the maintainer's wrapper runs" yes \
     "$(printf '%s\n' "$fn" | grep -q '^ *claude --disallowedTools' && echo yes || echo no)"
 check "the section says a positional slash command runs as the skill" yes \
-    "$(contains "$skill" 'runs it as the skill, not as plain text')"
+    "$(contains "$start" 'runs it as the skill, not as plain text')"
 
 # The Claude app route: a server kept for supervising, with the deny in a
 # settings file it hands its sessions, in place of the folder's own settings.
 check "the app route gives the server command" \
     "claude remote-control --spawn same-dir --no-chrome --permission-mode auto --settings <file>" \
-    "$(grep -x 'claude remote-control .*' "$skill")"
+    "$(grep -x 'claude remote-control .*' "$start")"
 check "the app route gives the settings file with the same tools" \
     "{\"permissions\": {\"deny\": [$quoted]}}" \
-    "$(grep -x '{"permissions": .*' "$skill")"
+    "$(grep -x '{"permissions": .*' "$start")"
 check "the app route says why same-dir" yes \
-    "$(contains "$skill" 'saves its spawn mode for the folder')"
+    "$(contains "$start" 'saves its spawn mode for the folder')"
 check "the app route says the file takes the exclude list" yes \
-    "$(contains "$skill" '`claudeMdExcludes`')"
+    "$(contains "$start" '`claudeMdExcludes`')"
 check "the app route says auto-compact stays off" yes \
-    "$(contains "$skill" 'Auto-compact stays off')"
+    "$(contains "$start" 'Auto-compact stays off')"
 check "the folder route stays until the server's first call is read" yes \
-    "$(contains "$skill" 'Until that reading shows the four tools gone, the measured route stays')"
+    "$(contains "$start" 'Until that reading shows the four tools gone, the measured route stays')"
 check "the folder route gives the same tools as a settings deny" yes \
-    "$(contains "$skill" "\"permissions\": {\"deny\": [$quoted]}\` (57,752")"
+    "$(contains "$start" "\"permissions\": {\"deny\": [$quoted]}\` (57,752")"
 check "the folder route says to git-ignore the settings file" yes \
-    "$(contains "$skill" 'Add the file to `.gitignore` when git does not already ignore it')"
+    "$(contains "$start" 'Add the file to `.gitignore` when git does not already ignore it')"
 
 check "the research records the start command's first call" yes \
     "$(has_line "$research" '### A supervisor started without its unused tools (#229)')"
