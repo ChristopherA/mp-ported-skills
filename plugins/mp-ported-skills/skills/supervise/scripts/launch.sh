@@ -156,7 +156,10 @@
 # on origin (distribution.sh, #125) has it checked the same way, each error
 # naming it, and refused when it is missing, not a repo's top, a linked
 # worktree or the Project's own repo (distribution_check, shared with
-# push.sh and resuming's state.sh, #209).
+# push.sh and resuming's state.sh, #209). It is also refused when this
+# profile's .claude.json has not recorded it as trusted (distribution_trusted,
+# #268), since claude --bg refuses an untrusted --add-dir folder and prints
+# no session id; the error names the one-time trust step.
 # The worker still runs in DIR, so `gh` reads the Project's tracker; it is
 # told the repo's path in its --append-system-prompt and given --add-dir
 # with it, which the job's respawnFlags must record. Checked live with
@@ -317,6 +320,15 @@ if [ -n "$DIST" ]; then
         esac
     fi
     check_repo "$DIST" "Distribution repo "
+    # claude --bg refuses an --add-dir folder this profile has not trusted
+    # (#268), after the setup lines and with no session id; refuse it here
+    # instead, naming the one-time step.
+    distribution_trusted "$DIST" "$CONFIG/.claude.json"
+    case $? in
+        0) ;;
+        1) fail "Distribution repo $DIST is not trusted under this profile ($CONFIG), so claude --bg refuses its --add-dir; start \`claude\` there once with CLAUDE_CONFIG_DIR=$CONFIG and choose \"Yes, I trust this folder\", then launch again; not launched" ;;
+        *) fail "$CONFIG/.claude.json could not be read, so whether Distribution repo $DIST is trusted is unknown; not launched" ;;
+    esac
     dist_default=$default
     # Where a parked worker resets the Distribution repo (#158). A continued
     # worker's first start there is not recorded, so it resets to the
