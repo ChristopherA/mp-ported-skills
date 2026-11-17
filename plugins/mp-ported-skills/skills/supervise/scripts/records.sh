@@ -48,12 +48,12 @@ records_path() {
 # append one line; with a citation and checks, a checked push's. A tab or
 # newline in either is written as a space, so the line keeps its layout.
 records_push_write() {
-    records_push_mark=""
+    records_push_suffix=""
     if [ $# -ge 8 ]; then
-        records_push_mark=$(printf ' checked-push\t%s\t%s' "$(printf '%s' "$7" | tr '\t\n' '  ')" \
+        records_push_suffix=$(printf ' checked-push\t%s\t%s' "$(printf '%s' "$7" | tr '\t\n' '  ')" \
             "$(printf '%s' "$8" | tr '\t\n' '  ')")
     fi
-    printf '%s %s %s %s %s%s\n' "$2" "$3" "$4" "$5" "$6" "$records_push_mark" 2>/dev/null >>"$1"
+    printf '%s %s %s %s %s%s\n' "$2" "$3" "$4" "$5" "$6" "$records_push_suffix" >>"$1"
 }
 
 # records_push_lines <file> <key>: the file's lines whose first field is
@@ -84,8 +84,8 @@ EOF_RECORDS_LINE
 }
 
 # records_push_last <lines> <upstream>: the last of the lines whose
-# upstream is <upstream>, or nothing. Leaves records_push_* set to the last
-# line read, so read the line it prints again.
+# upstream is <upstream>, or nothing. Run it in $( ) and read the line it
+# prints with records_push_read.
 records_push_last() {
     records_push_found=""
     while IFS= read -r records_push_line; do

@@ -188,7 +188,7 @@ To keep a watch from returning one state, gate that state's line, not the branch
 
 ## Records in a git folder
 
-A script that reads a record another `supervise` script writes under `git rev-parse --git-path <name>`, such as `mp-supervise-pushed` or `mp-supervise-watched`, resolves the path from the same folder the writer used, which is the Project folder (`record.sh`'s `PROJECT`), never the worker's cwd. `--git-path` gives a linked worktree a git folder of its own, so a read from a worktree cwd finds no record and reports its absence as a fact: in #182, the first build of the watch delay would have read every worktree run's watch time as unknown, and only the review caught it. Test the read with `--dir` a linked worktree.
+A `supervise` script that writes or reads a record in the Project's git folder, such as `mp-supervise-pushed`, `mp-supervise-posted` or `mp-supervise-watched`, finds its path with `records_path` in `records.sh`, never with `git rev-parse --git-path <name>` of its own, and reads or writes the push record's line through that helper too (#211). `records_path` resolves the record in the repo's main git folder, so a worktree cwd finds the Project folder's record. `--git-path` gives a linked worktree a git folder of its own, so a read from a worktree cwd with it finds no record and reports its absence as a fact: in #182, the first build of the watch delay would have read every worktree run's watch time as unknown, and only the review caught it. Test the read with `--dir` a linked worktree; `tests/supervise-helpers.test.sh` fails on a `--git-path` read of these records outside the helper.
 
 ## gh api lists
 

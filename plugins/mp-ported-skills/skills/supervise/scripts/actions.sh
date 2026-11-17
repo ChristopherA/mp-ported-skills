@@ -617,8 +617,9 @@ supervisor_push() {
     fi
 }
 
-# dist_checked <record lines>: each Distribution repo upstream a line
-# pushed under checked-push, once.
+# dist_checked <record lines>: each Distribution repo upstream any line
+# pushed under checked-push; the caller lists it only when its last push
+# was one.
 dist_checked() {
     while IFS= read -r line; do
         [ -n "$line" ] || continue
@@ -639,7 +640,9 @@ if commits=$(git -C "$DIR" rev-list "$START..HEAD" 2>/dev/null); then
     done | grep -v '/HEAD$' | sed 's|^refs/remotes/||' | sort -u)
     # The record is the Project folder's, found from a worktree cwd too.
     pushed_lines=""
-    ! pushed=$(records_path "$DIR" mp-supervise-pushed) || pushed_lines=$(records_push_lines "$pushed" "$ID")
+    if pushed=$(records_path "$DIR" mp-supervise-pushed); then
+        pushed_lines=$(records_push_lines "$pushed" "$ID")
+    fi
     for b in $branches; do
         last=$(records_push_last "$pushed_lines" "$b")
         if [ -n "$last" ]; then

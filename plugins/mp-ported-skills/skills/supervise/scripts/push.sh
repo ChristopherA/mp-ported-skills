@@ -130,7 +130,7 @@ while [ $# -gt 0 ]; do
         --checked)    CHECKED=1; shift ;;
         --help)
             printf 'Usage: push.sh --dir DIR --id ID --start SHA [--dist-start SHA] (--sweep CMD | --no-sweep) [--test CMD] [--dist-test CMD] [--checked] [--check]\n'
-            printf 'Checks a stopped worker'\''s commits and, without --check, pushes them to the branch'\''s upstream.\n'
+            printf 'Checks a stopped worker'\''s commits, or unpushed commits before any launch, and, without --check, pushes them to the branch'\''s upstream.\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
