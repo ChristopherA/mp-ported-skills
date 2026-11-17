@@ -1,7 +1,7 @@
 #!/bin/sh
 # distribution-repo.sh -- sourced by launch.sh, push.sh and resuming's
 # state.sh: the checks on a Distribution repo's path and the read of its
-# state (#209), one copy, so /next cannot offer a /supervise that the launch
+# state (#209), and launch.sh's read of whether the profile trusts it (#268), one copy, so /next cannot offer a /supervise that the launch
 # then refuses. Each caller reads the path itself (distribution.sh: the
 # launch and the push from origin's docs/agents/distribution-repo.md, the
 # readout from the working tree's) and words each reason its own way. The
@@ -50,15 +50,15 @@ distribution_state() {
     return 0
 }
 
-# distribution_trusted <path> <config file>: whether the profile's
+# distribution_trusted <path> <.claude.json>: whether the profile's
 # .claude.json records the trust prompt as accepted for the repo at <path>,
 # as `claude --bg --add-dir <path>` requires (#268). Claude Code records
 # trust per folder in .projects["<path>"].hasTrustDialogAccepted and, for a
 # folder inside a repo, looks no higher than the repo's top, so a trusted
 # folder above the repo does not cover it (read from Claude Code 2.1.326).
 # <path> is the resolved path distribution.sh prints, the one --add-dir
-# passes. Exits 0 trusted, 1 not (a missing file trusts nothing), 2 the file
-# could not be read.
+# passes. Exits 0 trusted, 1 not (a missing file trusts nothing), 2 jq
+# could not read it (not JSON, .projects not an object, or no jq).
 distribution_trusted() {
     [ -e "$2" ] || return 1
     jq -e --arg p "$1" '.projects[$p].hasTrustDialogAccepted == true' "$2" >/dev/null 2>&1

@@ -2619,38 +2619,39 @@ clear_markers() { command rm -f "$dist_marker" "$dproj_marker"; }
 # The repo must be trusted under this profile, as `claude --bg --add-dir`
 # requires (#268): Claude Code records trust per folder in the profile's
 # .claude.json, and a trusted folder above a repo does not cover it.
-trust() { # <path...> -- the profile's .claude.json trusting exactly these
+dist_trust() { # <path...> -- the profile's .claude.json trusting exactly these
     jq -n '[$ARGS.positional[] | {key: ., value: {hasTrustDialogAccepted: true}}] | {projects: from_entries}' \
         --args "$@" >"$cfg/.claude.json"
 }
-untrusted() { # the refusal for $dist, with launch.sh's exit status
+cfg_real=$(cd "$cfg" && pwd -P)
+dist_untrusted() { # the refusal for $dist, with launch.sh's exit status
     printf '1 Error: Distribution repo %s is not trusted under this profile (%s), so claude --bg refuses its --add-dir; start `claude` there once with CLAUDE_CONFIG_DIR=%s and choose "Yes, I trust this folder", then launch again; not launched' \
-        "$dist" "$(cd "$cfg" && pwd -P)" "$(cd "$cfg" && pwd -P)"
+        "$dist" "$cfg_real" "$cfg_real"
 }
 command rm -f "$cfg/.claude.json" "$fake/args"
 out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?
-check "launch dist: with no .claude.json the repo is untrusted" "$(untrusted)" "$rc $(printf '%s\n' "$out" | grep '^Error')"
+check "launch dist: with no .claude.json the repo is untrusted" "$(dist_untrusted)" "$rc $(printf '%s\n' "$out" | grep '^Error')"
 check "launch dist: an untrusted repo launches nothing" "no" "$([ -f "$fake/args" ] && echo yes || echo no)"
-trust "$dproj" "$work" "$(dirname "$work")"
+dist_trust "$dproj" "$work" "$(dirname "$work")"
 out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?
-check "launch dist: trusted folders above the repo do not cover it" "$(untrusted)" "$rc $(printf '%s\n' "$out" | grep '^Error')"
-jq --arg d "$dist" '.projects[$d] = {hasTrustDialogAccepted: false}' "$cfg/.claude.json" >"$work/cj" && command mv "$work/cj" "$cfg/.claude.json"
+check "launch dist: trusted folders above the repo do not cover it" "$(dist_untrusted)" "$rc $(printf '%s\n' "$out" | grep '^Error')"
+jq --arg d "$dist" '.projects[$d] = {hasTrustDialogAccepted: false}' "$cfg/.claude.json" >"$work/claude.json.new" && command mv "$work/claude.json.new" "$cfg/.claude.json"
 out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?
-check "launch dist: a declined trust record is untrusted" "$(untrusted)" "$rc $(printf '%s\n' "$out" | grep '^Error')"
+check "launch dist: a declined trust record is untrusted" "$(dist_untrusted)" "$rc $(printf '%s\n' "$out" | grep '^Error')"
 printf '{not json' >"$cfg/.claude.json"
 out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?
-check "launch dist: an unreadable .claude.json is refused, naming it" "1 Error: $(cd "$cfg" && pwd -P)/.claude.json could not be read, so whether Distribution repo $dist is trusted is unknown; not launched" "$rc $(printf '%s\n' "$out" | grep '^Error')"
+check "launch dist: an unreadable .claude.json is refused, naming it" "1 Error: jq could not read $cfg_real/.claude.json (not JSON, .projects not an object, or no jq), so whether Distribution repo $dist is trusted is unknown; not launched" "$rc $(printf '%s\n' "$out" | grep '^Error')"
 ln -s "$dist" "$work/dist-link"
 name_dist "$work/dist-link
 "
-trust "$dist"
+dist_trust "$dist"
 out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?
 check "launch dist: a repo named by a link counts its resolved path's record, the path --add-dir passes" "0 c2a368ee" "$rc $out"
 clear_markers
 name_dist '../dist
 '
 command rm -f "$work/dist-link"
-trust "$dproj" "$dist"
+dist_trust "$dproj" "$dist"
 out=$(launch_dir "$dproj" --ticket 56 2>&1); rc=$?
 check "launch dist: exit 0" "0 c2a368ee" "$rc $out"
 check "launch dist: --add-dir with the repo, before another option" "--add-dir

@@ -327,7 +327,7 @@ if [ -n "$DIST" ]; then
     case $? in
         0) ;;
         1) fail "Distribution repo $DIST is not trusted under this profile ($CONFIG), so claude --bg refuses its --add-dir; start \`claude\` there once with CLAUDE_CONFIG_DIR=$CONFIG and choose \"Yes, I trust this folder\", then launch again; not launched" ;;
-        *) fail "$CONFIG/.claude.json could not be read, so whether Distribution repo $DIST is trusted is unknown; not launched" ;;
+        *) fail "jq could not read $CONFIG/.claude.json (not JSON, .projects not an object, or no jq), so whether Distribution repo $DIST is trusted is unknown; not launched" ;;
     esac
     dist_default=$default
     # Where a parked worker resets the Distribution repo (#158). A continued
