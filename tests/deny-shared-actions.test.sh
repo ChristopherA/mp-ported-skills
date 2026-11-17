@@ -675,6 +675,42 @@ check "a create --parent goes through under every grant" "" \
     "$(decision 0 auto 'gh issue create --title t --parent 40' "$granted")"
 check "a label edit beside a link still refuses with both grants, as label and other fields" "yes" \
     "$(reason 0 auto 'gh issue edit 5 --add-label x; gh issue edit 6 --parent 40' "$granted" | grep -q "'gh issue edit (label and other fields)'" && echo yes)"
+# A gh api flag that takes a value (#227): the value is not an endpoint
+# word, so each granted gh api form keeps its grant with it, and an
+# ungranted write with it stays refused.
+test_gh_api_value_flags() {
+    check "a granted sub-issue link with --jq goes through" "" \
+        "$(decision 0 auto 'gh api --method POST repos/o/r/issues/40/sub_issues -F sub_issue_id=9 --jq .number' "$granted")"
+    check "the issue's link with {owner}/{repo} and --jq after a grant check goes through" "" \
+        "$(decision 0 auto "sh before-clear.sh --action sub-issue; gh api --method POST 'repos/{owner}/{repo}/issues/40/sub_issues' -F sub_issue_id=6054729935 --jq .number" "$granted")"
+    check "a granted sub-issue reorder with --jq goes through" "" \
+        "$(decision 0 auto 'gh api -X PATCH repos/o/r/issues/40/sub_issues/priority -F sub_issue_id=9 -F after_id=8 --jq .number' "$granted")"
+    check "a granted issue comment with --jq goes through" "" \
+        "$(decision 0 auto 'gh api repos/o/r/issues/104/comments -f body=x --jq .id' "$granted")"
+    check "a granted issue create with --jq goes through" "" \
+        "$(decision 0 auto 'gh api repos/o/r/issues -f title=x --jq .number' "$granted")"
+    check "a granted sub-issue link with -q goes through" "" \
+        "$(decision 0 auto 'gh api --method POST repos/o/r/issues/40/sub_issues -F sub_issue_id=9 -q .number' "$granted")"
+    check "a granted issue comment with --template goes through" "" \
+        "$(decision 0 auto "gh api repos/o/r/issues/104/comments -f body=x --template '{{.id}}'" "$granted")"
+    check "a granted issue create with -t goes through" "" \
+        "$(decision 0 auto "gh api repos/o/r/issues -f title=x -t '{{.number}}'" "$granted")"
+    check "a granted sub-issue reorder with -H goes through" "" \
+        "$(decision 0 auto "gh api -X PATCH repos/o/r/issues/40/sub_issues/priority -F sub_issue_id=9 -H 'Accept: application/json'" "$granted")"
+    check "a granted sub-issue link with --header goes through" "" \
+        "$(decision 0 auto "gh api --method POST repos/o/r/issues/40/sub_issues -F sub_issue_id=9 --header 'X-A: b'" "$granted")"
+    check "a granted issue comment with --hostname goes through" "" \
+        "$(decision 0 auto 'gh api repos/o/r/issues/104/comments -f body=x --hostname github.com' "$granted")"
+    check "a granted issue create with --cache goes through" "" \
+        "$(decision 0 auto 'gh api repos/o/r/issues -f title=x --cache 1h' "$granted")"
+    check "an ungranted gh api merge with --jq is refused" "deny" \
+        "$(decision 0 auto 'gh api -X PUT repos/o/r/pulls/5/merge --jq .sha' "$granted")"
+    check "an ungranted gh api issue PATCH with --jq is refused" "deny" \
+        "$(decision 0 auto 'gh api -X PATCH repos/o/r/issues/40 -f state=closed --jq .number' "$granted")"
+    check "a --jq value naming a granted path does not grant a merge" "deny" \
+        "$(decision 0 auto 'gh api -X POST repos/o/r/pulls/5/merge --jq repos/o/r/issues/1/comments' "$granted")"
+}
+test_gh_api_value_flags
 # Each part a command runs is checked against its own grant (#191): a
 # granted part first no longer carries an ungranted one behind it, in a
 # sequence, a nested shell or a piped one.

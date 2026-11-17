@@ -670,8 +670,8 @@ classify_gh() {
         # and so are a POST to an issue's sub_issues (linking a child) and a
         # PATCH to its sub_issues/priority (a reorder), for the sub-issue
         # grant (#162): only when that path, matched whole, is the one word
-        # not taken by a method or field flag. Any other word -- a second
-        # path, a header's value -- leaves it a plain gh api write, never
+        # not taken by a method, field or other value-taking flag. Any other
+        # word -- a second path -- leaves it a plain gh api write, never
         # granted, as is a PATCH or DELETE of a comment (#113) or of a
         # sub-issue. A GraphQL mutation is never granted either, addComment,
         # createIssue and addSubIssue included; ADR 0005 says why. The words
@@ -685,6 +685,9 @@ classify_gh() {
             --method=*) _cmethod=${1#--method=}; shift; continue ;;
             -f | -F | --field | --raw-field | --input) _cfields=yes; if [ $# -ge 2 ]; then shift 2; else shift; fi; continue ;;
             -f* | -F* | --field=* | --raw-field=* | --input=*) _cfields=yes; shift; continue ;;
+            # A flag that takes a value: the value is not an endpoint word
+            # (#227), so `--jq .number` does not hide a granted form.
+            -q | --jq | -t | --template | -H | --header | --hostname | --cache) if [ $# -ge 2 ]; then shift 2; else shift; fi; continue ;;
             -*) shift; continue ;;
             esac
             _cwords=$((_cwords + 1))
