@@ -13,7 +13,7 @@ A **phase boundary** is where the user picks Continue, `/clear`, `/handoff`, a s
 
 Walk the whole session for what was decided, learned or promised and is not yet durable. Route each item to its home now, as you find it, except findings, below:
 
-- **Settled decision or term**: an ADR or `CONTEXT.md`, through `domain-modeling`.
+- **Settled decision or term**: an ADR or `CONTEXT.md`, through `domain-modeling`. A decision too small for an ADR keeps its reason in the body of the commit that carries it, or in a comment on its ticket when no commit does. It is durable only when one of those holds the reason; when neither does, it is unfinished work and takes that route.
 - **Unfinished work** of this session's own: a ticket, published to this repo's tracker per `docs/agents/issue-tracker.md`, or none when this repo has no tracker. This session originated it, so it lands ready: `ready-for-agent`, or `ready-for-human` when it needs human judgment or access. `needs-triage` is the on-ramp for work arriving from others, and for a ticket an unattended capture files (**Unattended** below), which no one has read yet. When this session's work sits under a parent, link it as a sub-issue of that parent, placed per **A new ticket under a parent** below.
 - **A ticket of this session's own left open for a live check**: its build landed, and a criterion waits on a check only the user can run (a live `/supervise` run, a phone test). It moves to `ready-for-human` and, in the same step, after its parent's last open `ready-for-agent` child: left ahead of them, `resuming` names it as the parent's next child, and `/supervise` stops on it as `by hand` with buildable children behind it. See what that takes, which writes nothing:
 
@@ -90,11 +90,27 @@ Record everything this session sent out (an issue, a PR, a message) on its relat
 
 ## 5. Commit
 
-Run `git status` and compare it with what this session changed. Show the user anything you don't recognise as this session's work; on their yes, commit it separately, first. Then commit this session's work scoped to its files, per the repo's commit conventions.
+First, list what arrived while this session worked: commits on the current branch that another session made, such as a remote client's session beside a local terminal's. `git status` sees only uncommitted changes, so it never shows them:
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/arrivals.sh" --session "${CLAUDE_SESSION_ID}" </dev/null
+```
+
+Each `arrival <sha> <subject>` line is a commit since this session began that it did not make, read from its transcript. Read each (`git show --stat <sha>`) and triage it now: when it bears on this session's work, route it as move 1 would; otherwise name it as open in move 6's report. `arrivals: none` lists nothing. A line saying there is no transcript or no start time lists nothing either: report that line, and do not guess a start. Exit 1 is a usage error: report its error and go on.
+
+Then run `git status` and compare it with what this session changed, and check the changes for files that look like they hold a credential before offering any for a commit:
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/secrets.sh" </dev/null
+```
+
+Each `flagged <path>: <why>` line is such a file; `secrets: none` flags nothing, which does not show a file to be clean. By `before-clear.sh --action other`: `attended`: point out each flagged file and its reason where you show the changes, and commit it only on the user's yes for that file. `ungranted` (an unattended capture): never commit a flagged file, whatever a grant covers, and list it in move 6's report with its path and why it was flagged. Exit 1 is a usage error: treat every changed file as flagged.
+
+Show the user anything you don't recognise as this session's work; on their yes, commit it separately, first. Then commit this session's work scoped to its files, per the repo's commit conventions, leaving out any flagged file the user did not approve.
 
 ## 6. Report
 
-- What was routed where, what stays open, and what has no home. Name each finding with the comment or ticket it became, and the `granted: <citation>` line when it posted unasked; or, when nobody could confirm it and no grant covered it, its intended target, text and command, left unposted; and each finding the user skipped. For each ticket filed under a parent, the place it took in the order, with the `granted: <citation>` line when an unattended capture linked and placed it; or, unattended and ungranted, the proposed place, its reason and the link and reorder commands left unrun. For a ticket left open for a live check, `live-check.sh`'s lines, applied, with the `granted: <citation>` lines when an unattended capture applied them, or, unattended and ungranted, left for the `Waiting on:` line. For the `in-motion` label, the moves made, with the `granted: <citation>` line when unattended, or the label edits and commands left unrun.
+- What was routed where, what stays open, and what has no home. Name each finding with the comment or ticket it became, and the `granted: <citation>` line when it posted unasked; or, when nobody could confirm it and no grant covered it, its intended target, text and command, left unposted; and each finding the user skipped. For each ticket filed under a parent, the place it took in the order, with the `granted: <citation>` line when an unattended capture linked and placed it; or, unattended and ungranted, the proposed place, its reason and the link and reorder commands left unrun. For a ticket left open for a live check, `live-check.sh`'s lines, applied, with the `granted: <citation>` lines when an unattended capture applied them, or, unattended and ungranted, left for the `Waiting on:` line. For the `in-motion` label, the moves made, with the `granted: <citation>` line when unattended, or the label edits and commands left unrun. Move 5's arrivals, each with where it was routed or named as open, or its no-transcript line; and each flagged file, committed on the user's yes or left uncommitted, with its path and why it was flagged.
 - **One first next step**, from this repo's tracker only, read after move 5 from `resuming`'s script rather than worked out by hand:
 
   ```sh
