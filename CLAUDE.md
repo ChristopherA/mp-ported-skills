@@ -42,6 +42,8 @@ A session that continues a ticket from an earlier worker's red test commit check
 
 A test for a change in behaviour fails on the code before the change: put the old script back (`git show <base>:<path> > <path>`), run the test, and restore it. A check that passes on both guards nothing new: #172's first test of the narrowed subagent lookup passed on the old loop, since that loop also read the moved folder, and only a second check, with subagents in another project folder, failed there.
 
+When the same change makes a fake stricter about its input, as a fake `gh` that starts requiring `github.com/<owner>/<repo>`, run the old script against a copy of the test whose fake still accepts the old form. Otherwise the old script's calls all fail on the fake's refusal: checks that expect a success fail, which reads as the tests guarding the change, while checks that expect the failure path (here, "swept") pass for that reason and guard nothing: in #210, the push-target checks passed on the first build until the fake's new prefix test was dropped from the copy, and then four of them failed.
+
 A check that two files match tests `cmp -s`'s exit status, as `same` in `tests/status-line-copy.test.sh` does. `cmp` reports a file that is a prefix of the other on stderr, so a check on its captured stdout reads empty, and passes, for files that differ.
 
 A scratch repo whose upstream a script reads (`@{upstream}`, `@{u}`) has one set: push it with `-u`, or run `git branch -u origin/main main` after the push. A plain `git push origin main` sets none, and the script then takes the no-upstream path, not the one the test means: #186's held-close check read "no upstream" where the test expected a count of unpushed commits.
