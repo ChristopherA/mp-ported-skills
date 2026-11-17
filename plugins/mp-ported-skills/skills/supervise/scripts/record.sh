@@ -321,6 +321,10 @@ read_worker() {
                                  and (.input.skill // "" | test("(^|:)capturing$")))] | length)
                      + ([$rows[] | select(.type == "user") | text // empty
                         | select(test("<command-name>/([^<]*:)?capturing</command-name>"))] | length),
+           # Whether the worker pushed itself, as under a push grant: its
+           # work had landed before any zone capture (zone-capture.md).
+           pushedSelf: ([$rows[] | select(.type == "user") | .toolUseResult | objects
+                         | .gitOperation | objects | .push | objects] | length > 0),
            clears: ([$rows[] | select(.type == "user") | text // empty
                      | select(test("<command-name>/clear</command-name>"))] | length),
            compacts: ([$rows[] | select(.type == "system" and .subtype == "compact_boundary")] | length),
@@ -335,9 +339,10 @@ read_worker() {
                       | {at: (.timestamp // null), text: (text // null)} | select(.text != null)] | .[1:]
                      | map(select(.at != null)
                            | .sup = (.text | test("^\\[supervisor answer to |<command-name>/([^<]*:)?capturing</command-name>"))
-                           # A zone capture names the continuation (zone-capture.md).
-                           | .zone = (.text | test("<command-name>/([^<]*:)?capturing</command-name>")
-                                      and test("<command-args>next: a fresh worker continues #"))
+                           # A zone capture names the continuation, in the prompt
+                           # zone-capture.md'"'"'s step 2 sends; tests/supervise-record.test.sh
+                           # reads that prompt from the skill text.
+                           | .zone = (.sup and (.text | test("<command-args>next: a fresh worker continues #")))
                            | select(.sup or (.text | test("^\\s*[<\\[]") | not))
                            | {at, sup, zone})),
            # Every prompt after the first, slash commands included, by time;
@@ -566,6 +571,7 @@ elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // 
         --argjson m "$(printf '%s' "$worker" | jq -c '.marks // []')" \
         --argjson a "$(printf '%s' "$worker" | jq -c '.asked // []')" \
         --argjson q "$(printf '%s' "$worker" | jq -c '.questions // []')" \
+        --argjson ps "$(printf '%s' "$worker" | jq -c '.pushedSelf // false')" \
         --argjson approvals "$(printf '%s' "$approvals_json" | jq -c 'map(.at)')" "$defs"'
         # A wait is the supervisor'"'"'s when the first prompt after it is its answer.
         # It is no wait when the worker'"'"'s last prompt or turn end before it is
@@ -578,10 +584,11 @@ elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // 
         # for the worker at or after it, with no prompt to the worker in
         # between.
         # It is the supervisor'"'"'s too when it waits on a git push, the
-        # last prompt before it is a zone capture and none follows: the
-        # supervisor finishes that worker and leaves the push to the
-        # continuation, asking nobody (#131). A zone capture whose work had
-        # landed, whose push the maintainer then declined, reads the same.
+        # last prompt before it is a zone capture, none follows, and the
+        # worker made no push of its own: the supervisor finishes that
+        # worker and leaves the push to the continuation, asking nobody
+        # (#131). A worker that pushed had landed its work, so its zone
+        # capture'"'"'s push goes to Push on approval, which asks.
         # The transcript adds two waits the timeline may hold no blocked
         # entry for (#86), each counted once when one is stamped from 5
         # seconds before it: a turn end with a Waiting on: line, up to the
@@ -610,7 +617,7 @@ elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // 
              | [$approvals[] | epoch | select(. >= $be) | . as $pe
                 | select([$a[] | epoch | select(. > $be and . <= $pe)] | length == 0)] | length == 0))
          | select($b == "" or (($b | epoch) as $be
-             | (.detail | test("^git push")) and ([$a[] | epoch | select(. > $be)] | length == 0)
+             | ($ps | not) and (.detail | test("^git push")) and ([$a[] | epoch | select(. > $be)] | length == 0)
                and ([$p[] | select((.at | epoch) <= $be)] | max_by(.at | epoch) | .zone // false)
              | not))]
         | (. + $questions | sort_by(.at) | map(.detail)) as $w

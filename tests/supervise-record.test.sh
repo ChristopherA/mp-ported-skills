@@ -420,16 +420,22 @@ repo_git "$zoned" remote add origin "$work/zoned-remote.git"
 repo_git "$zoned" push -q -u origin main 2>/dev/null
 zoned_start=$(git -C "$zoned" rev-parse HEAD)
 repo_git "$zoned" commit -q --allow-empty -m "worker's commit"
-zone_prompt='<command-message>mp-ported-skills:capturing</command-message>
+# The capture prompt as zone-capture.md's step 2 sends it, read from the
+# skill text, so a rewording there that record.sh no longer reads fails here.
+zone_args=$(sed -n 's/.*--prompt "\/mp-ported-skills:capturing \(next: a fresh worker continues #N[^"]*\)".*/\1/p' \
+    "$root/plugins/mp-ported-skills/skills/supervise/zone-capture.md" | sed 's/#N/#56/g')
+check "zoned: zone-capture.md's capture prompt is found" "yes" "$([ -n "$zone_args" ] && echo yes || echo no)"
+zone_prompt="<command-message>mp-ported-skills:capturing</command-message>
 <command-name>/mp-ported-skills:capturing</command-name>
-<command-args>next: a fresh worker continues #56 from this session'"'"'s commits; commit the work so far, and record what is left on #56, not in a new ticket</command-args>'
-zoned_run() { # <capture prompt> -- the zone-captured worker's timeline and transcript
+<command-args>$zone_args</command-args>"
+zoned_run() { # <capture prompt> [build turn rows] -- the zone-captured worker's timeline and transcript
     {
         echo '{"at":"2026-09-29T06:01:30.000Z","state":"working","detail":"","text":""}'
         echo '{"at":"2026-09-29T06:21:02.000Z","state":"blocked","detail":"git push origin main (ungranted)","text":""}'
     } >"$cfg/jobs/c2a368ee/timeline.jsonl"
     {
         command cat "$work/t"
+        [ $# -lt 2 ] || printf '%s\n' "$2"
         said 2026-09-29T06:20:00.000Z "$1"
         call 2026-09-29T06:21:00.000Z r5 claude-sonnet-5 1 100000 1000 50 \
             '[{"type":"text","text":"Waiting on: git push origin main"}]'
@@ -441,6 +447,16 @@ out=$(PATH="$work/bin:$PATH" sh "$scripts/record.sh" --id c2a368ee --dir "$zoned
     --ticket 56 --supervisor "$sup" --now 2026-09-29T06:25:00Z </dev/null)
 check "zoned: the record counts the capture" "1 capture" "$(field 'captures and clears' "$out")"
 check "zoned: the zone capture's push wait is not a human's" "none" "$(field 'human interventions' "$out")"
+# A worker that pushed in its build turn had landed its work: the zone
+# capture's push is its own commits, which Push on approval asks the
+# maintainer about, so with no push after it the wait was a human's.
+zoned_run "$zone_prompt" "$(jq -cn '{type: "user", timestamp: "2026-09-29T06:12:00.000Z", message: {role: "user",
+    content: [{type: "tool_result", tool_use_id: "p1", content: "<output>"}]},
+    toolUseResult: {stdout: "", gitOperation: {push: {branch: "main"}}}}')"
+out=$(PATH="$work/bin:$PATH" sh "$scripts/record.sh" --id c2a368ee --dir "$zoned" --start "$zoned_start" \
+    --ticket 56 --supervisor "$sup" --now 2026-09-29T06:25:00Z </dev/null)
+check "zoned: after the worker's own push, the capture's push wait is a human's" \
+    "1 wait on a human (git push origin main (ungranted))" "$(field 'human interventions' "$out")"
 # A capture with no continuation named is the Capture step's: its push wait,
 # with no push after it, waited on the maintainer.
 zoned_run '<command-message>mp-ported-skills:capturing</command-message>
