@@ -48,8 +48,8 @@
 # printed as `ran: gh ...`. --pushed on a ticket already closed prints
 # `closed already: #N` and records nothing, since the close was not the
 # supervisor's. Otherwise --pushed prints `closed <url>` and appends
-# `ID <time> issue-close <url>` to the checkout's
-# `git rev-parse --git-path mp-supervise-posted`, which actions.sh reads to
+# `ID <time> issue-close <url>` to the checkout's mp-supervise-posted
+# (records.sh), which actions.sh reads to
 # name the close as the supervisor's, after the push, and record.sh to keep
 # the worker's wait off the waits on a human. --held prints `held open
 # <url>`, --declined and --failed `kept open <url>`; they record nothing:
@@ -71,6 +71,7 @@ set -u
 here=$(dirname -- "$0")
 . "$here/marker.sh"
 . "$here/own-repo.sh"
+. "$here/records.sh"
 
 DIR=""
 ID=""
@@ -233,7 +234,7 @@ if [ "$OUTCOME" = pushed ]; then
     fi
     run issue close "$TICKET" --comment "$(command cat "$body")"
     echo "closed $url"
-    record=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-posted)
+    record=$(records_path "$DIR" mp-supervise-posted)
     printf '%s %s %s %s\n' "$ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" issue-close "$url" >>"$record" ||
         echo "note the close was not recorded in $record, so record.sh will count the worker's wait for it as a human's"
     # After the close, so a failed close leaves the ticket held, not

@@ -1,6 +1,6 @@
 #!/bin/sh
-# push.sh -- push a stopped worker's commits for the maintainer, after
-# checking them (#100).
+# push.sh -- push a stopped worker's commits, or unpushed commits before any
+# launch, for the maintainer, after checking them (#100).
 #
 # A worker with no standing grant ends its turn on `Waiting on: git push
 # ...`, and the #66 hook and the git wrappers refuse its own push. The
@@ -59,8 +59,11 @@
 #
 # Without --check, when every check passes, it pushes and prints `pushed
 # <upstream> UP..HEAD`, and appends `ID <upstream> UP HEAD <time>` to the
-# checkout's `git rev-parse --git-path mp-supervise-pushed`, which
-# actions.sh reads to name the push as the supervisor's, not the worker's,
+# checkout's mp-supervise-pushed, through records.sh, which owns the
+# line's layout. ID is the line's key, matched whole: a worker's session
+# id, or `pre-launch` for unpushed commits /supervise pushes before its
+# first launch (#223), which no worker's read matches. actions.sh reads
+# the record to name the push as the supervisor's, not the worker's,
 # and record.sh to keep the worker's wait for it off the waits on a human;
 # a `note` line follows when that write fails. A Distribution repo's push
 # is recorded there too, as `distribution:<upstream>`, so it names no
@@ -98,6 +101,7 @@
 set -u
 . "$(dirname -- "$0")/marker.sh"
 . "$(dirname -- "$0")/own-repo.sh"
+. "$(dirname -- "$0")/records.sh"
 . "$(dirname -- "$0")/distribution-repo.sh"
 
 DIR=""
@@ -470,7 +474,7 @@ if [ -n "$DIST" ]; then
     done || exit 3
 fi
 
-record=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-pushed)
+record=$(records_path "$DIR" mp-supervise-pushed)
 landed=""
 printf '%s\n' "$pushes" | {
     while read -r remote merge up tip upname range repo; do
@@ -483,12 +487,12 @@ printf '%s\n' "$pushes" | {
         name=$(repo_name "$repo" "$upname")
         echo "pushed $name $range"
         landed="${landed:+$landed, }$name"
-        mark=""
+        set -- "$ID" "$name" "$up" "$tip" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         if [ "$CHECKED" = 1 ]; then
             if [ "$repo" = "$DIR" ]; then c=$project_checks; else c=$dist_checks; fi
-            mark=$(printf ' checked-push\t%s\t%s' "$CITATION" "$(printf '%s' "$c" | tr '\t' ' ')")
+            set -- "$@" "$CITATION" "$c"
         fi
-        printf '%s %s %s %s %s%s\n' "$ID" "$name" "$up" "$tip" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$mark" >>"$record" ||
+        records_push_write "$record" "$@" ||
             echo "note the push was not recorded in $record, so actions.sh will read $name as the worker's ungranted push"
     done
 } || exit 3

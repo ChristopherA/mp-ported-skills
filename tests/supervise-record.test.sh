@@ -556,6 +556,17 @@ check "posted: the supervisor's post on approval is not a wait" \
 check "posted: the record names the post as the supervisor's" \
     "  - issue-comment posted by the supervisor on the maintainer's approval: https://github.com/o/r/issues/139#issuecomment-1" \
     "$(printf '%s\n' "$out" | grep '^  - issue-')"
+# post.sh writes it with --dir the Project folder; a worktree cwd reads it
+# there, for the wait and for actions.sh's line (#211).
+git -C "$repo" worktree add -q --detach "$work/posted-wt" "$start" 2>/dev/null
+out=$(record --dir "$work/posted-wt" --project "$repo")
+check "posted: read in the Project folder for a worktree cwd" \
+    "3 waits on a human (push now?; approve Bash: git push; commits ready), 1 message typed into the worker" \
+    "$(field 'human interventions' "$out")"
+check "posted: actions.sh reads it in the Project folder for a worktree cwd" \
+    "  - issue-comment posted by the supervisor on the maintainer's approval: https://github.com/o/r/issues/139#issuecomment-1" \
+    "$(printf '%s\n' "$out" | grep '^  - issue-')"
+git -C "$repo" worktree remove --force "$work/posted-wt"
 printf '%s\n' "0ther000 2026-09-29T06:15:00Z issue-comment https://github.com/o/r/issues/139#issuecomment-1" >"$posted"
 check "posted: another worker's post leaves the wait a human's" "$waits4" "$(field 'human interventions' "$(record)")"
 printf '%s\n' "c2a368ee garbage issue-comment https://github.com/o/r/issues/139#issuecomment-1" >"$posted"
@@ -573,8 +584,17 @@ printf '%s\n' "c2a368ee origin/main $start $start 2026-09-29T06:15:00Z" >"$pushe
 check "pushed: the supervisor's push on approval is not a wait" \
     "3 waits on a human (push now?; approve Bash: git push; commits ready), 1 message typed into the worker" \
     "$(field 'human interventions' "$(record)")"
+# push.sh writes it with --dir the Project folder; a worker cwd in a linked
+# worktree, which has a git folder of its own, still reads it there (#211).
+git -C "$repo" worktree add -q --detach "$work/pushed-wt" "$start" 2>/dev/null
+check "pushed: read in the Project folder for a worktree cwd" \
+    "3 waits on a human (push now?; approve Bash: git push; commits ready), 1 message typed into the worker" \
+    "$(field 'human interventions' "$(record --dir "$work/pushed-wt" --project "$repo")")"
+git -C "$repo" worktree remove --force "$work/pushed-wt"
 printf '%s\n' "0ther000 origin/main $start $start 2026-09-29T06:15:00Z" >"$pushed"
 check "pushed: another worker's push leaves the wait a human's" "$waits4" "$(field 'human interventions' "$(record)")"
+printf '%s\n' "pre-launch origin/main $start $start 2026-09-29T06:15:00Z" >"$pushed"
+check "pushed: a pre-launch push leaves the wait a human's" "$waits4" "$(field 'human interventions' "$(record)")"
 printf '%s\n' "c2a368ee origin/main $start $start" >"$pushed"
 check "pushed: a line with no time is skipped" "$waits4" "$(field 'human interventions' "$(record)")"
 printf '%s\n' "c2a368ee origin/main $start $start 2026-09-29T06:13:45Z" >"$pushed"
@@ -822,7 +842,7 @@ check "record: --id and --session are exclusive" "1" "$?"
 # actions.sh failing makes the field unknown, never a list of its errors.
 setup
 mkdir -p "$work/scripts"
-command cp "$scripts/record.sh" "$scripts/park.sh" "$scripts/own-repo.sh" "$scripts/transcript.sh" "$work/scripts/"
+command cp "$scripts/record.sh" "$scripts/park.sh" "$scripts/own-repo.sh" "$scripts/transcript.sh" "$scripts/records.sh" "$work/scripts/"
 printf '#!/bin/sh\necho "branch origin/x ungranted: partial"\necho "Error: the shared-action hook is missing" >&2\nexit 1\n' \
     >"$work/scripts/actions.sh"
 out=$(PATH="$work/bin:$PATH" sh "$work/scripts/record.sh" --id c2a368ee --dir "$repo" --start "$start" --ticket 56 \

@@ -228,6 +228,7 @@ note() { notes="${notes}- note: $1
 "; }
 
 . "$SCRIPT_DIR/transcript.sh"
+. "$SCRIPT_DIR/records.sh"
 
 # Shared jq definitions: time, size and money as the record prints them, a
 # transcript's API calls, one per request in the order first written, and
@@ -519,14 +520,24 @@ fi
 # question (#188), `checked-push` after it, from the checkout's records;
 # each clears the wait before it as the supervisor's. With none, or
 # none readable, every wait they would clear stays a human's. A push.sh line
-# from before it wrote a time has none, and is skipped.
+# from before it wrote a time has none, and is skipped. post.sh and push.sh
+# write them with --dir the Project folder, so they are read in PROJECT
+# (records.sh), as the watch record below is (#211).
 approvals=""
-posted=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-posted 2>/dev/null)
-pushed=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-pushed 2>/dev/null)
+posted=$(records_path "$PROJECT" mp-supervise-posted) || posted=""
+pushed=$(records_path "$PROJECT" mp-supervise-pushed) || pushed=""
+# push_approvals: `<time> push` or `<time> checked-push` for each of the
+# worker's push.sh lines.
+push_approvals() {
+    records_push_lines "$pushed" "$ID" | while IFS= read -r line; do
+        records_push_read "$line"
+        printf '%s %s\n' "$records_push_time" "${records_push_mark:-push}"
+    done
+}
 if [ -n "$ID" ]; then
     approvals=$({
-        [ ! -f "$posted" ] || awk -v id="$ID" '$1 == id { print $2, "post" }' "$posted"
-        [ ! -f "$pushed" ] || awk -v id="$ID" '$1 == id { print $5, ($6 == "checked-push" ? "checked-push" : "push") }' "$pushed"
+        [ -z "$posted" ] || [ ! -f "$posted" ] || awk -v id="$ID" '$1 == id { print $2, "post" }' "$posted"
+        push_approvals
     } | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z (post|push|checked-push)$')
 fi
 approvals_json=$(jq -cn --arg t "$approvals" '[$t | splits("\n") | select(. != "") | split(" ") | {at: .[0], kind: .[1]}]')
@@ -536,8 +547,8 @@ approvals_json=$(jq -cn --arg t "$approvals" '[$t | splits("\n") | select(. != "
 # worktree with a git folder of its own. A line with no time it can read is
 # skipped.
 watches=""
-watched=$(git -C "$PROJECT" rev-parse --path-format=absolute --git-path mp-supervise-watched 2>/dev/null)
-if [ -n "$ID" ] && [ -f "$watched" ]; then
+watched=$(records_path "$PROJECT" mp-supervise-watched) || watched=""
+if [ -n "$ID" ] && [ -n "$watched" ] && [ -f "$watched" ]; then
     watches=$(awk -v id="$ID" '$1 == id { $1 = ""; print substr($0, 2) }' "$watched" |
         grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z ')
 fi

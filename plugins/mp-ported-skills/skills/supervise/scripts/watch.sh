@@ -175,7 +175,7 @@
 #
 # With --dir, each time the polling loop returns a state (exit 0; not a
 # timeout, and not --file), it appends `ID <time> <state>` to the checkout's
-# `git rev-parse --git-path mp-supervise-watched`, beside push.sh's
+# mp-supervise-watched (records.sh), beside push.sh's
 # mp-supervise-pushed: the worker's short id, the UTC time as
 # 2026-09-29T06:15:24Z, and the first line it printed, such as `done` or
 # `blocked input needed`. record.sh reads it for how long after the turn end
@@ -238,6 +238,7 @@ fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 . "$(dirname -- "$0")/park.sh"
 . "$(dirname -- "$0")/transcript.sh"
 . "$(dirname -- "$0")/signing.sh"
+. "$(dirname -- "$0")/records.sh"
 if [ -n "$DIR" ]; then
     [ -d "$DIR" ] || fail "not a directory: $DIR"
     DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
@@ -806,7 +807,7 @@ verdict() {
 # stdout and never fails the watch: an unwritten record is a note on stderr.
 returned() {
     [ -n "$DIR" ] || return 0
-    if ! watched=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-watched 2>/dev/null); then
+    if ! watched=$(records_path "$DIR" mp-supervise-watched); then
         printf "note the watch's return was not recorded: %s is not in a git checkout\n" "$DIR" >&2
         return 0
     fi

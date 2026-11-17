@@ -26,8 +26,8 @@
 #
 # Without --check, when every check passes, it runs the command and prints
 # `posted <action> <url>` (`no-url` when gh printed none), and appends
-# `ID <time> <action> <url>` to the checkout's
-# `git rev-parse --git-path mp-supervise-posted`, which actions.sh reads to
+# `ID <time> <action> <url>` to the checkout's mp-supervise-posted
+# (records.sh), which actions.sh reads to
 # name the post as the supervisor's, and record.sh to keep the worker's wait
 # for it off the waits on a human; a `note` line follows when that write
 # fails.
@@ -46,6 +46,7 @@
 
 set -u
 . "$(dirname -- "$0")/marker.sh"
+. "$(dirname -- "$0")/records.sh"
 
 DIR=""
 ID=""
@@ -195,6 +196,6 @@ command rm -f "$err"
 url=$(printf '%s\n' "$out" | grep '^https\{0,1\}://' | tail -n 1)
 [ -n "$url" ] || url=no-url
 echo "posted $action $url"
-record=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-posted)
+record=$(records_path "$DIR" mp-supervise-posted)
 printf '%s %s %s %s\n' "$ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$action" "$url" >>"$record" ||
     echo "note the post was not recorded in $record, so record.sh will count the worker's wait for it as a human's"

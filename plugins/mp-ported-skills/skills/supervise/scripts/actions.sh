@@ -82,9 +82,11 @@
 #
 # A branch push.sh pushed for this worker, on the maintainer's approval in
 # the supervisor's session (#100), is labelled `pushed by the supervisor on
-# the maintainer's approval` instead, read from the checkout's
-# `git rev-parse --git-path mp-supervise-pushed`, where push.sh records
-# each push by worker id and upstream branch. One pushed under the
+# the maintainer's approval` instead, read from the Project folder's
+# mp-supervise-pushed (records.sh, found from a worktree cwd too), where
+# push.sh records each push by its key and upstream branch: the worker's
+# id, or `pre-launch` for a push before any launch, which names no
+# worker's branch. One pushed under the
 # `checked-push` grant, with no question (#188), is labelled
 #   branch <b> pushed by the supervisor under checked-push (<citation>):
 #   <old>..<new>; holds the worker's commits; checks: <ok lines, and a
@@ -95,7 +97,7 @@
 # An issue comment or new issue post.sh posted for this worker, on the
 # maintainer's approval in the supervisor's session (#144), is listed as
 #   <action> posted by the supervisor on the maintainer's approval: <url>
-# read from the checkout's `git rev-parse --git-path mp-supervise-posted`,
+# read from the Project folder's mp-supervise-posted (records.sh),
 # where post.sh records each post by worker id; <action> is issue-comment
 # or issue-create. A ticket close.sh closed there after a landed
 # Distribution push (#186) is listed as
@@ -172,6 +174,7 @@ hook_reason() {
 }
 
 . "$SCRIPT_DIR/transcript.sh"
+. "$SCRIPT_DIR/records.sh"
 
 # hook_action <command>: the action a grant names for the form the hook
 # matched in it (grant_action, in the classifier the hook and the wrappers
@@ -600,19 +603,33 @@ EOF_PARTS
     done
 fi
 
-# checked_push <record> <id> <branch>: the line for the branch's last
-# push.sh push for the worker when it went under checked-push (#188), or
-# empty. Such a record line ends with ` checked-push`, a tab, the grant's
-# citation, a tab, and the check lines joined by `; `.
-checked_push() {
-    awk -F '\t' -v id="$2" -v b="$3" '
-        { split($1, f, " ") }
-        f[1] == id && f[2] == b { last = (f[6] == "checked-push") ? $0 : "" }
-        END {
-            if (last == "") exit
-            n = split(last, t, "\t"); split(t[1], f, " ")
-            printf "branch %s pushed by the supervisor under checked-push (%s): %s..%s; holds the worker'"'"'s commits; checks: %s\n", b, t[2], substr(f[3], 1, 7), substr(f[4], 1, 7), t[3]
-        }' "$1"
+# supervisor_push <record line> <branch>: the branch line for a push.sh
+# push, read from its record line (records.sh): under checked-push (#188)
+# with its citation, range and checks, otherwise on the maintainer's
+# approval.
+supervisor_push() {
+    records_push_read "$1"
+    if [ "$records_push_mark" = checked-push ]; then
+        printf "branch %s pushed by the supervisor under checked-push (%s): %.7s..%.7s; holds the worker's commits; checks: %s\n" \
+            "$2" "$records_push_citation" "$records_push_old" "$records_push_new" "$records_push_checks"
+    else
+        printf "branch %s pushed by the supervisor on the maintainer's approval: holds the worker's commits\n" "$2"
+    fi
+}
+
+# dist_checked <record lines>: each Distribution repo upstream a line
+# pushed under checked-push, once.
+dist_checked() {
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        records_push_read "$line"
+        [ "$records_push_mark" = checked-push ] || continue
+        case $records_push_upstream in
+            (distribution:*) printf '%s\n' "$records_push_upstream" ;;
+        esac
+    done <<EOF_DIST_CHECKED
+$1
+EOF_DIST_CHECKED
 }
 
 if commits=$(git -C "$DIR" rev-list "$START..HEAD" 2>/dev/null); then
@@ -620,16 +637,13 @@ if commits=$(git -C "$DIR" rev-list "$START..HEAD" 2>/dev/null); then
     branches=$(for c in $commits; do
         git -C "$DIR" for-each-ref --contains "$c" --format='%(refname)' refs/remotes
     done | grep -v '/HEAD$' | sed 's|^refs/remotes/||' | sort -u)
-    pushed=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-pushed 2>/dev/null)
+    # The record is the Project folder's, found from a worktree cwd too.
+    pushed_lines=""
+    ! pushed=$(records_path "$DIR" mp-supervise-pushed) || pushed_lines=$(records_push_lines "$pushed" "$ID")
     for b in $branches; do
-        checked=""
-        [ ! -f "$pushed" ] || checked=$(checked_push "$pushed" "$ID" "$b")
-        if [ -n "$checked" ]; then
-            add "$checked"
-            continue
-        fi
-        if [ -f "$pushed" ] && awk -v id="$ID" -v b="$b" '$1 == id && $2 == b { found = 1 } END { exit !found }' "$pushed"; then
-            add "branch $b pushed by the supervisor on the maintainer's approval: holds the worker's commits"
+        last=$(records_push_last "$pushed_lines" "$b")
+        if [ -n "$last" ]; then
+            add "$(supervisor_push "$last" "$b")"
             continue
         fi
         if [ -z "$unread" ] && ! printf '%s\n' "$worker_pushes" | grep -qxF -e '*' -e "${b#*/}"; then
@@ -640,19 +654,18 @@ if commits=$(git -C "$DIR" rev-list "$START..HEAD" 2>/dev/null); then
         add "branch $b $GRANT_LABEL: holds the worker's commits"
     done
     # A Distribution repo's branches are not in DIR; its checked pushes are
-    # listed from the record alone.
-    if [ -f "$pushed" ]; then
-        for b in $(awk -v id="$ID" '$1 == id && $2 ~ /^distribution:/ && $6 == "checked-push" { print $2 }' "$pushed" | sort -u); do
-            checked=$(checked_push "$pushed" "$ID" "$b")
-            [ -z "$checked" ] || add "$checked"
-        done
-    fi
+    # listed from the record alone, when the last push to the branch was one.
+    for b in $(dist_checked "$pushed_lines" | sort -u); do
+        last=$(records_push_last "$pushed_lines" "$b")
+        records_push_read "$last"
+        [ "$records_push_mark" != checked-push ] || add "$(supervisor_push "$last" "$b")"
+    done
 else
     note "git rev-list $START..HEAD failed in $DIR, so remote branches were not read"
 fi
 
-posted=$(git -C "$DIR" rev-parse --path-format=absolute --git-path mp-supervise-posted 2>/dev/null)
-if [ -f "$posted" ]; then
+posted=$(records_path "$DIR" mp-supervise-posted) || posted=""
+if [ -n "$posted" ] && [ -f "$posted" ]; then
     supervisor_posts=$(awk -v id="$ID" '
         $1 == id && $3 == "issue-close" { print "issue-close by the supervisor after the Distribution push landed: " $4; next }
         $1 == id { print $3 " posted by the supervisor on the maintainer'"'"'s approval: " $4 }' "$posted")

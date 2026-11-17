@@ -490,5 +490,61 @@ for f in supervise/scripts/watch.sh supervise/scripts/zone.sh; do
     check "signing: $f sources signing.sh" 0 "$rc"
 done
 
+# --- records.sh ----------------------------------------------------------------
+# The supervisor's records in a checkout's git folder, and push.sh's record
+# line (#211).
+. "$scripts/records.sh"
+rrepo="$work/records/repo"
+mkdir -p "$rrepo" "$work/records/plain"
+git -C "$rrepo" init -q
+git -C "$rrepo" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m one
+git -C "$rrepo" worktree add -q --detach "$work/records/wt" 2>/dev/null
+rgit=$(git -C "$rrepo" rev-parse --path-format=absolute --git-path mp-supervise-pushed)
+rpath() { out=$(records_path "$1" "$2"); printf '%s %s' "$?" "$out"; }
+check "records: the path in a checkout is its --git-path" "0 $rgit" "$(rpath "$rrepo" mp-supervise-pushed)"
+check "records: a linked worktree reads the main checkout's record" "0 $rgit" "$(rpath "$work/records/wt" mp-supervise-pushed)"
+check "records: a subfolder reads the checkout's record" "0 $rgit" "$(mkdir -p "$rrepo/sub"; rpath "$rrepo/sub" mp-supervise-pushed)"
+check "records: a folder in no repo fails" "1 " "$(rpath "$work/records/plain" mp-supervise-pushed)"
+tab=$(printf '\t')
+rfile="$work/records/pushed"
+records_push_write "$rfile" c2a368ee origin/main aaa1111222 bbb3333444 2026-09-29T06:15:00Z
+check "records: a plain line keeps its layout" "c2a368ee origin/main aaa1111222 bbb3333444 2026-09-29T06:15:00Z" "$(command cat "$rfile")"
+: >"$rfile"
+records_push_write "$rfile" c2a368ee origin/main aaa1111222 bbb3333444 2026-09-29T06:15:00Z 'checked-push: code-only' "ok tree: clean; ok${tab}test: x"
+check "records: a checked line keeps its layout, a tab in the checks made a space" \
+    "c2a368ee origin/main aaa1111222 bbb3333444 2026-09-29T06:15:00Z checked-push${tab}checked-push: code-only${tab}ok tree: clean; ok test: x" \
+    "$(command cat "$rfile")"
+check "records: an unwritable record fails" 1 "$(records_push_write "$work/records/none/x" a b c d e; echo $?)"
+rline() { records_push_read "$1"; printf '%s|%s|%s|%s|%s|%s|%s|%s' "$records_push_id" "$records_push_upstream" \
+    "$records_push_old" "$records_push_new" "$records_push_time" "$records_push_mark" "$records_push_citation" "$records_push_checks"; }
+check "records: a checked line's fields" "c2a368ee|origin/main|aaa1111222|bbb3333444|2026-09-29T06:15:00Z|checked-push|checked-push: code-only|ok tree: clean; ok test: x" \
+    "$(rline "$(command cat "$rfile")")"
+check "records: a plain line's fields" "c2a368ee|distribution:origin/main|a|b|2026-09-29T06:15:00Z|||" \
+    "$(rline "c2a368ee distribution:origin/main a b 2026-09-29T06:15:00Z")"
+check "records: a line from before the time has none" "c2a368ee|origin/main|a|b||||" "$(rline "c2a368ee origin/main a b")"
+printf '%s\n' "pre-launch origin/main a b 2026-09-29T06:00:00Z" "c2a368ee origin/x a b 2026-09-29T06:01:00Z" \
+    "c2a368ee0 origin/main a b 2026-09-29T06:02:00Z" "0ther000 origin/main a b 2026-09-29T06:03:00Z" \
+    "c2a368ee origin/main a b 2026-09-29T06:04:00Z" >"$rfile"
+check "records: one id's lines, a pre-launch line and a longer id passed over" \
+    "c2a368ee origin/x a b 2026-09-29T06:01:00Z
+c2a368ee origin/main a b 2026-09-29T06:04:00Z" "$(records_push_lines "$rfile" c2a368ee)"
+check "records: the pre-launch lines read by their own key" "pre-launch origin/main a b 2026-09-29T06:00:00Z" \
+    "$(records_push_lines "$rfile" pre-launch)"
+check "records: no record file has no lines" "0 " "$(out=$(records_push_lines "$work/records/gone" c2a368ee); printf '%s %s' "$?" "$out")"
+check "records: an empty path has no lines" "0 " "$(out=$(records_push_lines '' c2a368ee); printf '%s %s' "$?" "$out")"
+rlines="c2a368ee origin/main a b 2026-09-29T06:01:00Z checked-push${tab}c${tab}k
+c2a368ee origin/x a b 2026-09-29T06:02:00Z
+c2a368ee origin/main b c 2026-09-29T06:03:00Z"
+check "records: the last line for an upstream" "c2a368ee origin/main b c 2026-09-29T06:03:00Z" "$(records_push_last "$rlines" origin/main)"
+check "records: no line for an upstream" "" "$(records_push_last "$rlines" origin/y)"
+# The record line is written and read only through records.sh, and every
+# record path resolved there.
+check "records: no script resolves a record path of its own" "" \
+    "$(grep -l 'git-path mp-supervise-\(pushed\|posted\|watched\)' "$skills"/*/scripts/*.sh)"
+for f in push.sh actions.sh record.sh post.sh close.sh watch.sh; do
+    grep -q 'records\.sh"' "$scripts/$f"; rc=$?
+    check "records: $f sources records.sh" 0 "$rc"
+done
+
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

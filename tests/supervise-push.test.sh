@@ -261,6 +261,22 @@ mkdir -p "$CLAUDE_CONFIG_DIR/projects/p"
 check "actions: the supervisor's push, not the worker's" \
     "branch origin/main pushed by the supervisor on the maintainer's approval: holds the worker's commits" \
     "$(sh "$scripts/actions.sh" --id 3fb49286 --dir "$project" --start "$start" </dev/null)"
+# The record is the Project folder's: a worker cwd in a linked worktree,
+# with a git folder of its own, reads it there (#211).
+git -C "$project" worktree add -q --detach "$work/actions-wt" HEAD 2>/dev/null
+check "actions: the supervisor's push, read from a worktree cwd" \
+    "branch origin/main pushed by the supervisor on the maintainer's approval: holds the worker's commits" \
+    "$(sh "$scripts/actions.sh" --id 3fb49286 --dir "$work/actions-wt" --start "$start" </dev/null)"
+git -C "$project" worktree remove --force "$work/actions-wt"
+# A push before any launch is keyed `pre-launch` (#223): it names no
+# worker's branch.
+pushed_file=$(git -C "$project" rev-parse --path-format=absolute --git-path mp-supervise-pushed)
+command cp -f "$pushed_file" "$work/pushed.bak"
+sed 's/^3fb49286 /pre-launch /' "$work/pushed.bak" >"$pushed_file"
+check "actions: a pre-launch push is no worker's" \
+    "branch origin/main pushed by someone else: holds the worker's commits" \
+    "$(sh "$scripts/actions.sh" --id 3fb49286 --dir "$project" --start "$start" </dev/null)"
+command mv -f "$work/pushed.bak" "$pushed_file"
 mkdir -p "$CLAUDE_CONFIG_DIR/jobs/4aa00000"
 command cp -f "$CLAUDE_CONFIG_DIR/jobs/3fb49286/state.json" "$CLAUDE_CONFIG_DIR/jobs/4aa00000/state.json"
 protect "$project" 4aa00000
