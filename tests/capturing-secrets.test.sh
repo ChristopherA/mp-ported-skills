@@ -84,6 +84,26 @@ command rm -f "$repo/id_ed25519"
 command rm -f "$repo/tool.sh"
 check "secrets: a deleted file is skipped" "secrets: none" "$(run --dir "$repo")"
 
+# A git read that fails is an error, not a short list read as clean. The
+# fake fails ls-files and hands every other call to the real git, found by
+# name with its own folder off PATH.
+mkdir -p "$work/bin"
+cat >"$work/bin/git" <<EOF
+#!/bin/sh
+case " \$* " in (*" ls-files "*) echo "fake git: ls-files refused" >&2; exit 128 ;; esac
+PATH=\$(printf '%s' "\$PATH" | sed 's#^$work/bin:##')
+exec git "\$@"
+EOF
+chmod +x "$work/bin/git"
+if [ "$(PATH="$work/bin:$PATH" && export PATH && command -v git)" = "$work/bin/git" ]; then
+    printf 'secret\n' >"$repo/.env"
+    (PATH="$work/bin:$PATH" && export PATH && sh "$script" --dir "$repo" </dev/null >/dev/null 2>&1)
+    check "secrets: a failed git read exits 1" 1 "$?"
+    command rm -f "$repo/.env"
+else
+    check "secrets: the fake git is first on PATH" "$work/bin/git" "$(PATH="$work/bin:$PATH" && export PATH && command -v git)"
+fi
+
 # Usage errors exit 1.
 sh "$script" --dir "$work/nowhere" </dev/null >/dev/null 2>&1
 check "secrets: a folder that is no repo exits 1" 1 "$?"

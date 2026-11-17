@@ -81,13 +81,14 @@ why() {
 if [ $# -gt 0 ]; then
     paths=$(printf '%s\n' "$@")
 else
-    # Paths relative to the repo's top, made relative to DIR below. A
-    # deleted file is left out by --diff-filter=d.
-    paths=$({
-        git -C "$DIR" -c core.quotePath=false diff --name-only --diff-filter=d --relative
-        git -C "$DIR" -c core.quotePath=false diff --cached --name-only --diff-filter=d --relative
-        git -C "$DIR" -c core.quotePath=false ls-files --others --exclude-standard
-    } | sort -u) || fail "git status could not be read in $DIR"
+    # Paths relative to DIR: --relative and ls-files both give them so. A
+    # deleted file is left out by --diff-filter=d. Each read's own status is
+    # checked, since a short list would read as nothing flagged.
+    changed_git() { git -C "$DIR" -c core.quotePath=false "$@"; }
+    unstaged=$(changed_git diff --name-only --diff-filter=d --relative) || fail "git diff could not be read in $DIR"
+    staged=$(changed_git diff --cached --name-only --diff-filter=d --relative) || fail "git diff --cached could not be read in $DIR"
+    untracked=$(changed_git ls-files --others --exclude-standard) || fail "git ls-files could not be read in $DIR"
+    paths=$(printf '%s\n%s\n%s\n' "$unstaged" "$staged" "$untracked" | sort -u)
 fi
 
 found=$(printf '%s\n' "$paths" | while IFS= read -r p; do

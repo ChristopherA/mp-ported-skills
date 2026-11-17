@@ -99,6 +99,24 @@ ran() { # <time> <tool> <input json> -- an assistant row calling a tool
 check "arrivals: a quiet commit whose subject the session wrote is its own" \
     "arrival $other another session's commit" "$(run --dir "$repo" --session "$sid")"
 
+# Only a commit command, or a file whose first line is the subject, counts:
+# another session's subject quoted in a note or another command is still an
+# arrival, and so is a bad transcript line, which is skipped, not the end.
+{
+    row 2026-09-29T06:00:00.000Z
+    committed 2026-09-29T06:10:01.000Z "$own"
+    ran 2026-09-29T06:24:59.000Z Bash "$(jq -cn --arg c "git commit -q -m 'Say what the session'\"'\"'s quiet commit does'" '{command: $c}')"
+    ran 2026-09-29T06:25:59.000Z Write '{"file_path":"/tmp/m.txt","content":"A message written to a file\n\nIts body."}'
+    echo '{"type": "assistant", "trunc'
+    ran 2026-09-29T06:30:00.000Z Write '{"file_path":"/tmp/n.md","content":"Seen: another session'"'"'s commit, by the remote one."}'
+    ran 2026-09-29T06:30:01.000Z Bash '{"command":"git log --grep \"another session'"'"'s commit\""}'
+    committed 2026-09-29T06:30:02.000Z "$sub"
+} >"$dir/$sid.jsonl"
+command rm -f "$dir/$sid/subagents/agent-a1.jsonl"
+check "arrivals: a subject quoted elsewhere is still an arrival; a bad line is skipped" \
+    "arrival $other another session's commit" "$(run --dir "$repo" --session "$sid")"
+committed 2026-09-29T06:15:01.000Z "$sub" >"$dir/$sid/subagents/agent-a1.jsonl"
+
 # A session that began after the last commit: no commit to read at all.
 row 2026-09-29T07:00:00.000Z >"$dir/$sid.jsonl"
 check "arrivals: none when no commit is that new" "arrivals: none" "$(run --dir "$repo" --session "$sid")"
