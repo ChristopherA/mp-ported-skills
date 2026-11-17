@@ -335,8 +335,11 @@ read_worker() {
                       | {at: (.timestamp // null), text: (text // null)} | select(.text != null)] | .[1:]
                      | map(select(.at != null)
                            | .sup = (.text | test("^\\[supervisor answer to |<command-name>/([^<]*:)?capturing</command-name>"))
+                           # A zone capture names the continuation (zone-capture.md).
+                           | .zone = (.text | test("<command-name>/([^<]*:)?capturing</command-name>")
+                                      and test("<command-args>next: a fresh worker continues #"))
                            | select(.sup or (.text | test("^\\s*[<\\[]") | not))
-                           | {at, sup})),
+                           | {at, sup, zone})),
            # Every prompt after the first, slash commands included, by time;
            # a background agent'"'"'s report is no prompt.
            asked: ([$rows[] | select(.type == "user" and (.isMeta // false | not))
@@ -574,6 +577,11 @@ elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // 
         # It is the supervisor'"'"'s too when post.sh posted or push.sh pushed
         # for the worker at or after it, with no prompt to the worker in
         # between.
+        # It is the supervisor'"'"'s too when it waits on a git push, the
+        # last prompt before it is a zone capture and none follows: the
+        # supervisor finishes that worker and leaves the push to the
+        # continuation, asking nobody (#131). A zone capture whose work had
+        # landed, whose push the maintainer then declined, reads the same.
         # The transcript adds two waits the timeline may hold no blocked
         # entry for (#86), each counted once when one is stamped from 5
         # seconds before it: a turn end with a Waiting on: line, up to the
@@ -600,7 +608,11 @@ elif ! waits=$(jq -rs --argjson p "$(printf '%s' "$worker" | jq -c '.prompts // 
              | not))
          | select($b == "" or (($b | epoch) as $be
              | [$approvals[] | epoch | select(. >= $be) | . as $pe
-                | select([$a[] | epoch | select(. > $be and . <= $pe)] | length == 0)] | length == 0))]
+                | select([$a[] | epoch | select(. > $be and . <= $pe)] | length == 0)] | length == 0))
+         | select($b == "" or (($b | epoch) as $be
+             | (.detail | test("^git push")) and ([$a[] | epoch | select(. > $be)] | length == 0)
+               and ([$p[] | select((.at | epoch) <= $be)] | max_by(.at | epoch) | .zone // false)
+             | not))]
         | (. + $questions | sort_by(.at) | map(.detail)) as $w
         | if ($w | length) == 0 then ""
           else "\($w | length) wait\(if ($w | length) > 1 then "s" else "" end) on a human"

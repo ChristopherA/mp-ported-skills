@@ -408,6 +408,48 @@ check "settled: the record shows the one push" \
 check "settled: the outcome holds both commits" "2 commits after $(git -C "$settled" rev-parse --short "$settled_start"), ticket #56 CLOSED" \
     "$(field outcome "$out")"
 
+# A zone-captured run (zone-capture.md): the supervisor sends the capture
+# while the worker still builds, the capture ends waiting on a push, and the
+# supervisor finishes the worker and launches a continuation, which reaches
+# the push. Nobody is asked, so its push wait is the supervisor's (#131).
+zoned="$work/zoned"
+git init -q -b main "$zoned"
+repo_git "$zoned" commit -q --allow-empty -m start
+git init -q --bare "$work/zoned-remote.git"
+repo_git "$zoned" remote add origin "$work/zoned-remote.git"
+repo_git "$zoned" push -q -u origin main 2>/dev/null
+zoned_start=$(git -C "$zoned" rev-parse HEAD)
+repo_git "$zoned" commit -q --allow-empty -m "worker's commit"
+zone_prompt='<command-message>mp-ported-skills:capturing</command-message>
+<command-name>/mp-ported-skills:capturing</command-name>
+<command-args>next: a fresh worker continues #56 from this session'"'"'s commits; commit the work so far, and record what is left on #56, not in a new ticket</command-args>'
+zoned_run() { # <capture prompt> -- the zone-captured worker's timeline and transcript
+    {
+        echo '{"at":"2026-09-29T06:01:30.000Z","state":"working","detail":"","text":""}'
+        echo '{"at":"2026-09-29T06:21:02.000Z","state":"blocked","detail":"git push origin main (ungranted)","text":""}'
+    } >"$cfg/jobs/c2a368ee/timeline.jsonl"
+    {
+        command cat "$work/t"
+        said 2026-09-29T06:20:00.000Z "$1"
+        call 2026-09-29T06:21:00.000Z r5 claude-sonnet-5 1 100000 1000 50 \
+            '[{"type":"text","text":"Waiting on: git push origin main"}]'
+        jq -cn '{type: "system", subtype: "turn_duration", timestamp: "2026-09-29T06:21:01.000Z", pendingBackgroundAgentCount: 0}'
+    } >"$cfg/projects/-work-project/$sid.jsonl"
+}
+zoned_run "$zone_prompt"
+out=$(PATH="$work/bin:$PATH" sh "$scripts/record.sh" --id c2a368ee --dir "$zoned" --start "$zoned_start" \
+    --ticket 56 --supervisor "$sup" --now 2026-09-29T06:25:00Z </dev/null)
+check "zoned: the record counts the capture" "1 capture" "$(field 'captures and clears' "$out")"
+check "zoned: the zone capture's push wait is not a human's" "none" "$(field 'human interventions' "$out")"
+# A capture with no continuation named is the Capture step's: its push wait,
+# with no push after it, waited on the maintainer.
+zoned_run '<command-message>mp-ported-skills:capturing</command-message>
+<command-name>/mp-ported-skills:capturing</command-name>'
+out=$(PATH="$work/bin:$PATH" sh "$scripts/record.sh" --id c2a368ee --dir "$zoned" --start "$zoned_start" \
+    --ticket 56 --supervisor "$sup" --now 2026-09-29T06:25:00Z </dev/null)
+check "zoned: a plain capture's unpushed push wait is a human's" \
+    "1 wait on a human (git push origin main (ungranted))" "$(field 'human interventions' "$out")"
+
 # --- recorded fixtures -----------------------------------------------------
 # A live background job, cut down: tests/fixtures/jobs/1420c08b and its
 # transcript, live-check-worker.jsonl.
