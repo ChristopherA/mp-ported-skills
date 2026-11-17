@@ -701,10 +701,27 @@ check "launch --help: exit 0" 0 "$rc"
 check "launch --help: usage" "Usage: pane-launch.sh" "$(out | head -1 | cut -d' ' -f1-2)"
 
 # No state file: a launch leaves the working and temp directories as they were.
-before=$(ls -A "$work" "${TMPDIR:-/tmp}" 2>/dev/null)
+# The launch gets a temp folder of its own under $work, made before the first
+# listing: the shared $TMPDIR holds other programs' files, which come and go
+# while the suite runs. macOS mktemp with no template ignores TMPDIR (it uses
+# the per-user temp folder), so a fake mktemp, on PATH for this launch only,
+# makes its file in $TMPDIR as GNU's does.
+launch_tmp="$work/launch-tmp"
+mkdir -p "$launch_tmp" "$work/tmp-bin"
+cat > "$work/tmp-bin/mktemp" <<EOF
+#!/bin/sh
+PATH=\${PATH#"$work/tmp-bin:"}
+[ \$# -gt 0 ] || set -- "\${TMPDIR:-/tmp}/tmp.XXXXXXXXXX"
+exec mktemp "\$@"
+EOF
+chmod +x "$work/tmp-bin/mktemp"
+check "launch: the fake mktemp is the one found" "$work/tmp-bin/mktemp" \
+    "$(PATH="$work/tmp-bin:$PATH" command -v mktemp)"
+before=$(ls -A "$work" "$launch_tmp")
 reset; answer 'NEW-1 7 2'
-run pane-launch.sh --dir "$proj" --message hi
-check "launch: writes no file outside the pane" "$before" "$(ls -A "$work" "${TMPDIR:-/tmp}" 2>/dev/null)"
+(TMPDIR=$launch_tmp && PATH="$work/tmp-bin:$PATH" && export TMPDIR PATH &&
+    run pane-launch.sh --dir "$proj" --message hi)
+check "launch: writes no file outside the pane" "$before" "$(ls -A "$work" "$launch_tmp")"
 
 # --- the skill's content ---
 for f in "$scripts"/*.sh; do
