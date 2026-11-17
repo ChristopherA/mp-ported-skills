@@ -409,7 +409,7 @@ Read each file once: read a large file (over about 20KB, or a long one such as a
 # stopped the run mid-ticket (#213). The line sits just before the
 # Distribution repo's "no new branch or worktree" line when there is one.
 GRANTS="$GRANTS
-For a copy of another commit (a control run, or a test shown failing on the code before your change), never run \`git worktree add\`: /supervise sees the new worktree and stops the run. Put one file back with \`git show <sha>:<path> > <path>\` and restore it after, or export the commit into a scratch folder under your job's directory: \`mkdir <dir>; git -C <repo> archive <sha> | tar -x -C <dir>\`."
+For a copy of another commit (a control run, or a test shown failing on the code before your change), never run \`git worktree add\`: /supervise sees the new worktree and stops the run. Put one file back with \`git show <sha>:<path> > <path>\` and restore it after, or export the commit into a scratch folder under your job's directory, \$CLAUDE_JOB_DIR/tmp: \`mkdir -p <dir>; git -C <repo> archive <sha> | tar -x -C <dir>\`."
 [ -z "$DIST" ] || GRANTS="$GRANTS
 This Project's code lives in its Distribution repo, $DIST, named in docs/agents/distribution-repo.md. Make the ticket's code changes and commits there, by path (\`git -C $DIST\`), on its current branch, with no new branch or worktree; read the ticket and the Project's docs from this folder.
 A push in the Distribution repo is covered only by a distribution-push grant, never by push (#141). With none, do not push it: end your turn on \`Waiting on: git -C $DIST push origin $dist_default\`, or, when this Project's push waits too, on \`Waiting on: git push origin $default; git -C $DIST push origin $dist_default\`.
