@@ -705,12 +705,14 @@ check "launch --help: usage" "Usage: pane-launch.sh" "$(out | head -1 | cut -d' 
 # listing: the shared $TMPDIR holds other programs' files, which come and go
 # while the suite runs. macOS mktemp with no template ignores TMPDIR (it uses
 # the per-user temp folder), so a fake mktemp, on PATH for this launch only,
-# makes its file in $TMPDIR as GNU's does.
+# makes its file in $TMPDIR as GNU's does. It logs each call inside its own
+# folder, which the listing of $work names but does not open.
 launch_tmp="$work/launch-tmp"
 mkdir -p "$launch_tmp" "$work/tmp-bin"
 cat > "$work/tmp-bin/mktemp" <<EOF
 #!/bin/sh
 PATH=\${PATH#"$work/tmp-bin:"}
+printf '[%s]\n' "\$*" >> "$work/tmp-bin/calls"
 [ \$# -gt 0 ] || set -- "\${TMPDIR:-/tmp}/tmp.XXXXXXXXXX"
 exec mktemp "\$@"
 EOF
@@ -722,6 +724,12 @@ reset; answer 'NEW-1 7 2'
 (TMPDIR=$launch_tmp && PATH="$work/tmp-bin:$PATH" && export TMPDIR PATH &&
     run pane-launch.sh --dir "$proj" --message hi)
 check "launch: writes no file outside the pane" "$before" "$(ls -A "$work" "$launch_tmp")"
+# The check above means something only if the launch got through and made its
+# temp files through the fake: a call with a template could reach the per-user
+# temp folder, which nothing here lists.
+check "launch, own temp folder: prints the new pane's coordinates" 'NEW-1 7 2' "$(out)"
+check "launch, own temp folder: its temp files made with no template" '[]' \
+    "$(sort -u "$work/tmp-bin/calls")"
 
 # --- the skill's content ---
 for f in "$scripts"/*.sh; do
