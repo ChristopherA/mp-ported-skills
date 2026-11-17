@@ -991,9 +991,13 @@ check "launch: prints the id" "c2a368ee" "$out"
 # origin, so it has none, and an ungranted action ends the turn on one line.
 # It is also told how to read files without paying for them twice (#134).
 read_once="Read each file once: read a large file (over about 20KB, or a long one such as a SKILL.md or a test file) with Read in ranges, or grep -n it first and read the range you need, never whole with cat; read one file per call, since a result over the output limit is saved to a file and has to be read again; and do not print a file you have already read in this session unless it has changed since."
+# It is told how to copy another commit without a worktree, which stops the
+# run (#213).
+copy_commit="For a copy of another commit (a control run, or a test shown failing on the code before your change), never run \`git worktree add\`: /supervise sees the new worktree and stops the run. Put one file back with \`git show <sha>:<path> > <path>\` and restore it after, or export the commit into a scratch folder under your job's directory: \`mkdir <dir>; git -C <repo> archive <sha> | tar -x -C <dir>\`."
 no_grants="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/main, holds no standing grant.
 A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create, a gh api link or reorder of a sub-issue, a gh issue edit) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`.
-$read_once"
+$read_once
+$copy_commit"
 check "launch: flags and the command" "--bg
 --model
 claude-sonnet-5
@@ -1400,12 +1404,15 @@ A shared action one of these grants covers goes ahead without asking: when /impl
 A granted push goes ahead as soon as its grant's conditions hold, before any capture: the supervisor sends /mp-ported-skills:capturing after your turn ends. A commit that capture makes is pushed under the push grant only when the grant's note names a capture's commits, as \`its capture's commits included\` does; otherwise end the capture's turn on \`Waiting on: git push origin main\`.
 A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create, a gh api link or reorder of a sub-issue, a gh issue edit) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`.
 $park_line
-$read_once" \
+$read_once
+$copy_commit" \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d')"
 check "launch with grants: notes the grant committed only locally" "note: docs/agents/supervision.md grants pr-create on the working tree or current branch, not on the committed origin/main; ignored" \
     "$(launch_in "$granted" --ticket 56 2>&1 >/dev/null)"
 check "launch with grants: the job's flags carry them" "--append-system-prompt" \
     "$(jq -r '.respawnFlags[0]' "$cfg/jobs/c2a368ee/state.json")"
+check "launch with grants: the job's flags carry the copy line (#213)" "$copy_commit" \
+    "$(jq -r '.respawnFlags[1]' "$cfg/jobs/c2a368ee/state.json" | grep '^For a copy of another commit')"
 check "launch with grants: a fully set-up Project reports every file present" "setup: docs/agents/issue-tracker.md present
 setup: docs/agents/triage-labels.md present
 setup: docs/agents/supervision.md present on origin/main" "$(setup_lines)"
@@ -2660,8 +2667,10 @@ $dist
 check "launch dist: runs in the Project folder" "$dproj" "$(command cat "$fake/cwd")"
 check "launch dist: the worker is told the repo" "This Project's code lives in its Distribution repo, $dist, named in docs/agents/distribution-repo.md. Make the ticket's code changes and commits there, by path (\`git -C $dist\`), on its current branch, with no new branch or worktree; read the ticket and the Project's docs from this folder." \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 3 | head -n 1)"
-check "launch dist: the worker is told how to read files, before the repo (#134)" "$read_once" \
+check "launch dist: the worker is told how to copy a commit, next to the repo line (#213)" "$copy_commit" \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 4 | head -n 1)"
+check "launch dist: the worker is told how to read files, before the repo (#134)" "$read_once" \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 5 | head -n 1)"
 check "launch dist: the worker is told a Distribution repo push needs distribution-push (#141)" "A push in the Distribution repo is covered only by a distribution-push grant, never by push (#141). With none, do not push it: end your turn on \`Waiting on: git -C $dist push origin main\`, or, when this Project's push waits too, on \`Waiting on: git push origin main; git -C $dist push origin main\`." \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 2 | head -n 1)"
 check "launch dist: the worker names the close with the push only for a finished ticket (#186, #217)" "Closing the ticket waits for the Distribution push, under an issue-close grant or not (#186): while the Distribution repo holds commits its upstream lacks, do not close it. Name the close with the push only when the ticket's work is done, as \`Waiting on: git -C $dist push origin main; gh issue close 56\`; when work is left on the ticket, name the push alone, as \`Waiting on: git -C $dist push origin main\` (#217). /supervise closes the ticket after the push lands." \
