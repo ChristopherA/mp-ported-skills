@@ -25,7 +25,10 @@
 # folder (<marketplace>/<plugin>/<version>/) that appears whole is an
 # update adding it and is not reported, nor is one that disappears whole
 # while the same plugin gains one (a prune); one that disappears with no
-# new version beside it is reported as one line. A file added, changed or
+# new version beside it is reported as one line, unless the record showed
+# it marked .orphaned_at (the cache dropping an orphaned version). Claude
+# Code's markers are left out: entries under a version folder's .in_use/
+# and a .orphaned_at added at its top. Any other file added, changed or
 # removed inside a version folder present both times is reported.
 # The hook guards the whole profile directory; this record watches only the
 # files that govern a session. Known limit: a worker that writes a version
@@ -177,6 +180,12 @@ protected_compare() {
     # its files are not listed; one removed whole is a prune's when the
     # same plugin gained a version folder in the run, and is otherwise one
     # `removed` line for the folder, since it may hold the running gates.
+    # Claude Code's own bookkeeping in the cache is left out too (#266): any
+    # entry under a version folder's .in_use/ (a session that loaded the
+    # version starting or ending), a .orphaned_at added at a version
+    # folder's top (an update marking the version it replaced), and a
+    # version folder removed whole that the record already showed marked
+    # .orphaned_at (the cache dropping an orphaned version).
     if ! awk '
         function tag(line) { return substr(line, index(line, " ") + 1) }
         function unit(t,   a, n) {
@@ -187,15 +196,21 @@ protected_compare() {
         }
         function plugin(u) { return substr(u, 1, length(u) - length(ver(u)) - 1) }
         function ver(u,   a, n) { n = split(u, a, "/"); return a[n] }
+        function inside(t, u) { return substr(t, length(u) + 2) }
+        function in_use(t,   u) { u = unit(t); return u != "" && index(inside(t, u), ".in_use/") == 1 }
+        function orphan_mark(t,   u) { u = unit(t); return u != "" && inside(t, u) == ".orphaned_at" }
         FNR == NR { t = tag($0); old[t] = $1; u = unit(t); if (u != "") ou[u] = 1; next }
         { t = tag($0); cur[t] = $1; u = unit(t); if (u != "") nu[u] = 1 }
         END {
             for (u in nu) if (!(u in ou)) grew[plugin(u)] = 1
             for (t in old) {
+                if (in_use(t)) continue
                 if (!(t in cur)) {
                     u = unit(t)
                     if (u == "" || (u in nu)) print "removed " t
-                    else if (!(plugin(u) in grew) && !(u in gone)) { gone[u] = 1; print "removed " u }
+                    else if (!(plugin(u) in grew) && !((u "/.orphaned_at") in old) && !(u in gone)) {
+                        gone[u] = 1; print "removed " u
+                    }
                 } else if (old[t] != cur[t]) {
                     if (old[t] == "absent") print "added " t
                     else if (cur[t] == "absent") print "removed " t
@@ -203,7 +218,7 @@ protected_compare() {
                 }
             }
             for (t in cur) {
-                if (t in old) continue
+                if (t in old || in_use(t) || orphan_mark(t)) continue
                 u = unit(t)
                 if (u == "" || (u in ou)) print "added " t
             }

@@ -181,6 +181,57 @@ rm -rf "$cfg/plugins/cache/m/p/1.0"
 check "a version folder removed whole with no new one is one line" \
     "protected-file removed ungranted: $cfg/plugins/cache/m/p/1.0" "$(cmp_out)"
 
+# --- the plugin cache's own bookkeeping (#266) --------------------------
+fresh
+printf '1794877496287' >"$cfg/plugins/cache/m/p/1.0/.orphaned_at"
+check "no line for an update's .orphaned_at on the old version folder" "" "$(cmp_out)"
+
+fresh
+printf '1794877496287' >"$cfg/plugins/cache/m/p/1.0/.orphaned_at"
+printf 'evil\n' >>"$cfg/plugins/cache/m/p/1.0/skills/a.md"
+printf 'x\n' >"$cfg/plugins/cache/m/p/1.0/skills/.orphaned_at"
+check "another change beside .orphaned_at is still listed" \
+    "protected-file added ungranted: $cfg/plugins/cache/m/p/1.0/skills/.orphaned_at
+protected-file changed ungranted: $cfg/plugins/cache/m/p/1.0/skills/a.md" "$(cmp_out)"
+
+fresh
+mkdir -p "$cfg/plugins/cache/m/p/1.0/.in_use" "$cfg/plugins/cache/m/q/3.0/.in_use"
+printf 'q\n' >"$cfg/plugins/cache/m/q/3.0/q.md"
+: >"$cfg/plugins/cache/m/p/1.0/.in_use/92298"
+: >"$cfg/plugins/cache/m/q/3.0/.in_use/92298"
+protected_record "$repo" "$cfg" "$rec" || echo "record failed"
+rm "$cfg/plugins/cache/m/p/1.0/.in_use/92298" "$cfg/plugins/cache/m/q/3.0/.in_use/92298"
+: >"$cfg/plugins/cache/m/p/1.0/.in_use/97344"
+: >"$cfg/plugins/cache/m/q/3.0/.in_use/97344"
+check "no line for .in_use entries a session start and end write" "" "$(cmp_out)"
+printf 'evil\n' >>"$cfg/plugins/cache/m/q/3.0/q.md"
+check "a change beside .in_use entries is still listed" \
+    "protected-file changed ungranted: $cfg/plugins/cache/m/q/3.0/q.md" "$(cmp_out)"
+
+fresh
+mkdir -p "$cfg/plugins/cache/m/p/0.9/skills" "$cfg/plugins/cache/m/p/0.9/.in_use"
+printf 'old\n' >"$cfg/plugins/cache/m/p/0.9/skills/a.md"
+printf '1794804746981' >"$cfg/plugins/cache/m/p/0.9/.orphaned_at"
+: >"$cfg/plugins/cache/m/p/0.9/.in_use/92298"
+protected_record "$repo" "$cfg" "$rec" || echo "record failed"
+rm -rf "$cfg/plugins/cache/m/p/0.9"
+check "no line for an orphaned version folder the cache drops" "" "$(cmp_out)"
+
+fresh
+mkdir -p "$cfg/plugins/cache/m/p/0.9/skills"
+printf 'old\n' >"$cfg/plugins/cache/m/p/0.9/skills/a.md"
+printf '1794804746981' >"$cfg/plugins/cache/m/p/0.9/.orphaned_at"
+protected_record "$repo" "$cfg" "$rec" || echo "record failed"
+printf 'evil\n' >>"$cfg/plugins/cache/m/p/0.9/skills/a.md"
+check "a change inside an orphaned version folder is still listed" \
+    "protected-file changed ungranted: $cfg/plugins/cache/m/p/0.9/skills/a.md" "$(cmp_out)"
+
+fresh
+printf '1794877496287' >"$cfg/plugins/cache/m/p/1.0/.orphaned_at"
+rm -rf "$cfg/plugins/cache/m/p/1.0"
+check "a version folder marked orphaned during the run and removed is one line" \
+    "protected-file removed ungranted: $cfg/plugins/cache/m/p/1.0" "$(cmp_out)"
+
 # A protected name that is a symlink is followed.
 fresh
 mv "$cfg/rules" "$work/linked-rules"
