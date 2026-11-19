@@ -507,12 +507,14 @@ check "open: never reads a window id after the split" 0 "$(sent | grep -c 'id of
 # the command is typed would land ahead of it (#146). Focus goes back to the
 # caller's pane in the same script as the split, and a failed select does not
 # fail the open, since the pane is already split.
+# The split's own try ends at its first `end try`; the select comes next.
 check "open: selects the caller's pane right after the split" "split
 try
 tell foundSession to select
 end try
-return" "$(sent | sed 's/^ *//' | awk '/^set newSession to \(split/ { on = 1; print "split"; next }
-    on && /^return/ { print "return"; exit } on && !/^end tell$/ { print }')"
+return" "$(sent | sed 's/^ *//' | awk '/^set newSession to \(split/ { skip = 1; print "split"; next }
+    skip && /^end try$/ { skip = 0; on = 1; next }
+    on && /^return/ { print "return"; exit } on { print }')"
 
 reset; answer 'NEW-1 7 2'
 run pane-open.sh --direction horizontal
@@ -637,6 +639,86 @@ reset; answer 'NEW-1 7 2'
 check "open --command, other send failure: exit 1" 1 "$(command cat "$work/rc")"
 check "open --command, other send failure: osascript's reason" 'pane-send.sh: execution error: iTerm got an error: AppleEvent timed out. (-1712)' "$(err)"
 check "open --command, other send failure: typed once" 1 "$(sent | grep -c 'write text "ls -la"')"
+
+# iTerm2 can make the split and never answer it (#273). The split waits 10
+# seconds, not AppleScript's 120-second default, and an unanswered one returns
+# the tab and the sessions it held before the split.
+reset; answer 'NEW-1 7 2'
+run pane-open.sh
+check "open: the split waits 10 seconds for its answer" "with timeout of 10 seconds
+tell foundSession
+set newSession to (split vertically with default profile)
+end tell
+end timeout" "$(sent | sed 's/^ *//' | grep -B 1 -A 3 '^tell foundSession$')"
+check "open: the tab's sessions are listed before the split" 1 \
+    "$(sent | grep -c 'set beforeIds to id of sessions of tab foundTabNum of window id foundWindowId')"
+check "open: only an unanswered split returns unanswered" 1 "$(sent | grep -c 'if errNum is not -1712 then error errMsg number errNum')"
+check "open: every other iTerm2 call waits 10 seconds" 1 "$(sent | head -n 1 | grep -c '^with timeout of 10 seconds$')"
+check "open: the script holds no apostrophe" 0 "$(sent | grep -c "'")"
+
+# The fake osascript answers the split with `unanswered 7 2 CALLER-1`, lists
+# the tab as $FAKE_AFTER (or fails when $FAKE_LIST_RC is set), and fails a
+# close when $FAKE_CLOSE_RC is set.
+command cat > "$work/osa-unanswered" <<'EOF'
+#!/bin/sh
+s=""
+for a in "$@"; do [ "$a" = -e ] || s="$s$a
+"; done
+[ -t 0 ] || s="$s$(command cat)"
+printf '%s\n' "$s" >> "$FAKE_OSA_LOG"
+case $s in
+    *'split vertically'*) printf 'unanswered 7 2 CALLER-1\n' ;;
+    *'to close'*)
+        if [ -n "${FAKE_CLOSE_RC:-}" ]; then
+            printf '%s\n' "execution error: iTerm got an error: AppleEvent timed out. (-1712)" >&2; exit 1
+        fi ;;
+    *'id of sessions of tab 2 of window id 7'*)
+        if [ -n "${FAKE_LIST_RC:-}" ]; then
+            printf '%s\n' "execution error: iTerm got an error: AppleEvent timed out. (-1712)" >&2; exit 1
+        fi
+        printf '%s\n' "$FAKE_AFTER" ;;
+    *) exit 1 ;;
+esac
+EOF
+unanswered() { # <after> <list rc> <close rc>: runs pane-open.sh --command 'ls -la'
+    reset
+    command rm -rf "$work/un"; mkdir -p "$work/un"
+    command cp -f "$work/osa-unanswered" "$work/un/osascript"; chmod +x "$work/un/osascript"
+    ( FAKE_AFTER=$1 FAKE_LIST_RC=$2 FAKE_CLOSE_RC=$3 PATH="$work/un:$PATH" &&
+      export FAKE_AFTER FAKE_LIST_RC FAKE_CLOSE_RC PATH &&
+      [ "$(command -v osascript)" = "$work/un/osascript" ] &&
+      run pane-open.sh --command 'ls -la'
+      printf '%s\n' "$rc" > "$work/rc" )
+}
+why='Error: could not open a pane: iTerm2 did not answer the split within 10 seconds'
+unanswered 'CALLER-1 NEW-1' '' ''
+check "open, split unanswered: exit 1" 1 "$(command cat "$work/rc")"
+check "open, split unanswered: no coordinates" '' "$(out)"
+check "open, split unanswered: says the pane it made was closed" "$why, so the pane it made (NEW-1) was closed" "$(err)"
+check "open, split unanswered: lists the caller's tab within 10 seconds" 1 \
+    "$(sent | grep -A 3 '^with timeout of 10 seconds$' | grep -c 'return (id of sessions of tab 2 of window id 7) as text')"
+check "open, split unanswered: closes the new pane, within 10 seconds" 1 \
+    "$(sent | grep -A 1 '^with timeout of 10 seconds$' | grep -c '^tell application "iTerm2" to tell session id "NEW-1" of tab 2 of window id 7 to close$')"
+check "open, split unanswered: closes no other pane" 1 "$(sent | grep -c 'to close')"
+check "open, split unanswered: types nothing" 0 "$(sent | grep -c 'write text')"
+unanswered 'CALLER-1 NEW-1' '' 1
+check "open, split unanswered, close fails: exit 1" 1 "$(command cat "$work/rc")"
+check "open, split unanswered, close fails: the coordinates come first" 'NEW-1 7 2' "$(out)"
+check "open, split unanswered, close fails: then why" \
+    "$why, and the pane it made could not be closed: execution error: iTerm got an error: AppleEvent timed out. (-1712)" "$(err)"
+unanswered 'CALLER-1' '' ''
+check "open, split unanswered, no new pane: exit 1" 1 "$(command cat "$work/rc")"
+check "open, split unanswered, no new pane: says so" "$why, and no new pane is on its tab" "$(err)"
+check "open, split unanswered, no new pane: closes nothing" 0 "$(sent | grep -c 'to close')"
+unanswered 'NEW-2 CALLER-1 NEW-1' '' ''
+check "open, split unanswered, two new panes: names both" \
+    "$why, and more than one pane is new on its tab, so none was closed: NEW-2 7 2, NEW-1 7 2" "$(err)"
+check "open, split unanswered, two new panes: closes neither" 0 "$(sent | grep -c 'to close')"
+check "open, split unanswered, two new panes: no coordinates" '' "$(out)"
+unanswered 'CALLER-1 NEW-1' 1 ''
+check "open, split unanswered, tab not listed: exit 1" 1 "$(command cat "$work/rc")"
+check "open, split unanswered, tab not listed: says a pane may be open" \
+    "$why, and its tab could not be listed, so a pane it made may be open: execution error: iTerm got an error: AppleEvent timed out. (-1712)" "$(err)"
 
 reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
 run pane-open.sh

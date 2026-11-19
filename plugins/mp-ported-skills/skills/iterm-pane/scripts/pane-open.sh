@@ -59,6 +59,63 @@ else
     PROFILE_CLAUSE="with default profile"
 fi
 
+SPLIT_TIMEOUT=10
+OSA_TIMEOUT=10
+
+# The split got no answer within SPLIT_TIMEOUT seconds. Its pane, when it
+# made one, is the session on the caller's tab that was not there before the
+# split. One such pane is closed; when it cannot be closed its coordinates are
+# printed first, as for a pane the command could not be typed into, so the
+# caller can close it. Exits 1 in every case: no pane is left open for use.
+# Usage: unanswered unanswered WINDOW TAB BEFORE_ID...
+unanswered() {
+    shift
+    U_WINDOW=$1 U_TAB=$2; shift 2
+    U_BEFORE=" $* "
+    U_WHY="iTerm2 did not answer the split within $SPLIT_TIMEOUT seconds"
+    case "$U_WINDOW$U_TAB" in
+        ''|*[!0-9]*) printf "Error: could not open a pane: %s\n" "$U_WHY" >&2; exit 1 ;;
+    esac
+    if ! U_AFTER=$(osascript 2>"$ERR" <<APPLESCRIPT
+with timeout of ${OSA_TIMEOUT} seconds
+tell application "iTerm2"
+    set text item delimiters of AppleScript to " "
+    return (id of sessions of tab ${U_TAB} of window id ${U_WINDOW}) as text
+end tell
+end timeout
+APPLESCRIPT
+    ); then
+        printf "Error: could not open a pane: %s, and its tab could not be listed, so a pane it made may be open: %s\n" \
+            "$U_WHY" "$(command cat "$ERR")" >&2
+        exit 1
+    fi
+    U_NEW=""
+    for U_ID in $U_AFTER; do
+        case "$U_BEFORE" in *" $U_ID "*) continue ;; esac
+        case "$U_ID" in *[!A-Za-z0-9:-]*) continue ;; esac
+        U_NEW="$U_NEW${U_NEW:+, }$U_ID $U_WINDOW $U_TAB"
+    done
+    case "$U_NEW" in
+        '')
+            printf "Error: could not open a pane: %s, and no new pane is on its tab\n" "$U_WHY" >&2 ;;
+        *', '*)
+            printf "Error: could not open a pane: %s, and more than one pane is new on its tab, so none was closed: %s\n" \
+                "$U_WHY" "$U_NEW" >&2 ;;
+        *)
+            U_ID=${U_NEW%% *}
+            if osascript -e "with timeout of ${OSA_TIMEOUT} seconds
+tell application \"iTerm2\" to tell session id \"$U_ID\" of tab $U_TAB of window id $U_WINDOW to close
+end timeout" >/dev/null 2>"$ERR"; then
+                printf "Error: could not open a pane: %s, so the pane it made (%s) was closed\n" "$U_WHY" "$U_ID" >&2
+            else
+                printf "%s\n" "$U_NEW"
+                printf "Error: could not open a pane: %s, and the pane it made could not be closed: %s\n" \
+                    "$U_WHY" "$(command cat "$ERR")" >&2
+            fi ;;
+    esac
+    exit 1
+}
+
 # Find the iTerm2 session on the caller's TTY, split it, and return the new
 # session's coordinates. `w` is a reference by place in the window list,
 # which the split can reorder, so the window's id is read when the session is
@@ -68,9 +125,20 @@ fi
 # the command is typed would land in the new pane ahead of it (#146). The
 # caller's pane is selected again in the same script, right after the split.
 # A failed select does not fail the open: the pane is already split.
+#
+# iTerm2 can make the split and never answer it (#273): osascript then waits
+# out AppleScript's 120-second default and fails with -1712. So the split
+# waits SPLIT_TIMEOUT seconds, and when it gets no answer the script returns
+# `unanswered`, the tab's coordinates and the ids of the sessions the tab held
+# before the split, for `unanswered` to find and close the pane it made.
+# Finding the caller's pane, listing its tab and closing the pane each wait
+# OSA_TIMEOUT seconds at most. The AppleScript holds no
+# apostrophe: inside $( ), macOS /bin/sh (bash 3.2) reads one in a heredoc as
+# an open quote.
 ERR=$(mktemp)
 trap 'command rm -f "$ERR"' EXIT
 if ! RESULT=$(osascript 2>"$ERR" <<APPLESCRIPT
+with timeout of ${OSA_TIMEOUT} seconds
 tell application "iTerm2"
     set targetTTY to "${CALLER_TTY}"
     set foundSession to missing value
@@ -90,19 +158,33 @@ tell application "iTerm2"
     if foundSession is missing value then
         error "No iTerm2 session found for TTY " & targetTTY
     end if
-    tell foundSession
-        set newSession to (split ${DIRECTION}ly ${PROFILE_CLAUSE})
-    end tell
+    set beforeIds to id of sessions of tab foundTabNum of window id foundWindowId
+    try
+        with timeout of ${SPLIT_TIMEOUT} seconds
+            tell foundSession
+                set newSession to (split ${DIRECTION}ly ${PROFILE_CLAUSE})
+            end tell
+        end timeout
+    on error errMsg number errNum
+        if errNum is not -1712 then error errMsg number errNum
+        set text item delimiters of AppleScript to " "
+        return "unanswered " & foundWindowId & " " & foundTabNum & " " & (beforeIds as text)
+    end try
     try
         tell foundSession to select
     end try
     return (id of newSession) & " " & foundWindowId & " " & foundTabNum
 end tell
+end timeout
 APPLESCRIPT
 ); then
     printf "Error: could not open a pane: %s\n" "$(command cat "$ERR")" >&2
     exit 1
 fi
+
+case $RESULT in
+    'unanswered '*) unanswered $RESULT ;;
+esac
 
 # Printed before the command is typed, so a caller learns of a split pane
 # even when typing into it fails (supervise's view.sh closes it, #200).
