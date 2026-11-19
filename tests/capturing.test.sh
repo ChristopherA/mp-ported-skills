@@ -108,6 +108,12 @@ check "an unfinished ticket's close is neither run, offered nor listed, attended
     "$(contains "$capturing" "do not run, offer or list its close, attended or not, under any grant")"
 check "the push of the work so far stays a job" yes \
     "$(contains "$capturing" "a push of the work so far stays a job as before")"
+# An unposted command that reads its body from a file names a file that
+# exists (#224): a refused heredoc can leave the file unwritten.
+check "an unposted command's body file is checked before it is listed (#224)" yes \
+    "$(contains "$capturing" "Before listing an unposted item whose command reads its body from a file (\`--body-file\`, \`-F\`), check that the file exists and is not empty (\`test -s <file>\`)")"
+check "a missing body file is written again or the text listed inline" yes \
+    "$(contains "$capturing" "write the body to it again, or list the text inline with the command")"
 supervise="$skills/supervise/SKILL.md"
 sup_call='sh "${CLAUDE_SKILL_DIR}/../capturing/scripts/live-check.sh" --dir "<project folder>" N </dev/null'
 check "the supervisor routes the wait" yes \
