@@ -113,7 +113,11 @@ check "the push of the work so far stays a job" yes \
 check "an unposted command's body file is checked before it is listed (#224)" yes \
     "$(contains "$capturing" "Before listing an unposted item whose command reads its body from a file (\`--body-file\`, \`-F\`), check that the file exists and is not empty (\`test -s <file>\`)")"
 check "a missing body file is written again or the text listed inline" yes \
-    "$(contains "$capturing" "write the body to it again, or list the text inline with the command")"
+    "$(contains "$capturing" "write the body to it again with the Write tool rather than a heredoc, or list the text inline with the command")"
+check "an inline text replaces the missing file in the command" yes \
+    "$(contains "$capturing" "change the command to post that text, not the missing file")"
+check "the body-file -F is not gh api's field" yes \
+    "$(contains "$capturing" "The \`-F\` here is \`gh issue\`'s and \`git commit\`'s body file, not \`gh api\`'s field")"
 supervise="$skills/supervise/SKILL.md"
 sup_call='sh "${CLAUDE_SKILL_DIR}/../capturing/scripts/live-check.sh" --dir "<project folder>" N </dev/null'
 check "the supervisor routes the wait" yes \
