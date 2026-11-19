@@ -32,24 +32,33 @@ check() { # <name> <expected> <actual>
 has_in() { if printf '%s\n' "$1" | grep -qF -- "$2"; then echo yes; else echo no; fi; }
 
 done_head='- **`done`**: '
-report=$(grep -F -- "$done_head" "$skill" | head -n 1)
-check "the Report step has the done item" yes "$(has_in "$report" "$done_head")"
+done_item=$(grep -F -- "$done_head" "$skill" | head -n 1)
+check "the Report step has the done item" yes "$(has_in "$done_item" "$done_head")"
 check "done lists the Project repo's commits" yes \
-    "$(has_in "$report" 'its commits, `git -C <cwd> log --oneline <start>..HEAD`')"
+    "$(has_in "$done_item" 'its commits, `git -C <cwd> log --oneline <start>..HEAD`')"
 check "done lists the Distribution repo's commits from <dist start>" yes \
-    "$(has_in "$report" '`git -C <dist> log --oneline <dist start>..HEAD`')"
+    "$(has_in "$done_item" '`git -C "<dist>" log --oneline <dist start>..HEAD`')"
 check "the Distribution repo's commits only with a dist head line" yes \
-    "$(has_in "$report" 'when step 1'"'"'s snapshot has a `dist head` line')"
+    "$(has_in "$done_item" 'When step 1'"'"'s snapshot has a `dist head` line')"
 check "the Distribution repo is the snapshot's distribution line" yes \
-    "$(has_in "$report" '`<dist>` the path on its `distribution` line')"
+    "$(has_in "$done_item" '`<dist>` the path on its `distribution` line')"
 check "each repo's commits under its own name" yes \
-    "$(has_in "$report" "each repo's commits under its own name")"
+    "$(has_in "$done_item" "each repo's commits under its own name")"
 check "the no-commits check counts both repos" yes \
-    "$(has_in "$report" 'with no commits in either repo and the ticket open')"
+    "$(has_in "$done_item" 'with no commits in either repo and the ticket open')"
 check "the old Project-only no-commits check is gone" no \
-    "$(has_in "$report" 'with no commits and the ticket open')"
+    "$(has_in "$done_item" 'with no commits and the ticket open')"
 check "a Project with no Distribution repo reports as before" yes \
-    "$(has_in "$report" 'With no `dist head` line, only the Project repo')"
+    "$(has_in "$done_item" 'With no `dist head` line, only the Project repo')"
+
+# The same gap in the other reports that list a worker's commits.
+dir=$(dirname -- "$skill")
+zone_line=$(grep -F -- 'On a no, a failed check or a failed push, the report also lists the unpushed commits' "$dir/zone-capture.md" | head -n 1)
+check "a declined zone-capture push lists the Distribution repo's commits too" yes \
+    "$(has_in "$zone_line" '`git -C "<dist>" log --oneline <dist start>..HEAD`')"
+loop_line=$(grep -F -- '- each ticket the loop ran, built or parked, in order:' "$dir/loop.md" | head -n 1)
+check "the loop summary lists the Distribution repo's commits too" yes \
+    "$(has_in "$loop_line" "that repo's \`<dist start>..<end>\` and count too, under its own name")"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

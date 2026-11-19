@@ -44,4 +44,4 @@ A supervisor that ends while a zone-captured ticket still has work to build leav
    sh "${CLAUDE_SKILL_DIR}/scripts/launch.sh" --dir "<project folder>" --ticket N --continue <start> --model <model> --effort <effort> </dev/null
    ```
 
-   On a no, a failed check or a failed push, the report also lists the unpushed commits, `git -C "<project folder>" log --oneline <start>..HEAD`, and says that a later `/supervise` continues the ticket from them on its own, as long as nothing is committed on top of them.
+   On a no, a failed check or a failed push, the report also lists the unpushed commits, `git -C "<project folder>" log --oneline <start>..HEAD`, and with a Distribution repo that repo's too, under its own name, `git -C "<dist>" log --oneline <dist start>..HEAD` (the Report step's `done` item in `SKILL.md`, #219), and says that a later `/supervise` continues the ticket from them on its own, as long as nothing is committed on top of them.
