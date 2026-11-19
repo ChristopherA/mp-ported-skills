@@ -642,7 +642,7 @@ check "open --command, other send failure: typed once" 1 "$(sent | grep -c 'writ
 
 # iTerm2 can make the split and never answer it (#273). The split waits 10
 # seconds, not AppleScript's 120-second default, and an unanswered one returns
-# the tab and the sessions it held before the split.
+# the ids of every session open before the split.
 reset; answer 'NEW-1 7 2'
 run pane-open.sh
 check "open: the split waits 10 seconds for its answer" "with timeout of 10 seconds
@@ -650,15 +650,17 @@ tell foundSession
 set newSession to (split vertically with default profile)
 end tell
 end timeout" "$(sent | sed 's/^ *//' | grep -B 1 -A 3 '^tell foundSession$')"
-check "open: the tab's sessions are listed before the split" 1 \
-    "$(sent | grep -c 'set beforeIds to id of sessions of tab foundTabNum of window id foundWindowId')"
-check "open: only an unanswered split returns unanswered" 1 "$(sent | grep -c 'if errNum is not -1712 then error errMsg number errNum')"
-check "open: every other iTerm2 call waits 10 seconds" 1 "$(sent | head -n 1 | grep -c '^with timeout of 10 seconds$')"
+check "open: every session's id is noted while the caller's pane is looked for" "set beforeIds to beforeIds & \" \" & (id of s)
+if tty of s is targetTTY then" "$(sent | sed 's/^ *//' | grep -A 1 '^set beforeIds to beforeIds')"
+check "open: only an unanswered split returns unanswered" "if errNum is not -1712 then error errMsg number errNum
+return \"unanswered\" & beforeIds" "$(sent | sed 's/^ *//' | grep -A 1 '^if errNum')"
+check "open: finding the caller's pane waits 10 seconds for each answer" 'with timeout of 10 seconds' "$(sent | head -n 1)"
 check "open: the script holds no apostrophe" 0 "$(sent | grep -c "'")"
 
-# The fake osascript answers the split with `unanswered 7 2 CALLER-1`, lists
-# the tab as $FAKE_AFTER (or fails when $FAKE_LIST_RC is set), and fails a
-# close when $FAKE_CLOSE_RC is set.
+# The fake osascript answers the split with `unanswered CALLER-1 CALLER-2`,
+# lists the panes from $FAKE_AFTER_<n> for its nth listing, or from
+# $FAKE_AFTER (or fails when $FAKE_LIST_RC is set), and fails a close when
+# $FAKE_CLOSE_RC is set. A fake sleep records each wait.
 command cat > "$work/osa-unanswered" <<'EOF'
 #!/bin/sh
 s=""
@@ -667,58 +669,99 @@ for a in "$@"; do [ "$a" = -e ] || s="$s$a
 [ -t 0 ] || s="$s$(command cat)"
 printf '%s\n' "$s" >> "$FAKE_OSA_LOG"
 case $s in
-    *'split vertically'*) printf 'unanswered 7 2 CALLER-1\n' ;;
+    *'split vertically'*) printf 'unanswered CALLER-1 CALLER-2\n' ;;
     *'to close'*)
         if [ -n "${FAKE_CLOSE_RC:-}" ]; then
             printf '%s\n' "execution error: iTerm got an error: AppleEvent timed out. (-1712)" >&2; exit 1
         fi ;;
-    *'id of sessions of tab 2 of window id 7'*)
+    *'linefeed'*)
         if [ -n "${FAKE_LIST_RC:-}" ]; then
             printf '%s\n' "execution error: iTerm got an error: AppleEvent timed out. (-1712)" >&2; exit 1
         fi
-        printf '%s\n' "$FAKE_AFTER" ;;
+        n=$(( $(command cat "$FAKE_DIR/lists" 2>/dev/null || echo 0) + 1 )); echo $n > "$FAKE_DIR/lists"
+        eval "a=\${FAKE_AFTER_$n:-\$FAKE_AFTER}"
+        printf '%s\n' "$a" ;;
     *) exit 1 ;;
 esac
 EOF
-unanswered() { # <after> <list rc> <close rc>: runs pane-open.sh --command 'ls -la'
-    reset
+unanswered() { # <after> <list rc> <close rc> [args]: runs pane-open.sh, by default with --command 'ls -la'
+    reset; : > "$work/out"; : > "$work/err"; rc=unset
     command rm -rf "$work/un"; mkdir -p "$work/un"
-    command cp -f "$work/osa-unanswered" "$work/un/osascript"; chmod +x "$work/un/osascript"
-    ( FAKE_AFTER=$1 FAKE_LIST_RC=$2 FAKE_CLOSE_RC=$3 PATH="$work/un:$PATH" &&
-      export FAKE_AFTER FAKE_LIST_RC FAKE_CLOSE_RC PATH &&
-      [ "$(command -v osascript)" = "$work/un/osascript" ] &&
-      run pane-open.sh --command 'ls -la'
+    command cp -f "$work/osa-unanswered" "$work/un/osascript"
+    command cp -f "$work/sleep-fake" "$work/un/sleep"
+    chmod +x "$work/un/osascript" "$work/un/sleep"
+    a=$1 l=$2 c=$3; shift 3
+    [ $# -gt 0 ] || set -- --command 'ls -la'
+    ( FAKE_DIR="$work/un" FAKE_AFTER=$a FAKE_LIST_RC=$l FAKE_CLOSE_RC=$c PATH="$work/un:$PATH" &&
+      export FAKE_DIR FAKE_AFTER FAKE_LIST_RC FAKE_CLOSE_RC PATH &&
+      if [ "$(command -v osascript)" = "$work/un/osascript" ] && [ "$(command -v sleep)" = "$work/un/sleep" ]; then
+          run pane-open.sh "$@"
+      else
+          echo 'fakes not first on PATH' > "$work/err"
+      fi
       printf '%s\n' "$rc" > "$work/rc" )
 }
 why='Error: could not open a pane: iTerm2 did not answer the split within 10 seconds'
-unanswered 'CALLER-1 NEW-1' '' ''
+timedout='execution error: iTerm got an error: AppleEvent timed out. (-1712)'
+listed='CALLER-1 7 2
+CALLER-2 8 1'
+unanswered "$listed
+NEW-1 7 2" '' ''
 check "open, split unanswered: exit 1" 1 "$(command cat "$work/rc")"
 check "open, split unanswered: no coordinates" '' "$(out)"
 check "open, split unanswered: says the pane it made was closed" "$why, so the pane it made (NEW-1) was closed" "$(err)"
-check "open, split unanswered: lists the caller's tab within 10 seconds" 1 \
-    "$(sent | grep -A 3 '^with timeout of 10 seconds$' | grep -c 'return (id of sessions of tab 2 of window id 7) as text')"
+check "open, split unanswered: lists the panes once, within 10 seconds" 1 \
+    "$(sent | grep -A 4 '^with timeout of 10 seconds$' | grep -c 'repeat with w in windows')"
 check "open, split unanswered: closes the new pane, within 10 seconds" 1 \
     "$(sent | grep -A 1 '^with timeout of 10 seconds$' | grep -c '^tell application "iTerm2" to tell session id "NEW-1" of tab 2 of window id 7 to close$')"
 check "open, split unanswered: closes no other pane" 1 "$(sent | grep -c 'to close')"
 check "open, split unanswered: types nothing" 0 "$(sent | grep -c 'write text')"
-unanswered 'CALLER-1 NEW-1' '' 1
+check "open, split unanswered: no wait" '' "$(command cat "$work/un/slept" 2>/dev/null)"
+unanswered "$listed
+NEW-1 7 2" '' '' --direction vertical
+check "open with no --command, split unanswered: exit 1" 1 "$(command cat "$work/rc")"
+check "open with no --command, split unanswered: closes the new pane" "$why, so the pane it made (NEW-1) was closed" "$(err)"
+# iTerm2 can hold the new pane in another window than the caller's (#200).
+unanswered "$listed
+NEW-1 9 3" '' ''
+check "open, split unanswered, pane in another window: closed where it is" 1 \
+    "$(sent | grep -c 'tell session id "NEW-1" of tab 3 of window id 9 to close$')"
+unanswered "$listed
+NEW-1 7 2" '' 1
 check "open, split unanswered, close fails: exit 1" 1 "$(command cat "$work/rc")"
 check "open, split unanswered, close fails: the coordinates come first" 'NEW-1 7 2' "$(out)"
 check "open, split unanswered, close fails: then why" \
-    "$why, and the pane it made could not be closed: execution error: iTerm got an error: AppleEvent timed out. (-1712)" "$(err)"
-unanswered 'CALLER-1' '' ''
+    "$why, and the pane it made could not be closed: $timedout" "$(err)"
+# The split may still be making its pane when its wait runs out.
+( FAKE_AFTER_3="$listed
+NEW-1 7 2" && export FAKE_AFTER_3 && unanswered "$listed" '' '' )
+check "open, split unanswered, pane appears late: closed" "$why, so the pane it made (NEW-1) was closed" "$(err)"
+check "open, split unanswered, pane appears late: listed three times" 3 "$(command cat "$work/un/lists")"
+check "open, split unanswered, pane appears late: waited twice, a second each" 'sleep 1
+sleep 1' "$(command cat "$work/un/slept")"
+unanswered "$listed" '' ''
 check "open, split unanswered, no new pane: exit 1" 1 "$(command cat "$work/rc")"
-check "open, split unanswered, no new pane: says so" "$why, and no new pane is on its tab" "$(err)"
+check "open, split unanswered, no new pane: says so" "$why, and no new pane is open" "$(err)"
+check "open, split unanswered, no new pane: listed three times" 3 "$(command cat "$work/un/lists")"
 check "open, split unanswered, no new pane: closes nothing" 0 "$(sent | grep -c 'to close')"
-unanswered 'NEW-2 CALLER-1 NEW-1' '' ''
+unanswered "NEW-2 8 1
+$listed
+NEW-1 7 2" '' ''
 check "open, split unanswered, two new panes: names both" \
-    "$why, and more than one pane is new on its tab, so none was closed: NEW-2 7 2, NEW-1 7 2" "$(err)"
+    "$why, and more than one pane appeared since the split, so none was closed: NEW-2 8 1, NEW-1 7 2" "$(err)"
 check "open, split unanswered, two new panes: closes neither" 0 "$(sent | grep -c 'to close')"
 check "open, split unanswered, two new panes: no coordinates" '' "$(out)"
-unanswered 'CALLER-1 NEW-1' 1 ''
-check "open, split unanswered, tab not listed: exit 1" 1 "$(command cat "$work/rc")"
-check "open, split unanswered, tab not listed: says a pane may be open" \
-    "$why, and its tab could not be listed, so a pane it made may be open: execution error: iTerm got an error: AppleEvent timed out. (-1712)" "$(err)"
+# A line that is not three well-formed fields is never taken for a pane.
+unanswered "$listed
+NEW\"1 7 2
+NEW-3 x 2
+NEW-4 7" '' ''
+check "open, split unanswered, malformed lines: ignored" "$why, and no new pane is open" "$(err)"
+unanswered "$listed
+NEW-1 7 2" 1 ''
+check "open, split unanswered, panes not listed: exit 1" 1 "$(command cat "$work/rc")"
+check "open, split unanswered, panes not listed: says a pane may be open" \
+    "$why, and its panes could not be listed, so a pane it made may be open: $timedout" "$(err)"
 
 reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
 run pane-open.sh

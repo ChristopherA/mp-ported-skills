@@ -63,50 +63,61 @@ SPLIT_TIMEOUT=10
 OSA_TIMEOUT=10
 
 # The split got no answer within SPLIT_TIMEOUT seconds. Its pane, when it
-# made one, is the session on the caller's tab that was not there before the
-# split. One such pane is closed; when it cannot be closed its coordinates are
-# printed first, as for a pane the command could not be typed into, so the
-# caller can close it. Exits 1 in every case: no pane is left open for use.
-# Usage: unanswered unanswered WINDOW TAB BEFORE_ID...
+# made one, is the session that was in no window before the split; it is
+# looked for in every window, since iTerm2 can hold a new pane in another
+# one (#200), and up to LIST_TRIES times, LIST_WAIT seconds apart, since the
+# split may still be making it. One such pane is closed; when it cannot be
+# closed its coordinates are printed first, as for a pane the command could
+# not be typed into, so the caller can close it. Exits 1 in every case: no
+# pane is left open for use.
+# Usage: unanswered BEFORE_ID...
+LIST_TRIES=3 LIST_WAIT=1
 unanswered() {
-    shift
-    U_WINDOW=$1 U_TAB=$2; shift 2
     U_BEFORE=" $* "
     U_WHY="iTerm2 did not answer the split within $SPLIT_TIMEOUT seconds"
-    case "$U_WINDOW$U_TAB" in
-        ''|*[!0-9]*) printf "Error: could not open a pane: %s\n" "$U_WHY" >&2; exit 1 ;;
-    esac
-    if ! U_AFTER=$(osascript 2>"$ERR" <<APPLESCRIPT
+    U_TRIES=1
+    while :; do
+        if ! U_AFTER=$(osascript 2>"$ERR" <<APPLESCRIPT
 with timeout of ${OSA_TIMEOUT} seconds
 tell application "iTerm2"
-    set text item delimiters of AppleScript to " "
-    return (id of sessions of tab ${U_TAB} of window id ${U_WINDOW}) as text
+    set out to ""
+    repeat with w in windows
+        set wid to id of w
+        repeat with ti from 1 to count of tabs of w
+            repeat with s in sessions of (tab ti of w)
+                set out to out & (id of s) & " " & wid & " " & ti & linefeed
+            end repeat
+        end repeat
+    end repeat
+    return out
 end tell
 end timeout
 APPLESCRIPT
-    ); then
-        printf "Error: could not open a pane: %s, and its tab could not be listed, so a pane it made may be open: %s\n" \
-            "$U_WHY" "$(command cat "$ERR")" >&2
-        exit 1
-    fi
-    U_NEW=""
-    for U_ID in $U_AFTER; do
-        case "$U_BEFORE" in *" $U_ID "*) continue ;; esac
-        case "$U_ID" in *[!A-Za-z0-9:-]*) continue ;; esac
-        U_NEW="$U_NEW${U_NEW:+, }$U_ID $U_WINDOW $U_TAB"
+        ); then
+            printf "Error: could not open a pane: %s, and its panes could not be listed, so a pane it made may be open: %s\n" \
+                "$U_WHY" "$(command cat "$ERR")" >&2
+            exit 1
+        fi
+        U_NEW=$(printf '%s\n' "$U_AFTER" | awk -v before="$U_BEFORE" '
+            NF == 3 && $1 ~ /^[A-Za-z0-9:-]+$/ && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ &&
+                index(before, " " $1 " ") == 0 { printf "%s%s", sep, $0; sep = ", " }')
+        [ -z "$U_NEW" ] && [ "$U_TRIES" -lt "$LIST_TRIES" ] || break
+        U_TRIES=$((U_TRIES + 1))
+        sleep "$LIST_WAIT"
     done
     case "$U_NEW" in
         '')
-            printf "Error: could not open a pane: %s, and no new pane is on its tab\n" "$U_WHY" >&2 ;;
+            printf "Error: could not open a pane: %s, and no new pane is open\n" "$U_WHY" >&2 ;;
         *', '*)
-            printf "Error: could not open a pane: %s, and more than one pane is new on its tab, so none was closed: %s\n" \
+            printf "Error: could not open a pane: %s, and more than one pane appeared since the split, so none was closed: %s\n" \
                 "$U_WHY" "$U_NEW" >&2 ;;
         *)
-            U_ID=${U_NEW%% *}
+            set -- $U_NEW
+            SESSION_ID=$1 WINDOW_ID=$2 TAB_NUM=$3
             if osascript -e "with timeout of ${OSA_TIMEOUT} seconds
-tell application \"iTerm2\" to tell session id \"$U_ID\" of tab $U_TAB of window id $U_WINDOW to close
+tell application \"iTerm2\" to tell $(pane_target) to close
 end timeout" >/dev/null 2>"$ERR"; then
-                printf "Error: could not open a pane: %s, so the pane it made (%s) was closed\n" "$U_WHY" "$U_ID" >&2
+                printf "Error: could not open a pane: %s, so the pane it made (%s) was closed\n" "$U_WHY" "$SESSION_ID" >&2
             else
                 printf "%s\n" "$U_NEW"
                 printf "Error: could not open a pane: %s, and the pane it made could not be closed: %s\n" \
@@ -129,12 +140,11 @@ end timeout" >/dev/null 2>"$ERR"; then
 # iTerm2 can make the split and never answer it (#273): osascript then waits
 # out AppleScript's 120-second default and fails with -1712. So the split
 # waits SPLIT_TIMEOUT seconds, and when it gets no answer the script returns
-# `unanswered`, the tab's coordinates and the ids of the sessions the tab held
-# before the split, for `unanswered` to find and close the pane it made.
-# Finding the caller's pane, listing its tab and closing the pane each wait
-# OSA_TIMEOUT seconds at most. The AppleScript holds no
-# apostrophe: inside $( ), macOS /bin/sh (bash 3.2) reads one in a heredoc as
-# an open quote.
+# `unanswered` and the ids of every session open before the split, for
+# `unanswered` to find and close the pane it made. Each AppleEvent sent to
+# find the caller's pane, list the panes and close one waits OSA_TIMEOUT
+# seconds at most. The AppleScript holds no apostrophe: inside $( ), macOS
+# /bin/sh (bash 3.2) reads one in a heredoc as an open quote.
 ERR=$(mktemp)
 trap 'command rm -f "$ERR"' EXIT
 if ! RESULT=$(osascript 2>"$ERR" <<APPLESCRIPT
@@ -144,9 +154,11 @@ tell application "iTerm2"
     set foundSession to missing value
     set foundWindowId to missing value
     set foundTabNum to 1
+    set beforeIds to ""
     repeat with w in windows
         repeat with ti from 1 to count of tabs of w
             repeat with s in sessions of (tab ti of w)
+                set beforeIds to beforeIds & " " & (id of s)
                 if tty of s is targetTTY then
                     set foundSession to s
                     set foundWindowId to id of w
@@ -158,7 +170,6 @@ tell application "iTerm2"
     if foundSession is missing value then
         error "No iTerm2 session found for TTY " & targetTTY
     end if
-    set beforeIds to id of sessions of tab foundTabNum of window id foundWindowId
     try
         with timeout of ${SPLIT_TIMEOUT} seconds
             tell foundSession
@@ -167,8 +178,7 @@ tell application "iTerm2"
         end timeout
     on error errMsg number errNum
         if errNum is not -1712 then error errMsg number errNum
-        set text item delimiters of AppleScript to " "
-        return "unanswered " & foundWindowId & " " & foundTabNum & " " & (beforeIds as text)
+        return "unanswered" & beforeIds
     end try
     try
         tell foundSession to select
@@ -183,7 +193,7 @@ APPLESCRIPT
 fi
 
 case $RESULT in
-    'unanswered '*) unanswered $RESULT ;;
+    unanswered|'unanswered '*) unanswered ${RESULT#unanswered} ;;
 esac
 
 # Printed before the command is typed, so a caller learns of a split pane
