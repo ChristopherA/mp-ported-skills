@@ -217,6 +217,8 @@ protected_record "$repo" "$cfg" "$rec" || echo "record failed"
 rm -rf "$cfg/plugins/cache/m/p/0.9"
 check "no line for an orphaned version folder the cache drops" "" "$(cmp_out)"
 
+# The next two held before #266 too; they guard against leaving out more
+# than the cache's bookkeeping.
 fresh
 mkdir -p "$cfg/plugins/cache/m/p/0.9/skills"
 printf 'old\n' >"$cfg/plugins/cache/m/p/0.9/skills/a.md"
