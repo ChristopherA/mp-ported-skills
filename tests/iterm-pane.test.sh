@@ -547,7 +547,8 @@ chmod +x "$work/osa-send-fails"
 reset; answer 'NEW-1 7 2'
 ( mkdir -p "$work/bin2" && command cp -f "$work/osa-send-fails" "$work/bin2/osascript" &&
   printf '#!/bin/sh\n' > "$work/bin2/sleep" && chmod +x "$work/bin2/sleep" &&
-  PATH="$work/bin2:$PATH" && export PATH && run pane-open.sh --command 'ls -la'
+  PATH="$work/bin2:$PATH" && export PATH && [ "$(command -v sleep)" = "$work/bin2/sleep" ] &&
+  run pane-open.sh --command 'ls -la'
   printf '%s\n' "$rc" > "$work/rc" )
 check "open --command, send fails: exit 1" 1 "$(command cat "$work/rc")"
 check "open --command, send fails: the coordinates come first" 'NEW-1 7 2' "$(out)"

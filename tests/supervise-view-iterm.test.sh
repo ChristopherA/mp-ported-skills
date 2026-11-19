@@ -378,7 +378,7 @@ printf '#!/bin/sh\n' >"$osa/bin/sleep"
 chmod +x "$osa/bin/osascript" "$osa/bin/ps" "$osa/bin/sleep"
 real() { (PATH="$osa/bin:$PATH" MP_PANE_DIR="$root/plugins/mp-ported-skills/skills/iterm-pane/scripts" &&
     export PATH MP_PANE_DIR &&
-    [ "$(command -v osascript)" = "$osa/bin/osascript" ] && view "$@"); }
+    [ "$(command -v osascript)" = "$osa/bin/osascript" ] && [ "$(command -v sleep)" = "$osa/bin/sleep" ] && view "$@"); }
 sent() { command cat "$osa/log" 2>/dev/null; command rm -f "$osa/log"; }
 out=$(real --iterm --id $id --dir "$project"); rc=$?
 check "stubbed osascript, wrong window: exit 0" 0 "$rc"
@@ -432,7 +432,8 @@ late_view() { # <misses> <list from>: view.sh --iterm on the late stub
     (PATH="$late/bin:$PATH" MP_PANE_DIR="$root/plugins/mp-ported-skills/skills/iterm-pane/scripts" &&
         LATE_DIR=$late LATE_MISSES=$1 LATE_FROM=$2 &&
         export PATH MP_PANE_DIR LATE_DIR LATE_MISSES LATE_FROM &&
-        [ "$(command -v osascript)" = "$late/bin/osascript" ] && view --iterm --id $id --dir "$project")
+        [ "$(command -v osascript)" = "$late/bin/osascript" ] && [ "$(command -v sleep)" = "$late/bin/sleep" ] &&
+        view --iterm --id $id --dir "$project")
 }
 out=$(late_view 1 2); rc=$?
 check "stubbed osascript, pane listed late: exit 0" 0 "$rc"

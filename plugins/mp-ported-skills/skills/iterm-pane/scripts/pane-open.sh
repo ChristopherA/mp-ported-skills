@@ -112,11 +112,12 @@ printf "%s\n" "$RESULT"
 # the split returned (-1728, "no pane with session") before it lists it there
 # (#265), or hold it in another window (#200). So a typing that found no pane
 # is tried again, after a short wait and a lookup of the pane by session id,
-# up to six times in all. Nothing was typed when no pane was found, so the
+# up to SEND_TRIES times in all, SEND_WAIT seconds apart. Nothing was typed when no pane was found, so the
 # command is never typed twice; any other failure is not retried.
 if [ -n "$COMMAND" ]; then
     set -- $RESULT
     SEND_SESSION=$1 SEND_WINDOW=$2 SEND_TAB=$3
+    SEND_TRIES=6 SEND_WAIT=0.5
     TRIES=1
     while :; do
         if SEND_ERR=$(sh "$SCRIPT_DIR/pane-send.sh" --session "$SEND_SESSION" --window "$SEND_WINDOW" \
@@ -124,11 +125,11 @@ if [ -n "$COMMAND" ]; then
             exit 0
         fi
         case $SEND_ERR in
-            *'no pane with session'*) [ "$TRIES" -lt 6 ] || break ;;
+            *'no pane with session'*) [ "$TRIES" -lt "$SEND_TRIES" ] || break ;;
             *) break ;;
         esac
         TRIES=$((TRIES + 1))
-        sleep 0.5
+        sleep "$SEND_WAIT"
         # pane-find.sh matches part of an id, so only a line for the whole id counts.
         if FOUND=$(sh "$SCRIPT_DIR/pane-find.sh" --session "$SEND_SESSION" </dev/null 2>/dev/null); then
             FOUND=$(printf '%s\n' "$FOUND" | awk -v s="$SEND_SESSION" '$1 == s && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ { print $2, $3; exit }')
