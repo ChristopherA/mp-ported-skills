@@ -773,6 +773,14 @@ check "a quoted '>' before a second target still refuses" "deny" \
     "$(decision 0 auto "gh api repos/o/r/issues/40/comments -F body=x '>' repos/o/r/pulls" "$granted")"
 check "a quoted '>pulls' word still refuses" "deny" \
     "$(decision 0 auto "gh api repos/o/r/issues/40/comments -F body=x '>repos/o/r/pulls'" "$granted")"
+# A quoted redirect word given as a flag's value is that value, and cannot
+# pass over the header or host flag after it.
+for extra in "-p '>' --hostname=evil.example" "-H '>' -HX:y" "--preview '<' --hostname=evil.example" "--header '>' --header=X:y"; do
+    check "a quoted redirect as a flag value before $extra still refuses" "deny" \
+        "$(decision 0 auto "gh api --method POST repos/o/r/issues/40/sub_issues -F sub_issue_id=9 $extra" "$granted")"
+done
+check "a granted link with a quoted path and nothing added goes through" "" \
+    "$(decision 0 auto "gh api --method POST 'repos/{owner}/{repo}/issues/40/sub_issues' -F sub_issue_id=9" "$granted")"
 check "an output flag after -- is an endpoint word to gh, and refuses" "deny" \
     "$(decision 0 auto "gh api --method POST repos/o/r/issues/40/sub_issues -F sub_issue_id=9 -- --jq .number" "$granted")"
 check "a link with a header names plain gh api POST" "yes" \

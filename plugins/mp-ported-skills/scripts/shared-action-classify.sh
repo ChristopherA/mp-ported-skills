@@ -558,6 +558,16 @@ gh_words() {
     done
 }
 
+# classify_api_word <word>: succeeds when the word names an endpoint a gh
+# api write is refused on: the targets classify_gh's api case reads, or
+# graphql. A redirect word that does is counted as an endpoint (#227).
+classify_api_word() {
+    case "$1" in
+    *pulls* | *issues* | *merges* | *contents* | */git/* | *graphql*) return 0 ;;
+    esac
+    return 1
+}
+
 classify_gh() {
     gh_words "$@"
     case "$gh_sub/$gh_act" in
@@ -672,19 +682,19 @@ classify_gh() {
         # grant (#162): only when that path, matched whole, is the one word
         # not taken by a method, field or output flag (--jq, -q, --template,
         # -t, --cache) or a redirect (#227). Any other word -- a second
-        # path, a header's value (-H, --header), a --hostname -- leaves it a
-        # plain gh api write, never granted, as is a PATCH or DELETE of a
-        # comment (#113) or of a
-        # sub-issue. A GraphQL mutation is never granted either, addComment,
+        # path, a header's value (-H, --header), a --hostname or a
+        # --preview -- leaves it a plain gh api write, never granted, as is a
+        # PATCH or DELETE of a comment (#113) or of a sub-issue. A GraphQL
+        # mutation is never granted either, addComment,
         # createIssue and addSubIssue included; ADR 0005 says why. The words
         # after `api` are the request.
         shift $((gh_pre + 1))
-        _cmethod="" _cfields="" _ctarget="" _cgraphql="" _cissue="" _cwords=0 _cend=""
+        _cmethod="" _cfields="" _ctarget="" _cgraphql="" _cissue="" _cwords=0 _cdashdash=""
         while [ $# -gt 0 ]; do
             # After --, gh reads every word as an argument, flags included,
             # so none is passed over as a flag: the prefix matches no flag.
-            case "${_cend:+end:}$1" in
-            --) _cend=yes; shift; continue ;;
+            case "${_cdashdash:+end:}$1" in
+            --) _cdashdash=yes; shift; continue ;;
             -X | --method) _cmethod=${2:-}; if [ $# -ge 2 ]; then shift 2; else shift; fi; continue ;;
             -X* ) _cmethod=${1#-X}; shift; continue ;;
             --method=*) _cmethod=${1#--method=}; shift; continue ;;
@@ -694,8 +704,11 @@ classify_gh() {
             # no endpoint words (#227).
             -q | --jq | -t | --template | --cache) if [ $# -ge 2 ]; then shift 2; else shift; fi; continue ;;
             -q?* | --jq=* | -t?* | --template=* | --cache=*) shift; continue ;;
-            # A header or another host is never granted: a separate value
-            # counts as an endpoint word below, and a joined one counts here.
+            # A header, another host or a preview is never granted: its
+            # value counts as an endpoint word, joined or not. A separate
+            # value is taken here, so a quoted '>' given as one is not read
+            # as a redirect below that would pass over the next word.
+            -H | --header | --hostname | -p | --preview) _cwords=$((_cwords + 1)); if [ $# -ge 2 ]; then shift 2; else shift; fi; continue ;;
             -H?* | --header=* | --hostname=*) _cwords=$((_cwords + 1)); shift; continue ;;
             -*) shift; continue ;;
             esac
@@ -703,25 +716,25 @@ classify_gh() {
             # <file, or a bare > and its target) is no endpoint word either
             # (#227), unless its text names an API target: quotes are gone
             # by here, so a quoted '>' that gh would read as its endpoint
-            # still counts, and the form stays refused.
+            # still counts, and the form stays refused. So does a redirect
+            # to a file whose name holds one (>issues.json), and one from an
+            # fd above 9: both refuse, as before.
             case "$1" in
             '>' | '>>' | '>|' | [0-9]'>' | [0-9]'>>' | [0-9]'>|' | '&>' | '&>>' | '<' | [0-9]'<' | '<>')
-                case "${2:-}" in
-                *pulls* | *issues* | *merges* | *contents* | */git/* | graphql) ;;
-                *) if [ $# -ge 2 ]; then shift 2; else shift; fi; continue ;;
-                esac
+                if ! classify_api_word "${2:-}"; then
+                    if [ $# -ge 2 ]; then shift 2; else shift; fi
+                    continue
+                fi
                 ;;
             '>'* | [0-9]'>'* | '&>'* | '<'* | [0-9]'<'*)
-                case "$1" in
-                *pulls* | *issues* | *merges* | *contents* | */git/* | *graphql*) ;;
-                *) shift; continue ;;
-                esac
+                classify_api_word "$1" || { shift; continue; }
                 ;;
             esac
             _cwords=$((_cwords + 1))
             case "$1" in
             graphql) _cgraphql=yes ;;
             *pulls* | *issues* | *merges* | *contents* | */git/*)
+                # Keep in step with classify_api_word below.
                 _ctarget=yes
                 # Owner and repo are GitHub's name characters, or gh's
                 # {owner} and {repo}: a ? or # there would hide another
