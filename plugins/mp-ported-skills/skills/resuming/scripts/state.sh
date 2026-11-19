@@ -16,7 +16,9 @@
 # loop command, offered only for two or more tickets or a run to continue
 # (`supervise:`). When the next step is an in-motion parent's by-hand or
 # not-ready child and a ready child behind it could go ahead, prints the same
-# lines for that reorder (#207). Writes nothing.
+# lines for that reorder (#207). When the plugin running this script is an
+# installed version older than the one the default branch carries, prints
+# `plugin:` with the update command and /reload-plugins (#238). Writes nothing.
 #
 # Usage: sh state.sh [dir]
 #   dir defaults to the current folder. Reports everything; an unreached
@@ -51,6 +53,9 @@ distribution="$supervise_scripts/distribution.sh"
 . "$supervise_scripts/park.sh"
 # Whether unpushed commits are a supervised run of a ticket (#214).
 . "$supervise_scripts/run-start.sh"
+# Whether the installed plugin is older than the checkout's (#238).
+. "$supervise_scripts/plugin-version.sh"
+plugin_root=$(CDPATH= cd -- "$supervise_scripts/../../.." && pwd)
 
 cd "$dir" 2>/dev/null || exit 0
 
@@ -255,6 +260,7 @@ gather() {
     git show-ref -q --verify "refs/remotes/origin/$default" && defref=origin/$default
     echo "branch: $branch (default $default), $r_sync, as of last fetch"
     echo "uncommitted paths: $dirty; unpushed commits: $unpushed"
+    plugin_behind "$plugin_root" . "$defref"
     inflight=$(git_inflight)
     # The same less the unpushed commits, for the /supervise offer (#214).
     r_unpushed=0

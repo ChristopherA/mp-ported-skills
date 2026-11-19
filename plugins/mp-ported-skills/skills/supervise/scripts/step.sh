@@ -15,7 +15,9 @@
 # maintainer to push them before it launches #N (#223). Otherwise prints
 # `stop: ` and the `next:` line, for the supervisor to report. A folder in a
 # linked git worktree stops first, with main-checkout.sh's reason in place of
-# the `next:` line. Writes nothing.
+# the `next:` line. A `plugin:` line in the report, an installed plugin older
+# than the checkout's (#238), goes to stderr, so stdout stays the one step
+# line next.sh reads. Writes nothing.
 #
 # Usage:
 #   step.sh DIR          run state.sh in DIR
@@ -47,6 +49,7 @@ case "${1:-}" in
         report=$(sh "$state" "$1" </dev/null) ;;
 esac
 
+printf '%s\n' "$report" | grep '^plugin: ' >&2
 line=$(printf '%s\n' "$report" | sed -n 's/^next: //p' | head -n 1)
 if [ -z "$line" ]; then
     echo "stop: state.sh printed no next: line"
