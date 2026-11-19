@@ -395,6 +395,18 @@ A granted push goes ahead as soon as its grant's conditions hold, before any cap
     # no command maps to it, so without a push grant the worker's push waits.
     [ -z "$checked_granted" ] || [ -n "$push_granted" ] || GRANTS="$GRANTS
 checked-push is the supervisor's grant, not yours: it covers no push of yours. End your turn on \`Waiting on: git push origin $default\` as with no push grant; /supervise pushes after your turn ends, without asking when every check passes."
+    # The auto-mode classifier judges a granted action on its own (#225,
+    # docs/research/classifier-granted-actions.md): since 2026-11-12 it
+    # refused every worker's first granted push, whatever its form, and the
+    # same push went through after the supervisor's answer; a granted
+    # comment as --body-file passed 91 of 96 times, its refusals in the
+    # same form as calls that passed.
+    GRANTS="$GRANTS
+The auto-mode classifier can still refuse a granted action, whatever its form, and sending it again in the same turn is refused too. Take each granted action once, in its own Bash call. When one is refused, do not send it again or try another form: finish the rest of the work, then end your turn on \`Waiting on: <the command>\`, as for an action no grant covers, and /supervise answers it."
+    [ -z "$push_granted" ] || GRANTS="$GRANTS
+Expect that refusal for your first granted push, whatever its form: the same push goes through after the supervisor's answer."
+    [ -z "$comment_granted" ] || GRANTS="$GRANTS
+Post a granted comment as \`gh issue comment N --body-file <file>\`, with the body written to the file first: that form goes through most of the time, and no other form does better. List a refused comment, with its body file, for Post on approval."
 else
     GRANTS="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/$default, holds no standing grant."
 fi

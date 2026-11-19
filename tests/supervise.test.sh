@@ -1391,6 +1391,13 @@ launch_in() { # <dir> [args...] -- launch.sh --dir <dir> with the fake claude
 park_text() { # <start> -- the park line for ticket 56 started at <start>
     printf '%s' "Park the ticket instead of waiting when you reach a decision only the maintainer can make: a spec question, or a shared action no grant covers other than a push, an issue comment or a new issue, which /supervise asks the maintainer for after your turn ends. To park: commit any uncommitted work, then run /mp-ported-skills:capturing yourself, now and not after the park comment: /supervise sends no capture after a park, and the question must stay the ticket's newest comment, since a later comment re-arms the ticket. Then put your commits, the capture's included, on a local branch \`parked-56\` (\`git branch parked-56\`), and run \`git reset --hard $1\`, the commit you started from, so the checkout is clean for the next ticket. Push nothing while parking, under a push grant or not. Post your question on #56 under the issue-comment grant, as a comment whose first line is \`## Parked\` and which names the branch. Move #56 to the end of its parent's open sub-issues under the sub-issue grant: \`gh api repos/{owner}/{repo}/issues/56/parent\` names the parent (with none, skip this), and a PATCH to the parent's sub_issues/priority with sub_issue_id set to #56's id (the issue's \`id\` field, not its number) and after_id to the id of the last open child other than #56 moves it. Then end your turn on one line, \`Parked: <your question>\`."
 }
+# The classifier can refuse a granted action anyway (#225,
+# docs/research/classifier-granted-actions.md): the worker takes it once
+# and waits on a refusal, expects one for its first push, and posts a
+# comment in the form that passes most often.
+refuse_line="The auto-mode classifier can still refuse a granted action, whatever its form, and sending it again in the same turn is refused too. Take each granted action once, in its own Bash call. When one is refused, do not send it again or try another form: finish the rest of the work, then end your turn on \`Waiting on: <the command>\`, as for an action no grant covers, and /supervise answers it."
+push_refuse_line="Expect that refusal for your first granted push, whatever its form: the same push goes through after the supervisor's answer."
+comment_line="Post a granted comment as \`gh issue comment N --body-file <file>\`, with the body written to the file first: that form goes through most of the time, and no other form does better. List a refused comment, with its body file, for Post on approval."
 park_line=$(park_text "$(git -C "$granted" rev-parse --short HEAD)")
 out=$(launch_in "$granted" --ticket 56 2>/dev/null); rc=$?
 check "launch with grants: exit 0" "0 c2a368ee" "$rc $out"
@@ -1402,6 +1409,9 @@ check "launch with grants: lists the grants on origin, and only those" "You are 
 - label: relabels
 A shared action one of these grants covers goes ahead without asking: when /implement or a capture reaches it, take it, and do not end your turn to ask first.
 A granted push goes ahead as soon as its grant's conditions hold, before any capture: the supervisor sends /mp-ported-skills:capturing after your turn ends. A commit that capture makes is pushed under the push grant only when the grant's note names a capture's commits, as \`its capture's commits included\` does; otherwise end the capture's turn on \`Waiting on: git push origin main\`.
+$refuse_line
+$push_refuse_line
+$comment_line
 A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create, a gh api link or reorder of a sub-issue, a gh issue edit) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin main\`.
 $park_line
 $read_once
@@ -1453,6 +1463,10 @@ check "launch checked-push: lists the grant" "- checked-push: code-only pushes" 
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed -n 3p)"
 check "launch checked-push: the worker's push still waits" "checked-push is the supervisor's grant, not yours: it covers no push of yours. End your turn on \`Waiting on: git push origin main\` as with no push grant; /supervise pushes after your turn ends, without asking when every check passes." \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | grep '^checked-push is')"
+check "launch checked-push: told a granted action can be refused" "$refuse_line" \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | grep '^The auto-mode classifier')"
+check "launch checked-push: no push or comment form without those grants" "" \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | grep -e '^Expect that refusal' -e '^Post a granted comment')"
 check "launch checked-push: without issue-comment and sub-issue, no park" "" \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | grep '^Park ')"
 command rm -f "$(git -C "$checked" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
