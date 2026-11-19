@@ -6,7 +6,7 @@ The deny-shared-actions hook lets a supervised worker take an action its Project
 
 The record comes from the transcripts of real background workers, not a probe. A probe would have to post a real comment or push to a real remote, and it would not run with a worker's launch prompt and grants text, so it would not show what a worker sees.
 
-The transcripts are every session under the maintainer's profile whose transcript holds the grants text `launch.sh` appends ("You are a supervised worker"), from 2026-10-21 to 2026-11-19, in this repo and one other Project. For each Bash call whose command runs `gh issue comment`, `gh issue close` or `git push` (at the start of the command or after `;`, `&&` or `|`), the call's result was read:
+The transcripts are every session under the maintainer's profile whose transcript holds the grants text `launch.sh` appends ("You are a supervised worker"), from 2026-10-21 to 2026-11-19, in this repo and one other Project. For each Bash call whose command runs `gh issue comment`, `gh issue close` or `git push` (at the start of the command or after `;`, `&&` or `|`, leaving out calls that only search for, print or test that text, such as `rg`, `grep`, `printf` and `sh tests/...`), the call's result was read. A supervisor's own pushes go through `push.sh`, so they do not match; one attended session whose transcript quoted the grants text matched with one push, after its own prompts, and counts in no figure below. A count of every call that names these commands anywhere in a matching transcript, searches included, finds more refusals than these.
 
 - refused: the result starts "Permission for this action was denied by the Claude Code auto mode classifier", and the reason it gives was kept;
 - hook: the deny-shared-actions hook refused it;
@@ -47,6 +47,6 @@ So a close passes most of the time, and a refused one waits for the supervisor's
 
 `launch.sh`'s grants text tells the worker:
 
-- that the classifier can refuse a granted action whatever its form, and that sending it again does not help, so it takes each granted action once, in its own Bash call, and on a refusal ends its turn on `Waiting on: <the command>`, as for an action no grant covers;
-- with a push grant, to expect that refusal for its first push, which goes through after the supervisor's answer;
-- with an issue-comment grant, to post as `gh issue comment N --body-file <file>`, and to list a refused comment, with its body file, for Post on approval.
+- that the classifier can refuse a granted action and a change of form has not got one through (shown for pushes; a refused comment or close was never retried), so it takes each granted action once, in its own Bash call, and on a refusal ends its turn on `Waiting on: <the command>`, as for an action no grant covers;
+- with a push grant, to expect that refusal for its first push, which has gone through after the supervisor's answer;
+- with an issue-comment grant, to post as `gh issue comment N --body-file <file>`, the form nearly every recorded comment used, and to leave a refused comment's file in place for Post on approval.

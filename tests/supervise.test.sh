@@ -1395,9 +1395,9 @@ park_text() { # <start> -- the park line for ticket 56 started at <start>
 # docs/research/classifier-granted-actions.md): the worker takes it once
 # and waits on a refusal, expects one for its first push, and posts a
 # comment in the form that passes most often.
-refuse_line="The auto-mode classifier can still refuse a granted action, whatever its form, and sending it again in the same turn is refused too. Take each granted action once, in its own Bash call. When one is refused, do not send it again or try another form: finish the rest of the work, then end your turn on \`Waiting on: <the command>\`, as for an action no grant covers, and /supervise answers it."
-push_refuse_line="Expect that refusal for your first granted push, whatever its form: the same push goes through after the supervisor's answer."
-comment_line="Post a granted comment as \`gh issue comment N --body-file <file>\`, with the body written to the file first: that form goes through most of the time, and no other form does better. List a refused comment, with its body file, for Post on approval."
+refuse_line="The auto-mode classifier can still refuse a granted action, and a change of form has not got one through: a refused push sent again in the same turn, as is or in another form, was refused too. Take each granted action once, in its own Bash call. When one is refused, do not send it again or try another form: finish the rest of the work, then end your turn on \`Waiting on: <the command>\`, as for an action no grant covers, and /supervise answers it."
+push_refuse_line="Expect that refusal for your first granted push, whatever its form: the same push has gone through after the supervisor's answer."
+comment_line="Post a granted comment as \`gh issue comment N --body-file <file>\`, with the body written to the file first: that form goes through most of the time, and its refusals came in the same form as calls that went through. A refused comment waits like any other refused action, its \`Waiting on:\` line naming that command, and leave the file in place for Post on approval to post."
 park_line=$(park_text "$(git -C "$granted" rev-parse --short HEAD)")
 out=$(launch_in "$granted" --ticket 56 2>/dev/null); rc=$?
 check "launch with grants: exit 0" "0 c2a368ee" "$rc $out"

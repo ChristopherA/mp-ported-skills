@@ -81,7 +81,10 @@
 # and the maintainer's rules say, and the run stalled at blocked with a grant
 # in place. With a push grant, it is also told to push before the capture
 # the supervisor sends, and that the capture's own commits are covered only
-# when the grant's note names them (#131). Checked live with 2.1.286: a
+# when the grant's note names them (#131). Since the auto-mode classifier
+# can refuse a granted action anyway, it is told to take each once and wait
+# on a refusal, and, with those grants, to expect one for its first push and
+# how to post a comment (#225). Checked live with 2.1.286: a
 # `claude --bg` session given --append-system-prompt replied with a codeword
 # only that text held, and its job's respawnFlags began with the flag and its
 # text, so it can be confirmed.
@@ -398,15 +401,15 @@ checked-push is the supervisor's grant, not yours: it covers no push of yours. E
     # The auto-mode classifier judges a granted action on its own (#225,
     # docs/research/classifier-granted-actions.md): since 2026-11-12 it
     # refused every worker's first granted push, whatever its form, and the
-    # same push went through after the supervisor's answer; a granted
-    # comment as --body-file passed 91 of 96 times, its refusals in the
-    # same form as calls that passed.
+    # same push went through after the supervisor's answer; granted
+    # comments, nearly all as --body-file, passed 91 of the 96 the
+    # classifier judged, its refusals in the same form as calls that passed.
     GRANTS="$GRANTS
-The auto-mode classifier can still refuse a granted action, whatever its form, and sending it again in the same turn is refused too. Take each granted action once, in its own Bash call. When one is refused, do not send it again or try another form: finish the rest of the work, then end your turn on \`Waiting on: <the command>\`, as for an action no grant covers, and /supervise answers it."
+The auto-mode classifier can still refuse a granted action, and a change of form has not got one through: a refused push sent again in the same turn, as is or in another form, was refused too. Take each granted action once, in its own Bash call. When one is refused, do not send it again or try another form: finish the rest of the work, then end your turn on \`Waiting on: <the command>\`, as for an action no grant covers, and /supervise answers it."
     [ -z "$push_granted" ] || GRANTS="$GRANTS
-Expect that refusal for your first granted push, whatever its form: the same push goes through after the supervisor's answer."
+Expect that refusal for your first granted push, whatever its form: the same push has gone through after the supervisor's answer."
     [ -z "$comment_granted" ] || GRANTS="$GRANTS
-Post a granted comment as \`gh issue comment N --body-file <file>\`, with the body written to the file first: that form goes through most of the time, and no other form does better. List a refused comment, with its body file, for Post on approval."
+Post a granted comment as \`gh issue comment N --body-file <file>\`, with the body written to the file first: that form goes through most of the time, and its refusals came in the same form as calls that went through. A refused comment waits like any other refused action, its \`Waiting on:\` line naming that command, and leave the file in place for Post on approval to post."
 else
     GRANTS="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/$default, holds no standing grant."
 fi
