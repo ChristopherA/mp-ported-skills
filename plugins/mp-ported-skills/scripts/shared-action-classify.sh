@@ -670,22 +670,53 @@ classify_gh() {
         # and so are a POST to an issue's sub_issues (linking a child) and a
         # PATCH to its sub_issues/priority (a reorder), for the sub-issue
         # grant (#162): only when that path, matched whole, is the one word
-        # not taken by a method or field flag. Any other word -- a second
-        # path, a header's value -- leaves it a plain gh api write, never
-        # granted, as is a PATCH or DELETE of a comment (#113) or of a
+        # not taken by a method, field or output flag (--jq, -q, --template,
+        # -t, --cache) or a redirect (#227). Any other word -- a second
+        # path, a header's value (-H, --header), a --hostname -- leaves it a
+        # plain gh api write, never granted, as is a PATCH or DELETE of a
+        # comment (#113) or of a
         # sub-issue. A GraphQL mutation is never granted either, addComment,
         # createIssue and addSubIssue included; ADR 0005 says why. The words
         # after `api` are the request.
         shift $((gh_pre + 1))
-        _cmethod="" _cfields="" _ctarget="" _cgraphql="" _cissue="" _cwords=0
+        _cmethod="" _cfields="" _ctarget="" _cgraphql="" _cissue="" _cwords=0 _cend=""
         while [ $# -gt 0 ]; do
-            case "$1" in
+            # After --, gh reads every word as an argument, flags included,
+            # so none is passed over as a flag: the prefix matches no flag.
+            case "${_cend:+end:}$1" in
+            --) _cend=yes; shift; continue ;;
             -X | --method) _cmethod=${2:-}; if [ $# -ge 2 ]; then shift 2; else shift; fi; continue ;;
             -X* ) _cmethod=${1#-X}; shift; continue ;;
             --method=*) _cmethod=${1#--method=}; shift; continue ;;
             -f | -F | --field | --raw-field | --input) _cfields=yes; if [ $# -ge 2 ]; then shift 2; else shift; fi; continue ;;
             -f* | -F* | --field=* | --raw-field=* | --input=*) _cfields=yes; shift; continue ;;
+            # Output flags shape only what gh prints, so their values are
+            # no endpoint words (#227).
+            -q | --jq | -t | --template | --cache) if [ $# -ge 2 ]; then shift 2; else shift; fi; continue ;;
+            -q?* | --jq=* | -t?* | --template=* | --cache=*) shift; continue ;;
+            # A header or another host is never granted: a separate value
+            # counts as an endpoint word below, and a joined one counts here.
+            -H?* | --header=* | --hostname=*) _cwords=$((_cwords + 1)); shift; continue ;;
             -*) shift; continue ;;
+            esac
+            # A redirect the scan hands on as a word (>/dev/null, 2>&1,
+            # <file, or a bare > and its target) is no endpoint word either
+            # (#227), unless its text names an API target: quotes are gone
+            # by here, so a quoted '>' that gh would read as its endpoint
+            # still counts, and the form stays refused.
+            case "$1" in
+            '>' | '>>' | '>|' | [0-9]'>' | [0-9]'>>' | [0-9]'>|' | '&>' | '&>>' | '<' | [0-9]'<' | '<>')
+                case "${2:-}" in
+                *pulls* | *issues* | *merges* | *contents* | */git/* | graphql) ;;
+                *) if [ $# -ge 2 ]; then shift 2; else shift; fi; continue ;;
+                esac
+                ;;
+            '>'* | [0-9]'>'* | '&>'* | '<'* | [0-9]'<'*)
+                case "$1" in
+                *pulls* | *issues* | *merges* | *contents* | */git/* | *graphql*) ;;
+                *) shift; continue ;;
+                esac
+                ;;
             esac
             _cwords=$((_cwords + 1))
             case "$1" in

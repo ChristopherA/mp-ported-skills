@@ -738,6 +738,46 @@ check "the refusal names the edit, not the granted comment before it" \
 # still refuses it.
 check "a fallback split cannot hide --edit-last from the granted comment" "deny" \
     "$(decision 0 auto 'gh issue comment 3 --body "a; b" --edit-last; echo "' "$granted")"
+# An output flag's value and a redirect are no endpoint words (#227): each
+# granted gh api form is still its form with one added, and an ungranted
+# write still refuses. A header or another host stays ungranted.
+printf '## Grants\n\n- issue-comment\n- issue-create\n- sub-issue\n' >"$granted/docs/agents/supervision.md"
+git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -am "gh api grants"
+seed_push "$granted"
+for form in \
+    "--method POST 'repos/{owner}/{repo}/issues/40/sub_issues' -F sub_issue_id=9" \
+    "-X PATCH repos/o/r/issues/40/sub_issues/priority -F sub_issue_id=9 -F after_id=8" \
+    "repos/o/r/issues/40/comments -F body=x" \
+    "repos/o/r/issues -f title=x"; do
+    for extra in "--jq .number" "--jq=.number" "-q .number" "-q.number" \
+        "--template '{{.number}}'" "--template={{.number}}" "-t '{{.number}}'" "-t{{.number}}" \
+        "--cache 1h" "--cache=1h" \
+        ">/dev/null" "2>&1" "> /dev/null" "<f" "< f" ">/dev/null 2>&1; echo rc=\$?" "--jq .number </dev/null"; do
+        check "granted gh api $form with $extra goes through" "" \
+            "$(decision 0 auto "gh api $form $extra" "$granted")"
+    done
+    for extra in "-H 'Accept: x'" "--header=Accept:x" "-HAccept:x" "--hostname example.com" "--hostname=example.com"; do
+        check "granted gh api $form with $extra still refuses" "deny" \
+            "$(decision 0 auto "gh api $form $extra" "$granted")"
+    done
+done
+for form in "-X POST repos/o/r/issues/40/labels -f labels[]=x" "-X PATCH repos/o/r/issues/comments/7 -f body=x"; do
+    for extra in "--jq .id" "-q.id" ">/dev/null" "2>&1" "</dev/null"; do
+        check "ungranted gh api $form with $extra still refuses" "deny" \
+            "$(decision 0 auto "gh api $form $extra" "$granted")"
+    done
+done
+# A quoted redirect word that names an API target is what gh would read as
+# its endpoint, so it still counts and the form stays a plain write.
+check "a quoted '>' before a second target still refuses" "deny" \
+    "$(decision 0 auto "gh api repos/o/r/issues/40/comments -F body=x '>' repos/o/r/pulls" "$granted")"
+check "a quoted '>pulls' word still refuses" "deny" \
+    "$(decision 0 auto "gh api repos/o/r/issues/40/comments -F body=x '>repos/o/r/pulls'" "$granted")"
+check "an output flag after -- is an endpoint word to gh, and refuses" "deny" \
+    "$(decision 0 auto "gh api --method POST repos/o/r/issues/40/sub_issues -F sub_issue_id=9 -- --jq .number" "$granted")"
+check "a link with a header names plain gh api POST" "yes" \
+    "$(reason 0 auto "gh api --method POST repos/o/r/issues/40/sub_issues -F sub_issue_id=9 --jq .number -H x" "$granted" | grep -q "'gh api POST'" && echo yes)"
+
 command rm -rf "$granted" "$remote" "$ungranted"
 
 # A command that is not a shared action goes through.
