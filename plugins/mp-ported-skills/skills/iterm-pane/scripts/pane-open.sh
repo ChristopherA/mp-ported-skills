@@ -108,7 +108,35 @@ fi
 # even when typing into it fails (supervise's view.sh closes it, #200).
 printf "%s\n" "$RESULT"
 
+# Right after the split, iTerm2 can refuse the new pane at the coordinates
+# the split returned (-1728, "no pane with session") before it lists it there
+# (#265), or hold it in another window (#200). So a typing that found no pane
+# is tried again, after a short wait and a lookup of the pane by session id,
+# up to six times in all. Nothing was typed when no pane was found, so the
+# command is never typed twice; any other failure is not retried.
 if [ -n "$COMMAND" ]; then
     set -- $RESULT
-    sh "$SCRIPT_DIR/pane-send.sh" --session "$1" --window "$2" --tab "$3" --text "$COMMAND"
+    SEND_SESSION=$1 SEND_WINDOW=$2 SEND_TAB=$3
+    TRIES=1
+    while :; do
+        if SEND_ERR=$(sh "$SCRIPT_DIR/pane-send.sh" --session "$SEND_SESSION" --window "$SEND_WINDOW" \
+                --tab "$SEND_TAB" --text "$COMMAND" 2>&1); then
+            exit 0
+        fi
+        case $SEND_ERR in
+            *'no pane with session'*) [ "$TRIES" -lt 6 ] || break ;;
+            *) break ;;
+        esac
+        TRIES=$((TRIES + 1))
+        sleep 0.5
+        # pane-find.sh matches part of an id, so only a line for the whole id counts.
+        if FOUND=$(sh "$SCRIPT_DIR/pane-find.sh" --session "$SEND_SESSION" </dev/null 2>/dev/null); then
+            FOUND=$(printf '%s\n' "$FOUND" | awk -v s="$SEND_SESSION" '$1 == s && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ { print $2, $3; exit }')
+            if [ -n "$FOUND" ]; then
+                SEND_WINDOW=${FOUND% *} SEND_TAB=${FOUND#* }
+            fi
+        fi
+    done
+    printf '%s\n' "${SEND_ERR:-pane-send.sh failed}" >&2
+    exit 1
 fi

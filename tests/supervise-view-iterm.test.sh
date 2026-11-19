@@ -374,16 +374,19 @@ case "$*" in
     *ppid=*) echo 1 ;;
 esac
 EOF
-chmod +x "$osa/bin/osascript" "$osa/bin/ps"
+printf '#!/bin/sh\n' >"$osa/bin/sleep"
+chmod +x "$osa/bin/osascript" "$osa/bin/ps" "$osa/bin/sleep"
 real() { (PATH="$osa/bin:$PATH" MP_PANE_DIR="$root/plugins/mp-ported-skills/skills/iterm-pane/scripts" &&
     export PATH MP_PANE_DIR &&
     [ "$(command -v osascript)" = "$osa/bin/osascript" ] && view "$@"); }
 sent() { command cat "$osa/log" 2>/dev/null; command rm -f "$osa/log"; }
 out=$(real --iterm --id $id --dir "$project"); rc=$?
-check "stubbed osascript, wrong window: exit 1" 1 "$rc"
-check "stubbed osascript, wrong window: the pane was closed" "Error: claude attach did not start in the pane iTerm2 split (pane-send.sh: no pane with session D54E62AC-F574 in tab 1 of window 34630 (closed, or wrong coordinates)), so the pane was closed; watch with claude attach $id" "$out"
-check "stubbed osascript, wrong window: closed in the window that holds it" 1 \
-    "$(sent | grep -c 'tell session id "D54E62AC-F574" of tab 1 of window id 28142 to close')"
+check "stubbed osascript, wrong window: exit 0" 0 "$rc"
+check "stubbed osascript, wrong window: the viewer opens where the pane is" "viewer iterm pane D54E62AC-F574 28142 1 runs claude attach $id
+close: view.sh --close --pane 'D54E62AC-F574 28142 1'" "$out"
+check "stubbed osascript, wrong window: typed in the window that holds it" 1 \
+    "$(sent | grep -c 'tell session id "D54E62AC-F574" of tab 1 of window id 28142 to write text')"
+check "stubbed osascript, wrong window: closes nothing" 0 "$(sent | grep -c ' to close')"
 out=$(real --close --pane 'D54E62AC-F574 34630 1'); rc=$?
 check "stubbed osascript, close in the wrong window: exit 0" 0 "$rc"
 check "stubbed osascript, close in the wrong window: closes it" "closed pane D54E62AC-F574" "$out"
@@ -394,6 +397,54 @@ out=$(real --close --pane 'D54E62AC-F574 28142 1'); rc=$?
 check "stubbed osascript, no window holds it: already closed" "pane D54E62AC-F574 already closed" "$out"
 check "stubbed osascript, no window holds it: closes nothing" 0 "$(sent | grep -c ' to close')"
 command rm -f "$osa/gone"
+
+# The 2026-11-18 run (#265): the split named the right window, 181, but
+# iTerm2 refused the new pane there (-1728) and did not list it yet; a moment
+# later it listed it and took the command. The stub refuses the first
+# $LATE_MISSES typings and lists the pane only from listing $LATE_FROM on.
+# With LATE_FROM 99 the pane is never listed and every other command aimed
+# at it is refused, as for a pane that has gone.
+late="$work/late"
+mkdir -p "$late/bin"
+cat >"$late/bin/osascript" <<'EOF'
+#!/bin/sh
+s=""
+for a in "$@"; do [ "$a" = -e ] || s="$s$a
+"; done
+[ -t 0 ] || s="$s$(command cat)"
+printf '%s\n--\n' "$s" >>"$LATE_DIR/log"
+count() { n=$(( $(command cat "$LATE_DIR/$1" 2>/dev/null || echo 0) + 1 )); echo $n >"$LATE_DIR/$1"; echo $n; }
+missing() { echo "execution error: iTerm got an error: Can't get session id \"1EC0B628-9128\". (-1728)" >&2; exit 1; }
+case $s in
+    *'split vertically'*) echo "1EC0B628-9128 181 1" ;;
+    *'"W:"'*)
+        n=$(count lists)
+        printf 'W:181 T:1 S:SUPERVISOR-1 Name:claude\n'
+        [ "$n" -lt "$LATE_FROM" ] || printf 'W:181 T:1 S:1EC0B628-9128 Name:-zsh\n' ;;
+    *'write text'*) [ "$(count sends)" -gt "$LATE_MISSES" ] || missing ;;
+    *'window id 181'*) [ "$LATE_FROM" -lt 99 ] || missing ;;
+esac
+EOF
+command cp -f "$osa/bin/ps" "$osa/bin/sleep" "$late/bin/"
+chmod +x "$late/bin/osascript"
+late_view() { # <misses> <list from>: view.sh --iterm on the late stub
+    command rm -f "$late/log" "$late/lists" "$late/sends"
+    (PATH="$late/bin:$PATH" MP_PANE_DIR="$root/plugins/mp-ported-skills/skills/iterm-pane/scripts" &&
+        LATE_DIR=$late LATE_MISSES=$1 LATE_FROM=$2 &&
+        export PATH MP_PANE_DIR LATE_DIR LATE_MISSES LATE_FROM &&
+        [ "$(command -v osascript)" = "$late/bin/osascript" ] && view --iterm --id $id --dir "$project")
+}
+out=$(late_view 1 2); rc=$?
+check "stubbed osascript, pane listed late: exit 0" 0 "$rc"
+check "stubbed osascript, pane listed late: the viewer opens" "viewer iterm pane 1EC0B628-9128 181 1 runs claude attach $id
+close: view.sh --close --pane '1EC0B628-9128 181 1'" "$out"
+check "stubbed osascript, pane listed late: claude attach typed twice, the second time taken" 2 \
+    "$(grep -c "tell session id \"1EC0B628-9128\" of tab 1 of window id 181 to write text .*attach $id" "$late/log")"
+check "stubbed osascript, pane listed late: closes nothing" 0 "$(grep -c ' to close' "$late/log")"
+out=$(late_view 99 99); rc=$?
+check "stubbed osascript, pane never addressable: exit 1" 1 "$rc"
+check "stubbed osascript, pane never addressable: says so" "Error: claude attach did not start in the pane iTerm2 split (pane-send.sh: no pane with session 1EC0B628-9128 in tab 1 of window 181 (closed, or wrong coordinates)), and the pane has closed; watch with claude attach $id" "$out"
+check "stubbed osascript, pane never addressable: six typings" 6 "$(grep -c 'to write text' "$late/log")"
 
 echo "supervise-view-iterm: $pass passed, $fail failed"
 [ "$fail" = 0 ]

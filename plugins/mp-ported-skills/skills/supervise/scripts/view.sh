@@ -39,7 +39,9 @@
 # A pane is found by its session id in every window (pane-find.sh), both
 # after the open and at --close, and the window named in its coordinates is
 # only where to start: iTerm2 can report a split in another window than the
-# one that holds it (#200). When pane-open.sh split a pane but could not type
+# one that holds it (#200). pane-open.sh itself retries the typing, looking
+# the pane up by session id, while iTerm2 does not yet list it (#265). When
+# pane-open.sh split a pane but still could not type
 # the command into it, the pane is closed where it is, or its coordinates are
 # named when it cannot be. The same holds for a pane whose TTY (pane-tty.sh)
 # runs no `claude attach ID`, as when the typed line never ran as written and

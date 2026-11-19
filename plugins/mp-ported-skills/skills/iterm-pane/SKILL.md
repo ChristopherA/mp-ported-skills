@@ -17,6 +17,7 @@ It prints the new pane's coordinates, `SESSION_ID WINDOW_ID TAB_NUM`, for exampl
 
 - `--direction` names the **divider**, not where the pane goes: `vertical` (the default) puts the new pane to the right, `horizontal` puts it below. When the user asks for a pane "below" or "underneath", pass `horizontal`.
 - `--command "cmd"` types a first command into the new pane. `--profile "Name"` uses an iTerm2 profile.
+- Right after a split, iTerm2 can refuse the new pane at the coordinates it just returned, or hold it in another window. When typing `--command` finds no pane, `pane-open.sh` waits half a second, looks the pane up by session id and tries again, up to six times, and then exits 1 with the last `no pane with session ...` line. The coordinates printed first are the split's: when a later command says the pane is not there, find it with `pane-find.sh`.
 - It splits the pane on this session's TTY, so it lands in the right window whichever one is in front.
 - Keyboard focus stays on this session's pane, so what the user is typing never lands in the new pane ahead of the command. When the user must type in the pane (a password, a sudo prompt), tell them to click it first.
 

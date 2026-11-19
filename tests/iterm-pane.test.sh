@@ -546,11 +546,96 @@ EOF
 chmod +x "$work/osa-send-fails"
 reset; answer 'NEW-1 7 2'
 ( mkdir -p "$work/bin2" && command cp -f "$work/osa-send-fails" "$work/bin2/osascript" &&
+  printf '#!/bin/sh\n' > "$work/bin2/sleep" && chmod +x "$work/bin2/sleep" &&
   PATH="$work/bin2:$PATH" && export PATH && run pane-open.sh --command 'ls -la'
   printf '%s\n' "$rc" > "$work/rc" )
 check "open --command, send fails: exit 1" 1 "$(command cat "$work/rc")"
 check "open --command, send fails: the coordinates come first" 'NEW-1 7 2' "$(out)"
 check "open --command, send fails: then why" 'pane-send.sh: no pane with session NEW-1 in tab 2 of window 7 (closed, or wrong coordinates)' "$(err)"
+
+# Right after a split, iTerm2 can refuse to address the new pane at the
+# coordinates the split returned (-1728) and not list it yet, and then list
+# it there a moment later (#265). The fake osascript refuses the first
+# $FAKE_SEND_MISSES typings, lists the pane only from $FAKE_LIST_FROM
+# listings on, in window $FAKE_LIST_WINDOW, and types into it anywhere else
+# only when a listing named that window. A fake sleep records each wait.
+command cat > "$work/osa-late" <<'EOF'
+#!/bin/sh
+s=""
+for a in "$@"; do [ "$a" = -e ] || s="$s$a
+"; done
+[ -t 0 ] || s="$s$(command cat)"
+printf '%s\n' "$s" >> "$FAKE_OSA_LOG"
+count() { n=$(( $(command cat "$FAKE_DIR/$1" 2>/dev/null || echo 0) + 1 )); echo $n > "$FAKE_DIR/$1"; echo $n; }
+case $s in
+    *'split vertically'*) command cat "$FAKE_OSA_OUT" ;;
+    *'"W:"'*)
+        n=$(count lists)
+        [ "$n" -lt "${FAKE_LIST_FROM:-1}" ] || printf 'W:7 T:2 S:CALLER-1 Name:claude\nW:%s T:2 S:NEW-1 Name:-zsh\n' "$FAKE_LIST_WINDOW" ;;
+    *'write text'*)
+        n=$(count sends)
+        case $s in *"window id $FAKE_LIST_WINDOW to"*) w=ok ;; *) w=no ;; esac
+        if [ "$n" -le "${FAKE_SEND_MISSES:-0}" ] || [ "$w" = no ]; then
+            printf '%s\n' "execution error: iTerm got an error: Can't get session id \"NEW-1\". (-1728)" >&2; exit 1
+        fi ;;
+esac
+EOF
+command cat > "$work/sleep-fake" <<'EOF'
+#!/bin/sh
+echo "sleep $*" >> "$FAKE_DIR/slept"
+EOF
+late() { # <misses> <list from> <list window>: runs pane-open.sh --command 'ls -la'
+    reset; answer 'NEW-1 7 2'
+    command rm -rf "$work/late"; mkdir -p "$work/late/bin"; : > "$work/late/slept"
+    command cp -f "$work/osa-late" "$work/late/bin/osascript"
+    command cp -f "$work/sleep-fake" "$work/late/bin/sleep"
+    chmod +x "$work/late/bin/osascript" "$work/late/bin/sleep"
+    ( FAKE_DIR="$work/late" FAKE_SEND_MISSES=$1 FAKE_LIST_FROM=$2 FAKE_LIST_WINDOW=$3 PATH="$work/late/bin:$PATH" &&
+      export FAKE_DIR FAKE_SEND_MISSES FAKE_LIST_FROM FAKE_LIST_WINDOW PATH &&
+      [ "$(command -v osascript)" = "$work/late/bin/osascript" ] && [ "$(command -v sleep)" = "$work/late/bin/sleep" ] &&
+      run pane-open.sh --command 'ls -la'
+      printf '%s\n' "$rc" > "$work/rc" )
+}
+late 1 2 7
+check "open --command, pane listed late: exit 0" 0 "$(command cat "$work/rc")"
+check "open --command, pane listed late: prints the coordinates" 'NEW-1 7 2' "$(out)"
+check "open --command, pane listed late: no error" '' "$(err)"
+check "open --command, pane listed late: typed twice, at the split's coordinates" 2 \
+    "$(sent | grep -c 'tell session id "NEW-1" of tab 2 of window id 7 to write text "ls -la"')"
+check "open --command, pane listed late: waited once" 'sleep 0.5' "$(command cat "$work/late/slept")"
+late 3 3 7
+check "open --command, pane addressable after a few tries: exit 0" 0 "$(command cat "$work/rc")"
+check "open --command, pane addressable after a few tries: typed four times" 4 "$(sent | grep -c 'write text "ls -la"')"
+check "open --command, pane addressable after a few tries: waited three times" 3 "$(grep -c . "$work/late/slept")"
+# The split named another window than the one holding the pane (#200): the
+# lookup finds it there and the command is typed into it.
+late 0 1 9
+check "open --command, pane in another window: exit 0" 0 "$(command cat "$work/rc")"
+check "open --command, pane in another window: typed where it is listed" 1 \
+    "$(sent | grep -c 'tell session id "NEW-1" of tab 2 of window id 9 to write text "ls -la"')"
+check "open --command, pane in another window: prints the split's coordinates first" 'NEW-1 7 2' "$(out)"
+# Never listed, never addressable: six tries, then the last refusal.
+late 99 99 7
+check "open --command, pane never addressable: exit 1" 1 "$(command cat "$work/rc")"
+check "open --command, pane never addressable: says why" 'pane-send.sh: no pane with session NEW-1 in tab 2 of window 7 (closed, or wrong coordinates)' "$(err)"
+check "open --command, pane never addressable: six tries" 6 "$(sent | grep -c 'write text "ls -la"')"
+check "open --command, pane never addressable: five waits" 5 "$(grep -c . "$work/late/slept")"
+# A refusal other than a missing pane is not retried: typing may have begun.
+command cat > "$work/osa-other" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_OSA_LOG"
+case "$*" in
+    *'write text'*) printf '%s\n' "execution error: iTerm got an error: AppleEvent timed out. (-1712)" >&2; exit 1 ;;
+esac
+command cat "$FAKE_OSA_OUT"
+EOF
+reset; answer 'NEW-1 7 2'
+( command rm -rf "$work/bin3"; mkdir -p "$work/bin3" && command cp -f "$work/osa-other" "$work/bin3/osascript" &&
+  chmod +x "$work/bin3/osascript" && PATH="$work/bin3:$PATH" && export PATH && run pane-open.sh --command 'ls -la'
+  printf '%s\n' "$rc" > "$work/rc" )
+check "open --command, other send failure: exit 1" 1 "$(command cat "$work/rc")"
+check "open --command, other send failure: osascript's reason" 'pane-send.sh: execution error: iTerm got an error: AppleEvent timed out. (-1712)' "$(err)"
+check "open --command, other send failure: typed once" 1 "$(sent | grep -c 'write text "ls -la"')"
 
 reset; FAKE_OSA_RC=1; export FAKE_OSA_RC
 run pane-open.sh
