@@ -30,6 +30,12 @@ A commit signing helper waiting for the worker (`ssh-sk-helper`, `ssh-keygen -Y 
    sh "${CLAUDE_SKILL_DIR}/scripts/launch.sh" --dir "<project folder>" --ticket N --continue <start> </dev/null
    ```
 
+   With a Distribution repo:
+
+   ```sh
+   sh "${CLAUDE_SKILL_DIR}/scripts/launch.sh" --dir "<project folder>" --ticket N --continue <start> --dist-start <dist start> </dev/null
+   ```
+
    Its prompt tells `/implement` that the commits since `<start>` and the capture's notes on the ticket are the work so far, and its name ends `#N (continued)`. Tell the maintainer the ticket continues, with the new id and the reading that set it off, then Watch and Report it as any worker, keeping the first worker's `<start>` for `actions.sh`, `push.sh` and `record.sh`, so its push and record cover both workers' commits. With a Distribution repo, keep step 1's `<dist start>` the same way for `--dist-start`, not the new snapshot's `dist head`.
 
 A ticket continues once per supervisor session. A worker this session launched from `step.sh`'s `continue #N from <sha>` (step 1 in `SKILL.md`) is that session's continuation of #N: when it returns `capture-due`, it gets what a continuation gets, below, and step 5 launches no further worker. A continuation that returns `capture-due` itself gets steps 1 to 4, then the wrap-up below, and then the report, with both workers' ids and readings and no third worker; with `--loop`, the loop ends there (Loop end, `loop.md`). A later supervisor session may continue the ticket again from the same `<start>`: while the newest run record on #N accounts for the unpushed commits exactly, `step.sh` reads them as `continue #N from <start>` (#214), and with a Distribution repo, whose unpushed commits the record must account for too, as `continue #N from <start>, dist start <dist start>` (#263).
@@ -43,6 +49,12 @@ A supervisor that ends while a zone-captured ticket still has work to build leav
 
    ```sh
    sh "${CLAUDE_SKILL_DIR}/scripts/launch.sh" --dir "<project folder>" --ticket N --continue <start> --model <model> --effort <effort> </dev/null
+   ```
+
+   With a Distribution repo:
+
+   ```sh
+   sh "${CLAUDE_SKILL_DIR}/scripts/launch.sh" --dir "<project folder>" --ticket N --continue <start> --dist-start <dist start> --model <model> --effort <effort> </dev/null
    ```
 
    On a no, a failed check or a failed push, the report also lists the unpushed commits, `git -C "<project folder>" log --oneline <start>..HEAD`, and with a Distribution repo that repo's too, under its own name, `git -C "<dist>" log --oneline <dist start>..HEAD` (the Report step's `done` item in `SKILL.md`, #219), and says that a later `/supervise` continues the ticket from them on its own, as long as nothing is committed on top of them.

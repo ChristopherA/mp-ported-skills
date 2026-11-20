@@ -714,11 +714,14 @@ gather() {
     # those before them (early), the rest of what step.sh and launch.sh
     # refuse (hard), then what only the offer weighs.
     refusal= early= hard=
+    # Unpushed commits included, though only the rest refuses here: those are
+    # weighed with the run records below.
+    dist_refusal="work in flight in distribution repo $dist: ${dist_inflight#, }"
     if ! linked=$(sh "$main_checkout" . </dev/null 2>&1); then refusal=$linked early=1
     elif [ "$dirty" -gt 0 ]; then refusal="$dirty uncommitted paths; commit or clear them first" early=1
     elif [ "$branch" != "$default" ]; then refusal="on $branch, not the default branch $default" early=1
     elif [ -n "${own:-}" ]; then refusal="open PR $own; settle it first"
-    elif [ -n "$dist_rest" ]; then refusal="work in flight in distribution repo $dist: ${dist_inflight#, }"
+    elif [ -n "$dist_rest" ]; then refusal=$dist_refusal
     elif [ -n "$dist_unread" ]; then refusal="distribution repo $dist_unread"
     elif [ -z "$step_n" ]; then refusal="other work in flight: ${inflight_rest#, }"
     fi
@@ -774,7 +777,7 @@ gather() {
             if [ -n "$refusal$lone" ] || [ "$dist_unpushed" -gt 0 ]; then refusal="$unpushed unpushed commits; push them first"
             else push=1; fi
         else
-            [ -n "$hard" ] || refusal="work in flight in distribution repo $dist: ${dist_inflight#, }"
+            [ -n "$hard" ] || refusal=$dist_refusal
         fi
     fi
     if [ "$held" -gt 0 ] && [ -z "$start" ] && [ -z "$push" ] && [ -z "$records_unread" ]; then

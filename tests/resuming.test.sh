@@ -1135,6 +1135,10 @@ record 52 'Supervised run of #52' "no commits after $pshort in the Project repo,
 out=$(run)
 check "dist only, a record that did not count the repo: refused" "$dist_unpushed1" "$(sup "$out")"
 check "dist only, a record that did not count the repo: no continue line" "" "$(cont "$out")"
+record 52 'Supervised run of #52' "no commits after $pshort in the Project repo, commits unknown in the Distribution repo"
+out=$(run)
+check "dist only, a record whose count there is unknown: refused" "$dist_unpushed1" "$(sup "$out")"
+check "dist only, a record whose count there is unknown: no continue line" "" "$(cont "$out")"
 record 52 'Supervised run of #52' "no commits after $pshort in the Project repo, 1 commit after $dshort in the Distribution repo"
 g commit -q --allow-empty -m stray
 out=$(run)
@@ -1162,6 +1166,8 @@ check "project only, the record names the Distribution start: continue" "#52 fro
 record 52 'Supervised run of #52' "1 commit after $pshort in the Project repo, Distribution repo commits not counted (no --dist-start)"
 out=$(run)
 check "project only, no Distribution start recorded: continue from its HEAD" "#52 from $pstart, dist start $(dg rev-parse HEAD)" "$(cont "$out")"
+record 52 'Supervised run of #52' "1 commit after $pshort in the Project repo, commits unknown in the Distribution repo"
+check "project only, a Distribution count unknown: continue from its HEAD" "#52 from $pstart, dist start $(dg rev-parse HEAD)" "$(cont "$(run)")"
 g reset -q --hard "$pstart"
 command rm -f "$FAKE_GH/comments-52.json"
 
