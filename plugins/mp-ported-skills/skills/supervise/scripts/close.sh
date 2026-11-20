@@ -20,7 +20,12 @@
 #   --pushed    the push landed: close the ticket, then remove
 #               ready-for-human if it carries it, with a comment naming
 #               the pushed commit, under the Project's issue-close grant or
-#               the maintainer's own approval of the close (--approved)
+#               the maintainer's own approval of the close (--approved).
+#               In a Project with no Distribution repo, nothing was held,
+#               but a worker whose granted push was refused names its close
+#               beside the push the supervisor then makes; there --pushed
+#               checks the Project's own branch instead (#261), and only
+#               --pushed runs
 #   --declined  the push was declined: on a held ticket, a comment says so;
 #               on one not held, it is held as --held holds it, with a
 #               comment that the push was declined
@@ -38,8 +43,10 @@
 #
 # Checks, each printed as `ok <check>: ...` or `fail <check>: ...`:
 #   marker        no worker marker in the checkout
-#   distribution  DIR names a Distribution repo (distribution.sh)
-#   upstream      --pushed: the Distribution repo is even with its upstream;
+#   distribution  DIR names a Distribution repo (distribution.sh), or, for
+#                 --pushed, names none and DIR's own repo is checked
+#   upstream      --pushed: the Distribution repo (or DIR's) is even with
+#                 its upstream;
 #                 the others: it holds commits its upstream lacks
 #   grant         --pushed: the Project grants issue-close, or --approved
 #                 was given (then printed as `skip grant: ...`)
@@ -49,7 +56,8 @@
 # `closed already: #N` and records nothing, since the close was not the
 # supervisor's. Otherwise --pushed prints `closed <url>` and appends
 # `ID <time> issue-close <url>` to the checkout's mp-supervise-posted
-# (records.sh), which actions.sh reads to
+# (records.sh), with ` project` added when no Distribution repo is named,
+# which actions.sh reads to
 # name the close as the supervisor's, after the push, and record.sh to keep
 # the worker's wait off the waits on a human. --held prints `held open
 # <url>`, --declined and --failed `kept open <url>`; they record nothing:
@@ -138,29 +146,38 @@ else
 fi
 
 DIST=""
+# REPO is the repo whose push the ticket waited on: the Distribution repo,
+# or, with none named, the Project's own (--pushed only, #261).
+REPO=""
 if ! DIST=$(sh "$here/distribution.sh" --dir "$DIR" </dev/null 2>/dev/null); then
     bad "distribution: distribution.sh failed in $DIR"
 elif [ -z "$DIST" ]; then
-    bad "distribution: $DIR names no Distribution repo; close the ticket as any other"
+    if [ "$OUTCOME" = pushed ]; then
+        REPO=$DIR
+        ok "distribution: none named, so $DIR's own branch is checked"
+    else
+        bad "distribution: $DIR names no Distribution repo, so its ticket is not held; only --pushed runs there"
+    fi
 elif ! real=$(own_repo_top "$DIST"); then
     bad "distribution: $DIST is not a git checkout of its own"
     DIST=""
 else
     DIST=$real
+    REPO=$DIST
     ok "distribution: $DIST"
 fi
 
 head_line=""
 unpushed=""
-if [ -n "$DIST" ]; then
-    if ! n=$(git -C "$DIST" rev-list --count '@{upstream}..HEAD' 2>/dev/null); then
-        bad "upstream: $DIST has no upstream to compare with"
+if [ -n "$REPO" ]; then
+    if ! n=$(git -C "$REPO" rev-list --count '@{upstream}..HEAD' 2>/dev/null); then
+        bad "upstream: $REPO has no upstream to compare with"
     elif [ "$OUTCOME" = pushed ]; then
         if [ "$n" = 0 ]; then
-            head_line=$(git -C "$DIST" log -1 --format='%h %s')
-            ok "upstream: $DIST is even with its upstream at $head_line"
+            head_line=$(git -C "$REPO" log -1 --format='%h %s')
+            ok "upstream: $REPO is even with its upstream at $head_line"
         else
-            bad "upstream: $DIST still holds $n commit(s) its upstream lacks; push first"
+            bad "upstream: $REPO still holds $n commit(s) its upstream lacks; push first"
         fi
     elif [ "$n" = 0 ]; then
         bad "upstream: $DIST is even with its upstream, so nothing is unpushed; was the push made?"
@@ -226,7 +243,12 @@ if [ "$OUTCOME" != pushed ] && [ "$state" != CLOSED ] && has_label "$human" && !
 fi
 
 if [ "$OUTCOME" = pushed ]; then
-    printf 'Closed after the Distribution push landed: %s is even with its upstream at %s.\n' "$DIST" "$head_line" >"$body"
+    if [ -n "$DIST" ]; then
+        landed="the Distribution push landed" pushed_repo=""
+    else
+        landed="the push landed" pushed_repo=" project"
+    fi
+    printf 'Closed after %s: %s is even with its upstream at %s.\n' "$landed" "$REPO" "$head_line" >"$body"
     if [ "$state" = CLOSED ]; then
         # Someone else closed it, so the close is not the supervisor's.
         echo "closed already: #$TICKET"
@@ -235,7 +257,7 @@ if [ "$OUTCOME" = pushed ]; then
     run issue close "$TICKET" --comment "$(command cat "$body")"
     echo "closed $url"
     record=$(records_path "$DIR" mp-supervise-posted)
-    printf '%s %s %s %s\n' "$ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" issue-close "$url" >>"$record" ||
+    printf '%s %s %s %s%s\n' "$ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" issue-close "$url" "$pushed_repo" >>"$record" ||
         echo "note the close was not recorded in $record, so record.sh will count the worker's wait for it as a human's"
     # After the close, so a failed close leaves the ticket held, not
     # unlabelled; a closed ticket left ready-for-human is built by nothing.

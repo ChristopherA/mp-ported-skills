@@ -102,6 +102,9 @@
 # or issue-create. A ticket close.sh closed there after a landed
 # Distribution push (#186) is listed as
 #   issue-close by the supervisor after the Distribution push landed: <url>
+# and one closed after a push of the Project's own repo, in a Project with
+# no Distribution repo (its record line ends `project`, #261), as
+#   issue-close by the supervisor after the push landed: <url>
 #
 # The job's state.json and the transcripts are read under
 # $CLAUDE_CONFIG_DIR, the transcript by session id in any project folder,
@@ -670,6 +673,7 @@ fi
 posted=$(records_path "$DIR" mp-supervise-posted) || posted=""
 if [ -n "$posted" ] && [ -f "$posted" ]; then
     supervisor_posts=$(awk -v id="$ID" '
+        $1 == id && $3 == "issue-close" && $5 == "project" { print "issue-close by the supervisor after the push landed: " $4; next }
         $1 == id && $3 == "issue-close" { print "issue-close by the supervisor after the Distribution push landed: " $4; next }
         $1 == id { print $3 " posted by the supervisor on the maintainer'"'"'s approval: " $4 }' "$posted")
     [ -z "$supervisor_posts" ] || add "$supervisor_posts"

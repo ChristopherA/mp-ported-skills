@@ -313,13 +313,90 @@ out=$(close --pushed --approved)
 check "plain-folder Distribution path: refused" "exit=2" "$(last "$out")"
 check "plain-folder Distribution path: gh not called" "no" "$([ -f "$work/gh-log" ] && echo yes || echo no)"
 
-# A Project that names no Distribution repo has nothing to settle here.
+# A Project that names no Distribution repo (#261): nothing is held there,
+# since the worker closes its own ticket, but a close the worker named
+# beside a push the supervisor made is settled by --pushed, once the
+# Project's own branch is even with its upstream.
+printf '## Grants\n\n- push\n- issue-close\n' >"$proj/docs/agents/supervision.md"
 g "$proj" rm -q docs/agents/distribution-repo.md
-g "$proj" -c commit.gpgsign=false commit -q -m 'no dist'
+g "$proj" -c commit.gpgsign=false commit -q -am 'no dist'
+# distribution.sh reads the Project's origin, so the removal is pushed; the
+# worker's commit is not.
+g "$proj" push -q origin main 2>/dev/null
+g "$proj" -c commit.gpgsign=false commit -q --allow-empty -m 'Add the feature'
+for o in --held --declined; do
+    reset OPEN '["afk"]'
+    out=$(close $o)
+    check "no Distribution repo, $o: refused" "exit=2" "$(last "$out")"
+    check "no Distribution repo, $o: says nothing is held" \
+        "fail distribution: $proj names no Distribution repo, so its ticket is not held; only --pushed runs there" \
+        "$(printf '%s\n' "$out" | grep '^fail distribution')"
+    check "no Distribution repo, $o: gh not called" "no" "$([ -f "$work/gh-log" ] && echo yes || echo no)"
+done
+reset OPEN '["afk"]'
+out=$(close --failed "$work/check-out")
+check "no Distribution repo, --failed: refused" "exit=2" "$(last "$out")"
+
+reset OPEN '["afk"]'
+out=$(close --pushed)
+check "no Distribution repo, unpushed: refused" "exit=2" "$(last "$out")"
+check "no Distribution repo, unpushed: names the Project's branch" \
+    "fail upstream: $proj still holds 1 commit(s) its upstream lacks; push first" \
+    "$(printf '%s\n' "$out" | grep '^fail upstream')"
+check "no Distribution repo, unpushed: gh not called" "no" "$([ -f "$work/gh-log" ] && echo yes || echo no)"
+
+g "$proj" push -q origin main 2>/dev/null
+head=$(g "$proj" log -1 --format='%h %s')
+reset OPEN '["afk"]'
+out=$(close --pushed --check)
+check "no Distribution repo, --check: passes" "exit=0" "$(last "$out")"
+check "no Distribution repo, --check: says the Project is checked" \
+    "ok distribution: none named, so $proj's own branch is checked" \
+    "$(printf '%s\n' "$out" | grep '^ok distribution')"
+check "no Distribution repo, --check: gh not called" "no" "$([ -f "$work/gh-log" ] && echo yes || echo no)"
+
+out=$(close --pushed)
+check "no Distribution repo, pushed: exit 0" "exit=0" "$(last "$out")"
+check "no Distribution repo, pushed: cites the grant" "ok grant: issue-close" "$(printf '%s\n' "$out" | grep '^ok grant')"
+check "no Distribution repo, pushed: closes with a comment" "issue view 7 --json state,labels,url
+issue close 7 --comment Closed after the push landed: $proj is even with its upstream at $head." \
+    "$(command cat "$work/gh-log")"
+check "no Distribution repo, pushed: prints the url" "closed https://github.com/o/r/issues/7" \
+    "$(printf '%s\n' "$out" | grep '^closed ')"
+check "no Distribution repo, pushed: recorded as the Project's push" \
+    "2da1baa1 issue-close https://github.com/o/r/issues/7 project" \
+    "$(awk '{ print $1, $3, $4, $5 }' "$record")"
+out=$(sh "$scripts/actions.sh" --id 2da1baa1 --dir "$proj" --start "$start" </dev/null 2>&1)
+check "no Distribution repo, actions: the close is the supervisor's, after the push" \
+    "issue-close by the supervisor after the push landed: https://github.com/o/r/issues/7" \
+    "$(printf '%s\n' "$out" | grep '^issue-')"
+
+reset CLOSED '["afk"]'
+out=$(close --pushed)
+check "no Distribution repo, already closed: no second close" "issue view 7 --json state,labels,url" "$(command cat "$work/gh-log")"
+check "no Distribution repo, already closed: not recorded" "no" "$([ -f "$record" ] && echo yes || echo no)"
+
+printf '## Grants\n\n- push\n' >"$proj/docs/agents/supervision.md"
+g "$proj" -c commit.gpgsign=false commit -q -am 'no issue-close, no dist'
 g "$proj" push -q origin main 2>/dev/null
 reset OPEN '["afk"]'
+out=$(close --pushed)
+check "no Distribution repo, no grant: refused" "exit=2" "$(last "$out")"
+check "no Distribution repo, no grant: says to ask" "fail grant: the Project grants no issue-close; ask the maintainer, then run with --approved" \
+    "$(printf '%s\n' "$out" | grep '^fail grant')"
+check "no Distribution repo, no grant: gh not called" "no" "$([ -f "$work/gh-log" ] && echo yes || echo no)"
 out=$(close --pushed --approved)
-check "no Distribution repo: refused" "exit=2" "$(last "$out")"
+check "no Distribution repo, --approved: closes" "exit=0" "$(last "$out")"
+check "no Distribution repo, --approved: closed" "closed https://github.com/o/r/issues/7" \
+    "$(printf '%s\n' "$out" | grep '^closed ')"
+
+# A Project branch with no upstream holds the close.
+g "$proj" branch -q --unset-upstream
+reset OPEN '["afk"]'
+out=$(close --pushed --approved)
+check "no Distribution repo, no upstream: refused" "exit=2" "$(last "$out")"
+check "no Distribution repo, no upstream: says so" "fail upstream: $proj has no upstream to compare with" \
+    "$(printf '%s\n' "$out" | grep '^fail upstream')"
 
 # Usage errors.
 check "usage: both outcomes" "exit=1" "$(last "$(close --pushed --declined)")"
