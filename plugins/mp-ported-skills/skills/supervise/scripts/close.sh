@@ -1,6 +1,8 @@
 #!/bin/sh
 # close.sh -- hold a stopped worker's ticket while its Distribution push
-# waits, and settle it once the maintainer has answered (#186, #203).
+# waits, and settle it once the maintainer has answered (#186, #203); in a
+# Project with no Distribution repo, close the ticket once the supervisor's
+# push of the Project landed (--pushed only, #261).
 #
 # In a Project with a Distribution repo, a worker may not close its ticket
 # while that repo holds commits its upstream lacks: the issue-close grant
@@ -180,10 +182,10 @@ if [ -n "$REPO" ]; then
             bad "upstream: $REPO still holds $n commit(s) its upstream lacks; push first"
         fi
     elif [ "$n" = 0 ]; then
-        bad "upstream: $DIST is even with its upstream, so nothing is unpushed; was the push made?"
+        bad "upstream: $REPO is even with its upstream, so nothing is unpushed; was the push made?"
     else
-        unpushed=$(git -C "$DIST" log '@{upstream}..HEAD' --format='%h %s')
-        ok "upstream: $DIST holds $n commit(s) its upstream lacks"
+        unpushed=$(git -C "$REPO" log '@{upstream}..HEAD' --format='%h %s')
+        ok "upstream: $REPO holds $n commit(s) its upstream lacks"
         printf '%s\n' "$unpushed" | sed 's/^/  /'
     fi
 fi
@@ -244,9 +246,9 @@ fi
 
 if [ "$OUTCOME" = pushed ]; then
     if [ -n "$DIST" ]; then
-        landed="the Distribution push landed" pushed_repo=""
+        landed="the Distribution push landed" record_tag=""
     else
-        landed="the push landed" pushed_repo=" project"
+        landed="the push landed" record_tag=" project"
     fi
     printf 'Closed after %s: %s is even with its upstream at %s.\n' "$landed" "$REPO" "$head_line" >"$body"
     if [ "$state" = CLOSED ]; then
@@ -257,7 +259,7 @@ if [ "$OUTCOME" = pushed ]; then
     run issue close "$TICKET" --comment "$(command cat "$body")"
     echo "closed $url"
     record=$(records_path "$DIR" mp-supervise-posted)
-    printf '%s %s %s %s%s\n' "$ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" issue-close "$url" "$pushed_repo" >>"$record" ||
+    printf '%s %s %s %s%s\n' "$ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" issue-close "$url" "$record_tag" >>"$record" ||
         echo "note the close was not recorded in $record, so record.sh will count the worker's wait for it as a human's"
     # After the close, so a failed close leaves the ticket held, not
     # unlabelled; a closed ticket left ready-for-human is built by nothing.
