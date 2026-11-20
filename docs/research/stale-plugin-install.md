@@ -10,11 +10,13 @@ The skill paths each session loaded (the `Base directory for this skill:` line o
 
 | Sessions | Config folder | Version loaded |
 |---|---|---|
-| up to 2026-10-27 21:02 UTC | the profile's old folder name | 0.8.100 rising to 0.8.111 |
-| 2026-11-01 16:00 and 22:18 UTC | the new folder name | 0.8.18 |
-| 2026-11-01 23:01 UTC on | the new folder name | 0.8.112 and up |
+| up to 2026-10-27 21:02 UTC (last: `c4892ad6`) | the profile's old folder name | 0.8.100 rising to 0.8.111 |
+| 2026-11-01 16:00 and 22:18 UTC (`c97f0a79`, `e5b29699`) | the new folder name | 0.8.18 |
+| 2026-11-01 23:01 UTC on (first: `b711d0b6`) | the new folder name | 0.8.112 and up |
 
-Between the two, on 2026-10-27 at 14:42 local time, the profile's config folder was renamed (the same folder: its birth time is unchanged, and a debug symlink inside it still points at the old name). The first sessions under the new name, five days later, ran 0.8.18. The install record went stale at the rename, not through failed updates. The 22:18 supervisor's `claude plugin update` moved it `from 0.8.18 to 0.8.111`, and later updates stepped one version at a time again.
+The ids are the sessions' transcript names under `$CLAUDE_CONFIG_DIR/projects/`. `e5b29699`'s own read of the record printed `"installPath": "<config folder>/plugins/cache/mp-ported-skills/mp-ported-skills/0.8.18"` and `"lastUpdated": "2026-10-02T00:40:51.946Z"` before its update.
+
+Between the two, on 2026-10-27 at 14:42 local time, the profile's config folder was renamed (the same folder: its birth time is unchanged, and a debug symlink inside it still points at the old name). The first sessions under the new name, five days later, ran 0.8.18. No other scope or profile took the updates instead: the default config folder and the other profiles on the machine have no `mp-ported-skills` entry in their `installed_plugins.json`, and the old folder name no longer exists. The install record went stale at the rename, not through failed updates. The 22:18 supervisor's `claude plugin update` moved it `from 0.8.18 to 0.8.111`, and later updates stepped one version at a time again.
 
 ## What is not known
 
@@ -22,4 +24,4 @@ Why the record under the renamed folder read the 2026-10-02 state is not recover
 
 ## What changed
 
-Whatever the cause, a stale install is now reported at a session's start. `resuming`'s `state.sh` prints a `plugin:` line when the plugin running it is a cache version older than the `plugin.json` on the checkout's remote default branch, naming the update command and `/reload-plugins`, and `supervise`'s `step.sh` passes the line on on stderr. After renaming or moving a profile's config folder, run the plugin update once and check the installed version.
+Whatever the cause, a stale install is now reported at a session's start. `resuming`'s `state.sh` prints a `plugin:` line when the plugin running it is a cache version older than the `plugin.json` on the checkout's remote default branch, naming the update command and `/reload-plugins`, and `supervise`'s `step.sh` passes the line on on stderr. Nothing prints without an `origin` default branch to compare with, or for a plugin loaded from a folder rather than the cache. The check fires only in this plugin's own checkout, the one repo whose default branch names the version an update installs. After renaming or moving a profile's config folder, run the plugin update once and check the installed version.
