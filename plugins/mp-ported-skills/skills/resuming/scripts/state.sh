@@ -278,7 +278,9 @@ gather() {
     # the Project's setup is broken, and a ticket built now would fail or
     # land in the Project. It stays out of inflight_rest, so the offer reads
     # the step as it would be without it and names the not-read reason.
-    dist= dist_inflight= dist_unread=
+    # Its unpushed commits (dist_unpushed) stay out of inflight_rest too, as
+    # the Project's do, so a run record can account for them (#263).
+    dist= dist_inflight= dist_rest= dist_unread= dist_unpushed=0
     if ! dist=$(sh "$distribution" --dir . --working-tree </dev/null 2>"$tmp/dist-err"); then
         dist_unread="not read: $(cat "$tmp/dist-err")"
     elif [ -z "$dist" ]; then
@@ -299,7 +301,9 @@ gather() {
         echo "distribution repo branch: $r_branch (default $r_default), $r_sync, as of last fetch"
         echo "distribution repo uncommitted paths: $r_dirty; unpushed commits: $r_unpushed"
         dist_inflight=$(git_inflight " in distribution repo $dist")
-        inflight="$inflight$dist_inflight" inflight_rest="$inflight_rest$dist_inflight"
+        dist_unpushed=$r_unpushed r_unpushed=0
+        dist_rest=$(git_inflight " in distribution repo $dist")
+        inflight="$inflight$dist_inflight" inflight_rest="$inflight_rest$dist_rest"
     fi
     if [ -n "$dist_unread" ]; then
         echo "distribution repo: $dist_unread"
@@ -621,10 +625,15 @@ gather() {
     # asks the maintainer for before its first launch (#223), which step.sh
     # hands on. Otherwise the lines are as they were: no queue: line, and the
     # unpushed refusal. A Distribution repo that cannot be read is left out
-    # of the offer's step the same way, and refuses it below.
+    # of the offer's step the same way, and refuses it below. Unpushed
+    # commits in the Distribution repo are weighed with the Project's (held):
+    # a run record that accounts for both continues the run, and its
+    # continue: line names the Distribution start too (#263); with none,
+    # they refuse as that repo's work in flight, with no push: line.
     first=$(printf '%s' "$cases" | sed -n 1p)
     offer=$first
-    if [ "$unpushed" -gt 0 ] || [ -n "$dist_unread" ]; then
+    held=$((unpushed + dist_unpushed))
+    if [ "$held" -gt 0 ] || [ -n "$dist_unread" ]; then
         if [ -n "$inflight_rest" ]; then offer="1 work in flight: ${inflight_rest#, }"
         else offer=$(printf '%s' "$cases" | sed -n 2p); fi
     fi
@@ -709,7 +718,7 @@ gather() {
     elif [ "$dirty" -gt 0 ]; then refusal="$dirty uncommitted paths; commit or clear them first" early=1
     elif [ "$branch" != "$default" ]; then refusal="on $branch, not the default branch $default" early=1
     elif [ -n "${own:-}" ]; then refusal="open PR $own; settle it first"
-    elif [ -n "$dist_inflight" ]; then refusal="work in flight in distribution repo $dist: ${dist_inflight#, }"
+    elif [ -n "$dist_rest" ]; then refusal="work in flight in distribution repo $dist: ${dist_inflight#, }"
     elif [ -n "$dist_unread" ]; then refusal="distribution repo $dist_unread"
     elif [ -z "$step_n" ]; then refusal="other work in flight: ${inflight_rest#, }"
     fi
@@ -721,7 +730,7 @@ gather() {
     hard=$refusal lone=
     if [ -n "$refusal" ]; then :
     elif ! [ "$qlen" -ge 0 ] 2>/dev/null; then refusal="the queue could not be read"
-    elif [ "$qlen" -lt 2 ] && [ "$unpushed" -eq 0 ]; then
+    elif [ "$qlen" -lt 2 ] && [ "$held" -eq 0 ]; then
         refusal="a queue of one (#$step_n); /supervise is worth running only for two or more tickets"
     else
         [ "$qlen" -ge 2 ] || lone=1
@@ -748,30 +757,34 @@ gather() {
     # it offers no push. Its lines print as a continued run's
     # would, and a refusal set before the read, which holds whatever it
     # finds, stands.
-    start= push= records_unread=
-    if [ "$unpushed" -gt 0 ] && [ -z "$early" ]; then
+    start= dist_start= push= records_unread=
+    if [ "$held" -gt 0 ] && [ -z "$early" ]; then
         if [ -n "$hard" ]; then :
         elif ! comments=$(gh api "repos/{owner}/{repo}/issues/$step_n/comments?per_page=100" --paginate 2>/dev/null) ||
             ! comments=$(printf '%s' "$comments" | jq -cs 'add // []' 2>/dev/null); then
             records_unread=1
         else
-            start=$(run_start . "$step_n" "$comments") || start=
+            start=$(run_start . "$step_n" "$comments" ${dist:+"$dist"}) || start=
+            [ -z "$dist" ] || [ -z "$start" ] || dist_start=${start#* } start=${start%% *}
         fi
         if [ -n "$records_unread" ]; then
             [ -n "$refusal" ] || refusal="the run records on #$step_n could not be read"
-        elif [ -z "$start" ]; then
-            if [ -n "$refusal$lone" ]; then refusal="$unpushed unpushed commits; push them first"
+        elif [ -n "$start" ]; then :
+        elif [ "$unpushed" -gt 0 ]; then
+            if [ -n "$refusal$lone" ] || [ "$dist_unpushed" -gt 0 ]; then refusal="$unpushed unpushed commits; push them first"
             else push=1; fi
+        else
+            [ -n "$hard" ] || refusal="work in flight in distribution repo $dist: ${dist_inflight#, }"
         fi
     fi
-    if [ "$unpushed" -gt 0 ] && [ -z "$start" ] && [ -z "$push" ] && [ -z "$records_unread" ]; then
+    if [ "$held" -gt 0 ] && [ -z "$start" ] && [ -z "$push" ] && [ -z "$records_unread" ]; then
         [ -n "$impl" ] || return 0
     else
         [ -z "${qout:-}" ] || printf '%s\n' "$qout"
     fi
     if [ -n "$refusal" ]; then echo "supervise: not offered: $refusal"
     else echo "supervise: $loop $you_type"; fi
-    [ -z "$start" ] || echo "continue: #$step_n from $start"
+    [ -z "$start" ] || echo "continue: #$step_n from $start${dist_start:+, dist start $dist_start}"
     [ -z "$push" ] ||
         echo "push: #$step_n after $unpushed unpushed commits; /supervise asks to push them with git push origin $default before its first launch"
 }

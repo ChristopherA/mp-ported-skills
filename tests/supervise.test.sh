@@ -2727,6 +2727,26 @@ launch_dir "$dproj" --ticket 56 --continue "$(git -C "$dproj" rev-parse --short 
 check "launch dist --continue: a parked worker resets the repo to its upstream" "$(dist_park origin/main)" \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 1)"
 clear_markers
+# With the first worker's Distribution start (--dist-start, #263), the
+# continuation is told its commits there, and parks back to that start.
+pcont=$(git -C "$dproj" rev-parse --short HEAD) dcont=$(git -C "$dist" rev-parse HEAD)
+dcont_short=$(git -C "$dist" rev-parse --short HEAD)
+out=$(launch_dir "$dproj" --ticket 56 --continue "$pcont" --dist-start "$dcont" 2>&1); rc=$?
+check "launch dist --continue --dist-start: exit 0" "0 c2a368ee" "$rc $out"
+check "launch dist --continue --dist-start: the prompt names the Distribution commits" "/mattpocock-skills:implement #56 continues: an earlier worker on #56 passed its capture threshold, ran /mp-ported-skills:capturing and was stopped. Its commits since $pcont, its commits since $dcont_short in Distribution repo $dist, and its capture's notes on #56 are the work so far: build on them and finish the ticket." \
+    "$(tail -n 1 "$fake/args")"
+check "launch dist --continue --dist-start: a parked worker resets the repo to that start" "$(dist_park "$dcont_short")" \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | tail -n 1)"
+clear_markers
+command rm -f "$fake/args"
+out=$(launch_dir "$dproj" --ticket 56 --dist-start "$dcont" 2>&1); rc=$?
+check "launch dist --dist-start without --continue: refused" "1 Error: --dist-start goes with --continue, the first worker's start in the Distribution repo; not launched" "$rc $out"
+out=$(launch_dir "$dproj" --ticket 56 --continue "$pcont" --dist-start nope 2>&1); rc=$?
+check "launch dist --dist-start: refuses what is not a commit there" "1 Error: --dist-start needs a commit in Distribution repo $dist, not 'nope'; not launched" "$rc $(printf '%s\n' "$out" | grep '^Error')"
+check "launch dist --dist-start: a refusal launches nothing" "no" "$([ -f "$fake/args" ] && echo yes || echo no)"
+out=$(launch --ticket 56 --continue "$(git -C "$project" rev-parse --short HEAD)" --dist-start "$dcont" 2>&1); rc=$?
+check "launch --dist-start with no Distribution repo: refused" "1 Error: --dist-start given, but $project names no Distribution repo; not launched" "$rc $(printf '%s\n' "$out" | grep '^Error')"
+clear_markers
 dgit "$dproj" rm -q docs/agents/supervision.md
 dgit "$dproj" commit -m "Drop the grants"
 dgit "$dproj" push origin main

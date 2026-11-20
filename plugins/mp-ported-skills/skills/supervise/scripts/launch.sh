@@ -96,13 +96,16 @@
 # covers this line with the grants.
 #
 # Usage:
-#   launch.sh --dir DIR --ticket N [--model MODEL] [--effort LEVEL] [--continue START]
+#   launch.sh --dir DIR --ticket N [--model MODEL] [--effort LEVEL] [--continue START [--dist-start DIST_START]]
 #
 # --continue starts a worker that continues ticket N after an earlier
 # worker's zone capture (#60): its prompt tells /implement that the commits
 # since START and the capture's notes on the ticket are the work so far, and
 # its name ends `#N (continued)`. START is the first worker's start, a
-# commit in DIR.
+# commit in DIR. --dist-start, only with --continue and a Distribution
+# repo, is the first worker's start there, a commit in that repo: the prompt
+# names its commits since then as work so far too, and a parked worker
+# resets that repo to it (#263).
 #
 # With issue-comment and sub-issue both granted, the worker is told to park
 # its ticket rather than wait when it reaches a decision only the maintainer
@@ -115,8 +118,9 @@
 # as parked; /supervise sends no capture after it. A wait /supervise asks the maintainer about (a
 # push, an issue comment, a new issue) is not parked. Without both grants
 # the worker ends as before. In a Distribution repo it parks the same way,
-# back to that repo's HEAD at launch, or with --continue its upstream, since
-# the first worker's start there is not known.
+# back to that repo's HEAD at launch, or with --continue DIST_START, or
+# with --continue alone its upstream, since the first worker's start there
+# is not known.
 #
 # MODEL defaults to claude-sonnet-5 and must support auto mode, so a Haiku
 # model is refused. LEVEL is one of claude's effort levels (low, medium,
@@ -194,6 +198,7 @@ TICKET=""
 MODEL="claude-sonnet-5"
 EFFORT=""
 CONTINUE=""
+DIST_CONTINUE=""
 
 need_value() { [ $# -ge 2 ] || { printf 'Error: %s needs a value\n' "$1" >&2; exit 1; }; }
 while [ $# -gt 0 ]; do
@@ -203,8 +208,9 @@ while [ $# -gt 0 ]; do
         --model)  need_value "$@"; MODEL="$2"; shift 2 ;;
         --effort) need_value "$@"; EFFORT="$2"; shift 2 ;;
         --continue) need_value "$@"; CONTINUE="$2"; shift 2 ;;
+        --dist-start) need_value "$@"; DIST_CONTINUE="$2"; shift 2 ;;
         --help)
-            printf 'Usage: launch.sh --dir DIR --ticket N [--model MODEL] [--effort LEVEL] [--continue START]\n'
+            printf 'Usage: launch.sh --dir DIR --ticket N [--model MODEL] [--effort LEVEL] [--continue START [--dist-start DIST_START]]\n'
             printf 'Starts /mattpocock-skills:implement #N as a background session in DIR. Outputs: its short id\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
@@ -224,6 +230,8 @@ case $EFFORT in
     '' | low | medium | high | xhigh | max) ;;
     *) fail "--effort is low, medium, high, xhigh or max, not '$EFFORT'" ;;
 esac
+[ -z "$DIST_CONTINUE" ] || [ -n "$CONTINUE" ] ||
+    fail "--dist-start goes with --continue, the first worker's start in the Distribution repo; not launched"
 GUARD_OFF='{"worktree":{"bgIsolation":"none"}}'
 UNUSED="Artifact Workflow ScheduleWakeup SendFeedback"
 DENY="EnterWorktree,$(printf '%s' "$UNUSED" | tr ' ' ',')"
@@ -270,7 +278,6 @@ if [ -n "$CONTINUE" ]; then
     short=$(git -C "$DIR" rev-parse -q --verify --short "$CONTINUE^{commit}") ||
         fail "--continue needs a commit in $DIR, not '$CONTINUE'; not launched"
     start=$short
-    PROMPT="$PROMPT continues: an earlier worker on #$TICKET passed its capture threshold, ran /mp-ported-skills:capturing and was stopped. Its commits since $short and its capture's notes on #$TICKET are the work so far: build on them and finish the ticket."
 fi
 top=$(git -C "$DIR" rev-parse --show-toplevel)
 
@@ -338,6 +345,17 @@ if [ -n "$DIST" ]; then
     # upstream, which holds none of the ticket's unpushed work.
     dist_start=$(git -C "$DIST" rev-parse --short HEAD)
     [ -z "$CONTINUE" ] || dist_start="origin/$dist_default"
+    if [ -n "$DIST_CONTINUE" ]; then
+        dist_start=$(git -C "$DIST" rev-parse -q --verify --short "$DIST_CONTINUE^{commit}") ||
+            fail "--dist-start needs a commit in Distribution repo $DIST, not '$DIST_CONTINUE'; not launched"
+    fi
+elif [ -n "$DIST_CONTINUE" ]; then
+    fail "--dist-start given, but $DIR names no Distribution repo; not launched"
+fi
+if [ -n "$CONTINUE" ]; then
+    work="Its commits since $start"
+    [ -z "$DIST_CONTINUE" ] || work="$work, its commits since $dist_start in Distribution repo $DIST,"
+    PROMPT="$PROMPT continues: an earlier worker on #$TICKET passed its capture threshold, ran /mp-ported-skills:capturing and was stopped. $work and its capture's notes on #$TICKET are the work so far: build on them and finish the ticket."
 fi
 default=$project_default
 

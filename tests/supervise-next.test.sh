@@ -99,6 +99,17 @@ check "next: a ticket continues once per loop" "stop not-landed: 1 commit on mai
 exit 2" "$(next "$repo" --ran "28")"
 check "next: a continuation still stops at the count" "stop count-reached: 1 ticket ran, the most --loop 1 allows
 exit 2" "$(next "$repo" --ran "27" --max 1)"
+# A run whose commits sit only in the Distribution repo (#263): the Project
+# is level with its upstream, the line carries the Distribution start, and
+# the ticket still continues once per loop.
+dsha=89abcdef0123456789abcdef0123456789abcdef
+level=$(new_repo dist-level)
+distline="1 work in flight: 1 unpushed commits in distribution repo /d, in motion #24 t24; next child #28 (ready-for-agent, /implement #28, $you): t28"
+printf 'branch: main\nnext: %s\ncontinue: #28 from %s, dist start %s\n' "$distline" "$sha" "$dsha" >"$work/state.txt"
+check "next: a run only in the Distribution repo continues, with its start" "next continue #28 from $sha, dist start $dsha
+exit 0" "$(next "$level")"
+check "next: a run only in the Distribution repo continues once per loop" "stop repeat: #28 ran earlier in this loop and state.sh still offers to continue it
+exit 2" "$(next "$level" --ran "28")"
 printf 'branch: main\nnext: %s\n' "$contline" >"$work/state.txt"
 check "next: unpushed commits no run accounts for" "stop not-landed: 1 commit on main not on origin/main
 exit 2" "$(next "$repo")"

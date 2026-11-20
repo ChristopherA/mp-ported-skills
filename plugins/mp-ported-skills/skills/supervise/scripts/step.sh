@@ -9,7 +9,8 @@
 # refused only because it carries unpushed commits that a supervised run of
 # the ticket accounts for, state.sh prints `continue: #N from <sha>`, and
 # step.sh prints `continue #N from <sha>`: the supervisor launches a
-# continuation from that start (#214). When unpushed commits no run accounts
+# continuation from that start (#214). With a Distribution repo both lines
+# end `, dist start <sha>`, that repo's start (#263). When unpushed commits no run accounts
 # for are all that refuses it, state.sh prints `push: #N after ...`, and
 # step.sh prints `push then implement #N`: the supervisor asks the
 # maintainer to push them before it launches #N (#223). Otherwise prints
@@ -59,7 +60,7 @@ fi
 # Which steps it takes is accept.sh's, shared with state.sh's supervise:
 # offer (#115).
 n=$(accept_step "$line")
-cont=$(printf '%s\n' "$report" | sed -n 's/^continue: \(#[0-9][0-9]* from [0-9a-f]\{40\}\)$/\1/p' | head -n 1)
+cont=$(printf '%s\n' "$report" | sed -n 's/^continue: \(#[0-9][0-9]* from [0-9a-f]\{40\}\(, dist start [0-9a-f]\{40\}\)\{0,1\}\)$/\1/p' | head -n 1)
 push=$(printf '%s\n' "$report" | sed -n 's/^push: #\([0-9][0-9]*\) after [0-9][0-9]* unpushed commits; .*/\1/p' | head -n 1)
 if [ -n "$n" ]; then
     echo "implement #$n"

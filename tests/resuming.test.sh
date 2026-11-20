@@ -1105,7 +1105,65 @@ out=$(run)
 check "dist: unpushed, ahead of its upstream" "main (default main), ahead 1, behind 0 of origin/main, as of last fetch" "$(line_of "$out" 'distribution repo branch')"
 check "dist: unpushed is case 1" "1 work in flight: 1 unpushed commits in distribution repo $dist, $child" "$(next "$out")"
 check "dist: unpushed, supervise not offered" "not offered: work in flight in distribution repo $dist: 1 unpushed commits in distribution repo $dist" "$(sup "$out")"
+check "dist: unpushed, no run record, no continue line" "" "$(cont "$out")"
+# Unpushed commits only in the Distribution repo that the newest run record
+# on the ticket accounts for exactly, by its Distribution range (#263): the
+# loop is offered, and the continue: line names both starts, the Project's
+# with no commits after it.
+step_sh="$root/plugins/mp-ported-skills/skills/supervise/scripts/step.sh"
+pstart=$(g rev-parse HEAD) dstart=$(dg rev-parse origin/main)
+pshort=$(g rev-parse --short HEAD) dshort=$(dg rev-parse --short origin/main)
+dist_unpushed1="not offered: work in flight in distribution repo $dist: 1 unpushed commits in distribution repo $dist"
+record 52 'Supervised run of #52' "no commits after $pshort in the Project repo, 1 commit after $dshort in the Distribution repo"
+out=$(run)
+check "dist only, run accounts: next line unchanged" "1 work in flight: 1 unpushed commits in distribution repo $dist, $child" "$(next "$out")"
+check "dist only, run accounts: the loop offered" "$offer" "$(sup "$out")"
+check "dist only, run accounts: continue from both starts" "#52 from $pstart, dist start $dstart" "$(cont "$out")"
+check "dist only, run accounts: no push line" "" "$(pushl "$out")"
+printf '%s\n' "$out" >"$work/state-out"
+check "dist only, run accounts: step.sh continues it" "continue #52 from $pstart, dist start $dstart" "$(sh "$step_sh" --from "$work/state-out")"
+# Commits in either repo that the record does not account for stop as work
+# in flight.
+record 52 'Supervised run of #52' "no commits after $pshort in the Project repo, 2 commits after $dshort in the Distribution repo"
+out=$(run)
+check "dist only, a count that does not match: refused" "$dist_unpushed1" "$(sup "$out")"
+check "dist only, a count that does not match: no continue line" "" "$(cont "$out")"
+check "dist only, a count that does not match: no push line" "" "$(pushl "$out")"
+printf '%s\n' "$out" >"$work/state-out"
+check "dist only, a count that does not match: step.sh stops" "stop: next: 1 work in flight: 1 unpushed commits in distribution repo $dist, $child" "$(sh "$step_sh" --from "$work/state-out")"
+record 52 'Supervised run of #52' "no commits after $pshort in the Project repo, Distribution repo commits not counted (no --dist-start)"
+out=$(run)
+check "dist only, a record that did not count the repo: refused" "$dist_unpushed1" "$(sup "$out")"
+check "dist only, a record that did not count the repo: no continue line" "" "$(cont "$out")"
+record 52 'Supervised run of #52' "no commits after $pshort in the Project repo, 1 commit after $dshort in the Distribution repo"
+g commit -q --allow-empty -m stray
+out=$(run)
+check "dist only, a stray Project commit: refused" "$unpushed1" "$(sup "$out")"
+check "dist only, a stray Project commit: no continue line" "" "$(cont "$out")"
+check "dist only, a stray Project commit: no push line" "" "$(pushl "$out")"
+# Commits in both repos that the record accounts for.
+record 52 'Supervised run of #52' "1 commit after $pshort in the Project repo, 1 commit after $dshort in the Distribution repo"
+out=$(run)
+check "both repos, run accounts: the loop offered" "$offer" "$(sup "$out")"
+check "both repos, run accounts: continue from both starts" "#52 from $pstart, dist start $dstart" "$(cont "$out")"
+record 52 'Supervised run of #52' "1 commit after $pshort in the Project repo, no commits after $dshort in the Distribution repo"
+out=$(run)
+check "both repos, a Distribution commit the record lacks: refused" "$unpushed1" "$(sup "$out")"
+check "both repos, a Distribution commit the record lacks: no continue line" "" "$(cont "$out")"
+g reset -q --hard "$pstart"
+command rm -f "$FAKE_GH/comments-52.json"
 dg push -q
+# Project commits only, with the Distribution repo clean: the Distribution
+# start is the record's, or with none recorded, the repo's HEAD.
+g commit -q --allow-empty -m wip
+record 52 'Supervised run of #52' "1 commit after $pshort in the Project repo, no commits after $(dg rev-parse --short HEAD) in the Distribution repo"
+out=$(run)
+check "project only, the record names the Distribution start: continue" "#52 from $pstart, dist start $(dg rev-parse HEAD)" "$(cont "$out")"
+record 52 'Supervised run of #52' "1 commit after $pshort in the Project repo, Distribution repo commits not counted (no --dist-start)"
+out=$(run)
+check "project only, no Distribution start recorded: continue from its HEAD" "#52 from $pstart, dist start $(dg rev-parse HEAD)" "$(cont "$out")"
+g reset -q --hard "$pstart"
+command rm -f "$FAKE_GH/comments-52.json"
 
 dg checkout -q -b feature
 out=$(run)

@@ -30,6 +30,7 @@
 #                 (--ran), which state.sh still recommends when its work
 #                 carries no `Closes #N` on the default branch
 # Otherwise prints `next implement #N`, or `next continue #N from <sha>`
+# (ending `, dist start <sha>` with a Distribution repo, #263)
 # for a continuation the supervisor launches with launch.sh --continue. The one-session-per-checkout check
 # is launch.sh's, which the loop runs next. Writes nothing but the fetch.
 #
