@@ -341,7 +341,8 @@ if [ -n "$DIST" ]; then
     esac
     dist_default=$default
     # Where a parked worker resets the Distribution repo (#158). A continued
-    # worker's first start there is not recorded, so it resets to the
+    # worker resets to the first worker's start there when --dist-start names
+    # it (#263); without it that start is not known, so it resets to the
     # upstream, which holds none of the ticket's unpushed work.
     dist_start=$(git -C "$DIST" rev-parse --short HEAD)
     [ -z "$CONTINUE" ] || dist_start="origin/$dist_default"
