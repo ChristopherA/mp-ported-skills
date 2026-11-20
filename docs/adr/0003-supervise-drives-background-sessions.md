@@ -4,7 +4,7 @@ The maintainer builds by hand in a loop: `/next`, `/implement #N`, `/capturing`,
 
 ## Considered Options
 
-- **Port mattpocock-skills' `implement-spec`.** Parallel subagents in worktrees, with one `/code-review` over the whole branch. Rejected: a subagent cannot invoke a user-invoked skill (anthropics/claude-code#43809), so its workers skip `/implement`. As of mattpocock-skills 1.3.1, each implementer subagent calls the model-invocable `tdd` skill, so each ticket keeps its TDD, but no ticket gets its own `/code-review`: the one review runs over the integration branch after every ticket is built. Its workers also have no capture-and-clear loop.
+- **Port mattpocock-skills' `implement-spec`.** Parallel subagents in worktrees, with one `/code-review` over the whole branch. Rejected: a subagent cannot invoke a user-invoked skill (anthropics/claude-code#43809), so its workers skip `/implement`. As of mattpocock-skills 1.3.1, each implementer subagent loads the `tdd` skill, which is not user-invoked, so each ticket keeps its TDD. No ticket gets its own `/code-review`: the one review runs over the whole branch after every ticket is built. Its workers also have no capture-and-clear loop.
 - **Drive sessions in iTerm2 panes.** Built on `iterm-pane`: type commands into a pane and classify the screen. Rejected once a spike showed background sessions do the same through the human's door, with a JSON status API and no iTerm2, AppleScript or screen classifier. `iterm-pane` stays for work that needs a real terminal.
 
 ## Consequences
