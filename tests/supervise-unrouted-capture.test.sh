@@ -87,6 +87,11 @@ check "zone route holds only when the work has landed" yes \
     "$(has_in "$zcap" "the work has landed and is settled")"
 check "zone route checks the branch is even" yes "$(has_in "$zcap" "$settled")"
 check "zone route checks a Distribution repo too" yes "$(has_in "$zcap" "$dist")"
+check "zone route checks the ticket" yes "$(has_in "$zcap" "and the ticket closed or labelled \`ready-for-human\`")"
+check "zone route refuses an open ticket the capture calls done" yes \
+    "$(has_in "$zcap" "A ticket still open with another label is not settled, whatever the capture's report says")"
+check "zone route carries a second wait to the run's report" yes \
+    "$(has_in "$zcap" "carry this command to the run's report")"
 check "zone route goes on to step 4" yes "$(has_in "$zcap" "go on to step 4")"
 check "zone route lists the blocked command" yes "$(has_in "$zcap" "$listed")"
 check "zone route reports an unsettled one with no continuation" yes \
@@ -101,6 +106,15 @@ check "loop settles on an unrouted capture block with settled work" yes \
 summary=$(line "$loop" "each ticket the loop ran, built or parked, in order")
 check "loop summary lists the blocked command" yes \
     "$(has_in "$summary" "any command its capture blocked on that no route takes, waiting on the maintainer")"
+
+waiting=$(line "$loop" "   - each push, merge or issue close waiting on the maintainer")
+check "loop summary's waiting list holds the blocked command" yes \
+    "$(has_in "$waiting" "and each command a capture blocked on that no route takes")"
+human=$(line "$loop" "**List what waits on the human.**")
+check "Loop end's waiting list holds the blocked command" yes \
+    "$(has_in "$human" "and each command a capture blocked on that no route takes, for a run finished with its work settled")"
+check "loop's stop list does not end on a settled unrouted block" yes \
+    "$(has_in "$settle" "(and other than a capture's unrouted block with its work settled, which settles as above)")"
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]
