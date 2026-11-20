@@ -260,7 +260,10 @@ gather() {
     git show-ref -q --verify "refs/remotes/origin/$default" && defref=origin/$default
     echo "branch: $branch (default $default), $r_sync, as of last fetch"
     echo "uncommitted paths: $dirty; unpushed commits: $unpushed"
-    plugin_behind "$plugin_root" . "$defref"
+    # Only a pushed version can be installed, so no origin ref, no line.
+    plugin_ref=
+    [ "$defref" = "$default" ] || plugin_ref=$defref
+    plugin_behind "$plugin_root" . "$plugin_ref"
     inflight=$(git_inflight)
     # The same less the unpushed commits, for the /supervise offer (#214).
     r_unpushed=0

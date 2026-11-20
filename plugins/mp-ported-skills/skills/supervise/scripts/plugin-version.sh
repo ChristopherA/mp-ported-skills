@@ -16,25 +16,28 @@
 # plugins/<plugin>/.claude-plugin/plugin.json at a higher version, compared
 # by number. The line names the update command and /reload-plugins. Prints
 # nothing otherwise: a plugin loaded from a folder (--plugin-dir), a repo
-# that does not carry the plugin, or a version the same or lower. <ref> is
-# the remote-tracking default branch when there is one, since the update
-# fetches from the remote and a bump not yet pushed cannot be installed.
+# that does not carry the plugin, a plugin.json it cannot read (a hint at
+# start, not a check, so an unreadable file stays quiet), or a version the
+# same or lower. <ref> is the remote-tracking default branch, since the
+# update fetches from the remote and a bump not yet pushed cannot be
+# installed; the caller passes none when there is no such branch.
 # Calls programs by their plain names: state.sh runs it in its background
 # gather, inside $( ).
 plugin_behind() {
+    [ -n "$3" ] || return 0
     plugin_behind_loaded=$(basename -- "$1")
     plugin_behind_is_version "$plugin_behind_loaded" || return 0
     plugin_behind_name=$(basename -- "$(dirname -- "$1")")
     plugin_behind_market=$(basename -- "$(dirname -- "$(dirname -- "$1")")")
-    plugin_behind_repo=$(git -C "$2" show "${3}:plugins/${plugin_behind_name}/.claude-plugin/plugin.json" 2>/dev/null |
+    plugin_behind_wanted=$(git -C "$2" show "${3}:plugins/${plugin_behind_name}/.claude-plugin/plugin.json" 2>/dev/null |
         jq -r '.version // empty' 2>/dev/null)
-    plugin_behind_is_version "$plugin_behind_repo" || return 0
-    [ "$plugin_behind_repo" != "$plugin_behind_loaded" ] || return 0
-    plugin_behind_newest=$(printf '%s\n%s\n' "$plugin_behind_loaded" "$plugin_behind_repo" |
+    plugin_behind_is_version "$plugin_behind_wanted" || return 0
+    [ "$plugin_behind_wanted" != "$plugin_behind_loaded" ] || return 0
+    plugin_behind_newest=$(printf '%s\n%s\n' "$plugin_behind_loaded" "$plugin_behind_wanted" |
         sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
-    [ "$plugin_behind_newest" = "$plugin_behind_repo" ] || return 0
+    [ "$plugin_behind_newest" = "$plugin_behind_wanted" ] || return 0
     printf 'plugin: %s %s is loaded, older than %s on %s; run `command claude plugin marketplace update %s && command claude plugin update %s@%s` through Bash, then type /reload-plugins\n' \
-        "$plugin_behind_name" "$plugin_behind_loaded" "$plugin_behind_repo" "$3" \
+        "$plugin_behind_name" "$plugin_behind_loaded" "$plugin_behind_wanted" "$3" \
         "$plugin_behind_market" "$plugin_behind_name" "$plugin_behind_market"
 }
 

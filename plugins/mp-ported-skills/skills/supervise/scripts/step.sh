@@ -49,7 +49,7 @@ case "${1:-}" in
         report=$(sh "$state" "$1" </dev/null) ;;
 esac
 
-printf '%s\n' "$report" | grep '^plugin: ' >&2
+printf '%s\n' "$report" | grep '^plugin: ' >&2 || :
 line=$(printf '%s\n' "$report" | sed -n 's/^next: //p' | head -n 1)
 if [ -z "$line" ]; then
     echo "stop: state.sh printed no next: line"
