@@ -7,8 +7,10 @@
 #
 # - branch: the cwd's branch, left out on main or master; `detached` when
 #   HEAD is detached; left out outside git.
-# - workstream: the name after `workstream:` in the repo's .state/ACTIVE.md,
-#   quotes dropped. Left out when there is none or it reads `none`. A persona
+# - workstream: the name after `workstream:` in the first 10 lines of the
+#   repo's .state/ACTIVE.md (else .claude/ACTIVE.md), quotes dropped, read as
+#   status-line-base.sh reads it so the title and status line agree. Left out
+#   when there is none or it reads `none`. A persona
 #   (CLAUDE_SESSION_PERSONA) goes before it as `persona@workstream`, or stands
 #   alone when there is no workstream.
 # - repo: the git top-level of the session's cwd, or the folder itself
@@ -31,7 +33,9 @@
 [ "${MP_SESSION_TITLE:-}" = 1 ] || exit 0
 [ -z "${CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX:-}" ] || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
-. "$(dirname -- "$0")/session-tag.sh"
+helper="$(dirname -- "$0")/session-tag.sh"
+[ -f "$helper" ] || exit 0
+. "$helper"
 input=$(cat)
 source=$(printf '%s' "$input" | jq -r '.source // empty' 2>/dev/null) || source=""
 case $source in startup|clear|fork) ;; *) exit 0 ;; esac
@@ -51,8 +55,10 @@ fi
 repo=$(basename "$top")
 
 work=""
-if [ -f "$top/.state/ACTIVE.md" ]; then
-    work=$(sed -n 's/^workstream:[[:space:]]*//p' "$top/.state/ACTIVE.md" 2>/dev/null | head -n 1 \
+active="$top/.state/ACTIVE.md"
+[ -f "$active" ] || active="$top/.claude/ACTIVE.md"
+if [ -f "$active" ]; then
+    work=$(head -n 10 "$active" 2>/dev/null | sed -n 's/^workstream:[[:space:]]*//p' | head -n 1 \
         | tr -d '"' | sed 's/[[:space:]]*$//') || work=""
     [ "$work" = none ] && work=""
 fi

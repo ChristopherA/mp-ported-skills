@@ -75,7 +75,7 @@ git -C "$repo" checkout -q main
 # The workstream, from .state/ACTIVE.md.
 mkdir -p "$repo/.state"
 printf '# Active\nworkstream: zone-work\nphase: 2\n' >"$repo/.state/ACTIVE.md"
-check "workstream: after the branch slot" "zone-work » myrepo (testprof) » $host" "$(title startup "$repo")"
+check "workstream: before the repo" "zone-work » myrepo (testprof) » $host" "$(title startup "$repo")"
 check "workstream: read from a subdirectory too" "zone-work » myrepo (testprof) » $host" "$(title startup "$repo/sub/dir")"
 git -C "$repo" checkout -q feature/x
 check "workstream: branch first, then workstream" "feature/x » zone-work » myrepo (testprof) » $host" "$(title startup "$repo")"
@@ -86,7 +86,12 @@ printf 'workstream: none\n' >"$repo/.state/ACTIVE.md"
 check "workstream: none leaves the slot out" "myrepo (testprof) » $host" "$(title startup "$repo")"
 printf '# Active\nphase: 2\n' >"$repo/.state/ACTIVE.md"
 check "workstream: no line leaves the slot out" "myrepo (testprof) » $host" "$(title startup "$repo")"
+printf '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\nworkstream: late\n' >"$repo/.state/ACTIVE.md"
+check "workstream: past line 10 is not read, as the status line" "myrepo (testprof) » $host" "$(title startup "$repo")"
 command rm -f "$repo/.state/ACTIVE.md"
+mkdir -p "$repo/.claude"; printf 'workstream: old-home\n' >"$repo/.claude/ACTIVE.md"
+check "workstream: .claude/ACTIVE.md when .state has none" "old-home » myrepo (testprof) » $host" "$(title startup "$repo")"
+command rm -rf "$repo/.claude"
 check "workstream: no file leaves the slot out" "myrepo (testprof) » $host" "$(title startup "$repo")"
 
 # The persona: before the workstream as persona@workstream, or alone.
@@ -125,6 +130,14 @@ out=$(printf '{"source":"startup","cwd":"%s"}' "$repo" \
     | MP_SESSION_TITLE=1 CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX=host-myrepo sh -c "$hook_cmd"); rc=$?
 check "wrapper-named: no output" "" "$out"
 check "wrapper-named: exit 0" "0" "$rc"
+
+# A plugin copy missing the tag helper sets no title and still exits 0.
+mkdir -p "$work/nohelper/scripts"
+command cp -f "$CLAUDE_PLUGIN_ROOT/scripts/session-title.sh" "$work/nohelper/scripts/"
+out=$(printf '{"source":"startup","cwd":"%s"}' "$repo" \
+    | (export MP_SESSION_TITLE=1 CLAUDE_PLUGIN_ROOT="$work/nohelper"; sh -c "$hook_cmd" 2>&1)); rc=$?
+check "no tag helper: no output" "" "$out"
+check "no tag helper: exit 0" "0" "$rc"
 
 # The title and the status line name the host and profile the same way, so
 # the two agree on screen. The status line's line 1 with titles off starts
