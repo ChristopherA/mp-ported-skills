@@ -1009,7 +1009,7 @@ EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback
 --append-system-prompt
 $no_grants
 --name
-worker project #56: Add the thing
+worker@#56 » project (config) » Add the thing
 --permission-mode
 auto
 /mattpocock-skills:implement #56" "$(command cat "$fake/args")"
@@ -1022,20 +1022,29 @@ $project" "$(command cat "$fake/gh-args" "$fake/gh-cwd")"
 # The worker is named after its Project and ticket (#103), so the Claude
 # app and `claude agents` tell workers apart. A long title is cut.
 name_of() { sed -n '/^--name$/{n;p;}' "$fake/args"; }
-long="Make every supervised worker show its Project and its ID in the Claude app list"
+long="Make each supervised worker show its Project and its ID in the Claude app list"
 (export FAKE_GH_TITLE="$long"; launch --ticket 56 >/dev/null 2>&1)
-check "launch: a long title is cut, with no space before the dots" "worker project #56: Make every supervised worker show its Project and its ID..." "$(name_of)"
+check "launch: a long title is cut, with no space before the dots" "worker@#56 » project (config) » Make each supervised worker show its Project..." "$(name_of)"
 check "launch: the cut name is at most 80 characters" "yes" "$([ "$(name_of | tr -d '\n' | LC_ALL=en_US.UTF-8 wc -m)" -le 80 ] && echo yes || echo no)"
 (export FAKE_GH_TITLE="Fix the café sign"; launch --ticket 56 >/dev/null 2>&1)
-check "launch: a title with non-ASCII text is kept whole" "worker project #56: Fix the café sign" "$(name_of)"
+check "launch: a title with non-ASCII text is kept whole" "worker@#56 » project (config) » Fix the café sign" "$(name_of)"
 out=$( (export FAKE_GH_FAIL=1; launch --ticket 56 2>&1) )
 rc=$?
 check "launch: no title still launches" "0" "$rc"
-check "launch: no title names the Project and ticket" "worker project #56" "$(name_of)"
+check "launch: no title names the Project and ticket" "worker@#56 » project (config)" "$(name_of)"
 check "launch: no title says why" "note: gh issue view 56 failed (HTTP 404: Not Found), so the worker's name leaves out the ticket's title
 c2a368ee" "$out"
 out=$( (export FAKE_GH_TITLE=""; launch --ticket 56 2>&1) )
-check "launch: an empty title names the Project and ticket" "worker project #56" "$(name_of)"
+check "launch: an empty title names the Project and ticket" "worker@#56 » project (config)" "$(name_of)"
+# The tag is the profile's session-tag file's first line when it has one
+# (#171), as the session-title hook reads it.
+printf 'mp\n' >"$cfg/session-tag"
+launch --ticket 56 >/dev/null 2>&1
+check "launch: the session-tag file names the tag" "worker@#56 » project (mp) » Add the thing" "$(name_of)"
+: >"$cfg/session-tag"
+launch --ticket 56 >/dev/null 2>&1
+check "launch: an empty session-tag file falls back to the profile" "worker@#56 » project (config) » Add the thing" "$(name_of)"
+command rm -f "$cfg/session-tag"
 
 # A continuation after a zone capture (#60) names the earlier worker's start,
 # so the fresh worker builds on its commits rather than starting over.
@@ -1045,7 +1054,7 @@ rc=$?
 check "launch --continue: exit 0" "0 c2a368ee" "$rc $out"
 check "launch --continue: the prompt says where the work stands" "/mattpocock-skills:implement #56 continues: an earlier worker on #56 passed its capture threshold, ran /mp-ported-skills:capturing and was stopped. Its commits since $(git -C "$project" rev-parse --short "$cstart") and its capture's notes on #56 are the work so far: build on them and finish the ticket." \
     "$(tail -n 1 "$fake/args")"
-check "launch --continue: the name says continued" "worker project #56 (continued): Add the thing" "$(name_of)"
+check "launch --continue: the name says continued" "worker@#56 (continued) » project (config) » Add the thing" "$(name_of)"
 out=$(launch --ticket 56 --continue nope 2>&1)
 rc=$?
 check "launch --continue: refuses what is not a commit" "1 Error: --continue needs a commit in $project, not 'nope'; not launched" "$rc $out"
@@ -1075,7 +1084,7 @@ out=$( (export FAKE_STATE_FILTER='| .respawnFlags[-3] = "high"'; launch --ticket
 rc=$?
 check "launch: effort not recorded exits 2" "2" "$rc"
 check "launch: effort not recorded stops the session" "stop c2a368ee" "$(command cat "$fake/calls" 2>/dev/null)"
-check "launch: effort not recorded says why" "Error: session c2a368ee does not run at effort medium (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --effort high --name worker project #56: Add the thing); stopped it" "$out"
+check "launch: effort not recorded says why" "Error: session c2a368ee does not run at effort medium (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --effort high --name worker@#56 » project (config) » Add the thing); stopped it" "$out"
 
 out=$(launch --ticket 56 --model claude-haiku-4-5-20251001 2>&1)
 rc=$?
@@ -1120,17 +1129,17 @@ mismatch "isolation guard on" '| .respawnFlags = ["--disallowedTools", "EnterWor
 mismatch "isolation guard set to another value" '| .respawnFlags = ["--disallowedTools", "EnterWorktree", "--settings", "{\"worktree\":{\"bgIsolation\":\"worktree\"}}", "--permission-mode", "auto"]' \
     "Error: session c2a368ee has the background worktree guard on, so its edits in $project would be refused: bgIsolation none is not in its settings (its flags: --disallowedTools EnterWorktree --settings {\"worktree\":{\"bgIsolation\":\"worktree\"}} --permission-mode auto); stopped it"
 mismatch "grants not recorded" '| .respawnFlags |= .[2:]' \
-    "Error: session c2a368ee was not told its Project's grants and how to read files: its flags hold no --append-system-prompt with them (its flags: --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
+    "Error: session c2a368ee was not told its Project's grants and how to read files: its flags hold no --append-system-prompt with them (its flags: --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker@#56 » project (config) » Add the thing); stopped it"
 mismatch "other grants recorded" '| .respawnFlags[1] = "something else"' \
-    "Error: session c2a368ee was not told its Project's grants and how to read files: its flags hold no --append-system-prompt with them (its flags: --append-system-prompt something else --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
+    "Error: session c2a368ee was not told its Project's grants and how to read files: its flags hold no --append-system-prompt with them (its flags: --append-system-prompt something else --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker@#56 » project (config) » Add the thing); stopped it"
 # A worker is launched without the tools it never uses and without Claude in
 # Chrome (#130); flags from the launch with one of them missing are refused.
 mismatch "tools a worker does not use allowed" '| .respawnFlags[3] = "EnterWorktree"' \
-    "Error: session c2a368ee keeps tools a worker does not use: Artifact Workflow ScheduleWakeup SendFeedback not in its disallowed tools (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
+    "Error: session c2a368ee keeps tools a worker does not use: Artifact Workflow ScheduleWakeup SendFeedback not in its disallowed tools (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker@#56 » project (config) » Add the thing); stopped it"
 mismatch "one such tool allowed" '| .respawnFlags[3] = "EnterWorktree Artifact Workflow ScheduleWakeup"' \
-    "Error: session c2a368ee keeps tools a worker does not use: SendFeedback not in its disallowed tools (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree Artifact Workflow ScheduleWakeup --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
+    "Error: session c2a368ee keeps tools a worker does not use: SendFeedback not in its disallowed tools (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree Artifact Workflow ScheduleWakeup --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker@#56 » project (config) » Add the thing); stopped it"
 mismatch "chrome on" '| .respawnFlags |= map(select(. != "--no-chrome"))' \
-    "Error: session c2a368ee has Claude in Chrome on: --no-chrome is not in its flags (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
+    "Error: session c2a368ee has Claude in Chrome on: --no-chrome is not in its flags (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker@#56 » project (config) » Add the thing); stopped it"
 mismatch "wrong profile" '| .providerEnv.CLAUDE_CONFIG_DIR = "/elsewhere"' \
     "Error: session c2a368ee runs under config /elsewhere, not $cfg; stopped it"
 mismatch "no profile recorded" '| del(.providerEnv)' \
@@ -1152,7 +1161,7 @@ renamed() { # <name> <jq filter> <recorded name>
     check "launch: $1 stops nothing" "" "$(command cat "$fake/calls" 2>/dev/null)"
     check "launch: $1 writes the marker" "c2a368ee
 distribution" "$(command cat "$marker" 2>/dev/null)"
-    check "launch: $1 notes it" "note: session c2a368ee is named '$3', not 'worker project #56: Add the thing'" "$err"
+    check "launch: $1 notes it" "note: session c2a368ee is named '$3', not 'worker@#56 » project (config) » Add the thing'" "$err"
 }
 renamed "name not recorded" '| .name = "mattpocock skills implementation"' "mattpocock skills implementation"
 renamed "no name recorded" '| del(.name)' "(none recorded)"
@@ -1177,7 +1186,7 @@ command rm -f "$marker"
 mismatch "excludes not recorded" '| .respawnFlags |= (index("--settings") as $i | .[$i + 1] = "{\"worktree\":{\"bgIsolation\":\"none\"}}")' \
     "note: /elsewhere/CLAUDE.md, listed in $excludes, does not exist
 note: the worker leaves out the 4 instruction paths listed in $excludes
-Error: session c2a368ee loads the profile instructions listed in $excludes: its settings hold no claudeMdExcludes with them (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker project #56: Add the thing); stopped it"
+Error: session c2a368ee loads the profile instructions listed in $excludes: its settings hold no claudeMdExcludes with them (its flags: --append-system-prompt $no_grants --disallowedTools EnterWorktree,Artifact,Workflow,ScheduleWakeup,SendFeedback --no-chrome --settings {\"worktree\":{\"bgIsolation\":\"none\"}} --permission-mode auto --model claude-sonnet-5 --name worker@#56 » project (config) » Add the thing); stopped it"
 printf '%s\n' '~/nowhere/rule.md' >"$excludes"
 out=$( (export HOME="$work/home"; launch --ticket 56 2>&1) )
 check "launch excludes: a ~/ line is under HOME" "0 {\"worktree\":{\"bgIsolation\":\"none\"},\"claudeMdExcludes\":[\"$work/home/nowhere/rule.md\"]}" "$? $(settings_of)"
@@ -1434,12 +1443,16 @@ check "launch --continue: parks back to the first worker's start" "$(park_text "
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | grep '^Park ')"
 command rm -f "$(git -C "$granted" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
 # A grant.sh error is not read as "no grants": nothing launches.
-mkdir -p "$work/broken-scripts"
-command cp -f "$scripts"/*.sh "$work/broken-scripts/"
-printf '#!/bin/sh\necho "Error: broken" >&2\nexit 1\n' >"$work/broken-scripts/grant.sh"
+# The copy keeps the plugin's layout, since launch.sh sources the
+# plugin-level scripts/session-tag.sh (#171).
+broken="$work/broken-plugin/skills/supervise/scripts"
+mkdir -p "$broken" "$work/broken-plugin/scripts"
+command cp -f "$scripts"/*.sh "$broken/"
+command cp -f "$root/plugins/mp-ported-skills/scripts/session-tag.sh" "$work/broken-plugin/scripts/"
+printf '#!/bin/sh\necho "Error: broken" >&2\nexit 1\n' >"$broken/grant.sh"
 reset_fake
 echo "$fixtures/working-busy.json" >"$fake/seq"
-out=$(launch_run "$work/broken-scripts" "$granted" --ticket 56 2>&1); rc=$?
+out=$(launch_run "$broken" "$granted" --ticket 56 2>&1); rc=$?
 check "launch: a grant.sh error exits 1" "1" "$rc"
 check "launch: a grant.sh error never launched" "no" "$([ -f "$fake/args" ] && echo yes || echo no)"
 check "launch: a grant.sh error says why" "grant.sh: Error: broken

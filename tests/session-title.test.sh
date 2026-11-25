@@ -1,11 +1,14 @@
 #!/bin/sh
 # session-title.test.sh -- tests for the SessionStart hook that sets the
-# session title.
+# session title, `[branch » ][workstream » ]<repo> (<tag>) » <host>`.
 #
 # Runs the command string from hooks.json, as Claude Code does, with a
-# SessionStart payload on stdin: each source, the opt-in on and off, and a
-# working directory at a repo's top, in its subdirectory and outside git.
-# Touches nothing outside its own mktemp directory.
+# SessionStart payload on stdin: each source, the opt-in on and off, a
+# working directory at a repo's top, in its subdirectory and outside git,
+# the branch on main, master, another branch and detached, the workstream
+# present, absent and `none`, a persona with and without one, and the tag
+# file present, empty and absent. Touches nothing outside its own mktemp
+# directory.
 #
 # Usage: sh tests/session-title.test.sh
 
@@ -30,14 +33,18 @@ check() { # <name> <expected> <actual>
 entry='.hooks.SessionStart[] | select(.hooks[0].command | test("session-title"))'
 hook_cmd=$(jq -r "$entry | .hooks[0].command" "$hooks")
 
-repo="$work/myrepo"
-git init -q "$repo"
-mkdir -p "$repo/sub/dir"
+# Every variable the hook reads, set or unset here, so the result does not
+# depend on the session running the test.
+unset MP_SESSION_TITLE CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX CLAUDE_SESSION_PERSONA 2>/dev/null || true
 export CLAUDE_CONFIG_DIR="$work/.claude-testprof"
 mkdir -p "$CLAUDE_CONFIG_DIR"
 export CLAUDE_PLUGIN_ROOT="$root/plugins/mp-ported-skills"
-unset MP_SESSION_TITLE CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX 2>/dev/null || true
 host=$(hostname -s)
+
+repo="$work/myrepo"
+git init -q -b main "$repo"
+git -C "$repo" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m init
+mkdir -p "$repo/sub/dir"
 
 title() { # <source> <cwd>: the title the hook sets, with titles on
     printf '{"hook_event_name":"SessionStart","source":"%s","cwd":"%s","session_id":"s1"}' "$1" "$2" \
@@ -45,14 +52,63 @@ title() { # <source> <cwd>: the title the hook sets, with titles on
         | jq -r '.hookSpecificOutput.sessionTitle // empty'
 }
 
-check "startup: project · profile · host" "myrepo · testprof · $host" "$(title startup "$repo")"
-check "clear: titled" "myrepo · testprof · $host" "$(title clear "$repo")"
-check "fork: titled" "myrepo · testprof · $host" "$(title fork "$repo")"
-check "subdirectory: the repo's name" "myrepo · testprof · $host" "$(title startup "$repo/sub/dir")"
+check "startup: repo (tag) » host" "myrepo (testprof) » $host" "$(title startup "$repo")"
+check "clear: titled" "myrepo (testprof) » $host" "$(title clear "$repo")"
+check "fork: titled" "myrepo (testprof) » $host" "$(title fork "$repo")"
+check "subdirectory: the repo's name" "myrepo (testprof) » $host" "$(title startup "$repo/sub/dir")"
 outside="$work/plainfolder"; mkdir -p "$outside"
-check "outside git: the folder's name" "plainfolder · testprof · $host" \
+check "outside git: the folder's name, no branch" "plainfolder (testprof) » $host" \
     "$(GIT_CEILING_DIRECTORIES="$work" title startup "$outside")"
-check "default profile" "myrepo · default · $host" "$(CLAUDE_CONFIG_DIR="$HOME/.claude" title startup "$repo")"
+check "default profile" "myrepo (default) » $host" "$(CLAUDE_CONFIG_DIR="$HOME/.claude" title startup "$repo")"
+check "profile without the .claude- prefix" "myrepo (config) » $host" \
+    "$(mkdir -p "$work/config"; CLAUDE_CONFIG_DIR="$work/config" title startup "$repo")"
+
+# The branch: left out on main or master, named otherwise, detached flagged.
+git -C "$repo" checkout -q -b feature/x
+check "branch: another branch goes first" "feature/x » myrepo (testprof) » $host" "$(title startup "$repo")"
+git -C "$repo" checkout -q -b master
+check "branch: master is left out" "myrepo (testprof) » $host" "$(title startup "$repo")"
+git -C "$repo" checkout -q --detach
+check "branch: detached HEAD" "detached » myrepo (testprof) » $host" "$(title startup "$repo")"
+git -C "$repo" checkout -q main
+
+# The workstream, from .state/ACTIVE.md.
+mkdir -p "$repo/.state"
+printf '# Active\nworkstream: zone-work\nphase: 2\n' >"$repo/.state/ACTIVE.md"
+check "workstream: after the branch slot" "zone-work » myrepo (testprof) » $host" "$(title startup "$repo")"
+check "workstream: read from a subdirectory too" "zone-work » myrepo (testprof) » $host" "$(title startup "$repo/sub/dir")"
+git -C "$repo" checkout -q feature/x
+check "workstream: branch first, then workstream" "feature/x » zone-work » myrepo (testprof) » $host" "$(title startup "$repo")"
+git -C "$repo" checkout -q main
+printf 'workstream: "quoted"\n' >"$repo/.state/ACTIVE.md"
+check "workstream: quotes dropped" "quoted » myrepo (testprof) » $host" "$(title startup "$repo")"
+printf 'workstream: none\n' >"$repo/.state/ACTIVE.md"
+check "workstream: none leaves the slot out" "myrepo (testprof) » $host" "$(title startup "$repo")"
+printf '# Active\nphase: 2\n' >"$repo/.state/ACTIVE.md"
+check "workstream: no line leaves the slot out" "myrepo (testprof) » $host" "$(title startup "$repo")"
+command rm -f "$repo/.state/ACTIVE.md"
+check "workstream: no file leaves the slot out" "myrepo (testprof) » $host" "$(title startup "$repo")"
+
+# The persona: before the workstream as persona@workstream, or alone.
+check "persona: alone with no workstream" "pete » myrepo (testprof) » $host" \
+    "$(export CLAUDE_SESSION_PERSONA=pete; title startup "$repo")"
+printf 'workstream: zone-work\n' >"$repo/.state/ACTIVE.md"
+check "persona: persona@workstream" "pete@zone-work » myrepo (testprof) » $host" \
+    "$(export CLAUDE_SESSION_PERSONA=pete; title startup "$repo")"
+check "persona: empty is no persona" "zone-work » myrepo (testprof) » $host" \
+    "$(export CLAUDE_SESSION_PERSONA=; title startup "$repo")"
+command rm -f "$repo/.state/ACTIVE.md"
+
+# The tag: the session-tag file's first line overrides the profile's name.
+printf 'mp\nsecond line\n' >"$CLAUDE_CONFIG_DIR/session-tag"
+check "tag: the file's first line" "myrepo (mp) » $host" "$(title startup "$repo")"
+printf '  mp  \n' >"$CLAUDE_CONFIG_DIR/session-tag"
+check "tag: spaces around it trimmed" "myrepo (mp) » $host" "$(title startup "$repo")"
+: >"$CLAUDE_CONFIG_DIR/session-tag"
+check "tag: an empty file falls back to the profile" "myrepo (testprof) » $host" "$(title startup "$repo")"
+printf '\nmp\n' >"$CLAUDE_CONFIG_DIR/session-tag"
+check "tag: an empty first line falls back to the profile" "myrepo (testprof) » $host" "$(title startup "$repo")"
+command rm -f "$CLAUDE_CONFIG_DIR/session-tag"
 
 # No title, and no output at all, so a /rename survives.
 check "resume: no title" "" "$(title resume "$repo")"
@@ -75,9 +131,9 @@ check "wrapper-named: exit 0" "0" "$rc"
 # "<host> · <profile>".
 sl=$(printf '{"workspace":{"project_dir":"%s"},"context_window":{"used_percentage":4,"context_window_size":1000000}}' "$repo" \
     | sh "$CLAUDE_PLUGIN_ROOT/scripts/status-line.sh" | sed -n 1p)
-t=$(title startup "$repo")      # <project> · <profile> · <host>
-t=${t#* · }; t_profile=${t% · *}; t_host=${t#* · }
-check "host and profile match the status line" "${sl%% » *}" "$t_host · $t_profile"
+t=$(title startup "$repo")      # <repo> (<tag>) » <host>
+t_host=${t##* » }; t_tag=${t##*(}; t_tag=${t_tag%%)*}
+check "host and profile match the status line" "${sl%% » *}" "$t_host · $t_tag"
 
 # The matcher Claude Code applies before the script's own check.
 check "matcher: startup, clear and fork only" "startup|clear|fork" "$(jq -r "$entry | .matcher" "$hooks")"

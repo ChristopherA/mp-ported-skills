@@ -130,12 +130,16 @@
 # job's flags read ["--model","claude-opus-5-5","--effort","medium", ...]. MP_SUPERVISE_WAIT: seconds to wait for the job's
 # state.json (default 20).
 #
-# The worker is named `worker <project> #N: <ticket title>` with --name,
-# cut to 80 characters, so `claude agents` and the Claude app tell workers
-# apart (#103): without it, Claude Code named every worker from its first
-# prompt, the same for every ticket. The app adds the machine's name, so the
-# name leaves it out. The title comes from `gh issue view` in DIR; when that
-# fails, the name is `worker <project> #N` and a note says so. Checked
+# The worker is named `worker@#N » <repo> (<tag>) » <ticket title>` with
+# --name, cut to 80 characters, so `claude agents` and the Claude app tell
+# workers apart (#103): without it, Claude Code named every worker from its
+# first prompt, the same for every ticket. It takes the form the session-title
+# hook gives sessions (#171), and the tag is the hook's, session_tag in
+# scripts/session-tag.sh: the profile's session-tag file's first line, or the
+# profile's name. A --continue worker reads `worker@#N (continued) » ...`.
+# The app adds the machine's name, so the name leaves it out. The title comes
+# from `gh issue view` in DIR; when that fails, the name is
+# `worker@#N » <repo> (<tag>)` and a note says so. Checked
 # live with 2.1.288: a `claude --bg --name` session's SessionStart title hook
 # (MP_SESSION_TITLE) wrote its own title first, then the name was written
 # over it, and it stayed the last custom-title in the transcript; the job's
@@ -192,6 +196,7 @@ set -u
 . "$(dirname -- "$0")/own-repo.sh"
 . "$(dirname -- "$0")/protected.sh"
 . "$(dirname -- "$0")/distribution-repo.sh"
+. "$(dirname -- "$0")/../../../scripts/session-tag.sh"
 
 DIR=""
 TICKET=""
@@ -451,12 +456,14 @@ Closing the ticket waits for the Distribution push, under an issue-close grant o
 [ -z "$DIST" ] || [ -z "$comment_granted" ] || [ -z "$sub_issue_granted" ] || GRANTS="$GRANTS
 When you park, park the Distribution repo the same way: put its commits on a local branch \`parked-$TICKET\` there (\`git -C $DIST branch parked-$TICKET\`), run \`git -C $DIST reset --hard $dist_start\`, and name both branches in the comment."
 
-# The worker's name (#103), in characters, not bytes, whatever the locale.
-NAME="worker ${top##*/} #$TICKET"
+# The worker's name (#103, #171), in characters, not bytes, whatever the
+# locale.
+NAME="worker@#$TICKET"
 [ -z "$CONTINUE" ] || NAME="$NAME (continued)"
+NAME="$NAME » ${top##*/} ($(session_tag "$CONFIG"))"
 NAME_MAX=80
 if title=$(cd "$DIR" && gh issue view "$TICKET" --json title --jq .title </dev/null 2>&1); then
-    [ -z "$title" ] || NAME="$NAME: $title"
+    [ -z "$title" ] || NAME="$NAME » $title"
 else
     printf "note: gh issue view %s failed (%s), so the worker's name leaves out the ticket's title\n" \
         "$TICKET" "$(printf '%s\n' "$title" | head -n 1)" >&2
