@@ -2,7 +2,10 @@
 # state.sh -- read-only snapshot of where a repo's work stands, and the next step.
 #
 # Reads git (no fetch: remote refs are as of the last fetch) and, when
-# docs/agents/issue-tracker.md names GitHub, the tracker through `gh`. Prints
+# docs/agents/issue-tracker.md names GitHub, the tracker through `gh`; when
+# it is titled `# Issue tracker: Local Markdown`, the ticket files under
+# .scratch/ instead, with no `gh` call (#233), building the same rows, so
+# the cases run unchanged on string ids (<feature-slug>#<NN>). Prints
 # state lines, then `next: <case> ...` for the first of the seven weighing
 # cases that applies and `runner-up: ...` for the second (case 7's suggestions
 # when no other applies). A ticket labelled `parked` is never a step, nor is
@@ -55,6 +58,8 @@ distribution="$supervise_scripts/distribution.sh"
 . "$supervise_scripts/run-start.sh"
 # Whether the installed plugin is older than the checkout's (#238).
 . "$supervise_scripts/plugin-version.sh"
+# Which tracker docs/agents/issue-tracker.md names (#233).
+. "$supervise_scripts/tracker.sh"
 plugin_root=$(CDPATH= cd -- "$supervise_scripts/../../.." && pwd)
 
 cd "$dir" 2>/dev/null || exit 0
@@ -96,54 +101,90 @@ frontier_def='
         and (if has("links") then .links != null and all(.links[]; cleared) else .dep == 0 end);
     def open_line($open): .line |= [.[] | select(. as $b | $open | index($b))];'
 
+# A ticket's id as the readout writes it: #N for a GitHub number, and a Local
+# Markdown id (<feature-slug>#<NN>, a string) as it is (#233). fxkey is the
+# key a closing commit names it by: the number, or the id with its NN's
+# leading zeros dropped (.k).
+ref_def='def ref: if type == "number" then "#\(.)" else . end;
+    def fxkey: .k // .n;'
+
+# A row's role from its labels, the same on either tracker.
+role_def='def role_of($ta; $th; $ti; $tr; $tw):
+    if (.l | index($ta)) then "agent"
+    elif (.l | index($th)) then "human"
+    elif (.l | index($ti)) then "info"
+    elif (.l | index($tr)) then "triage"
+    elif (.l | index($tw)) then "wontfix"
+    elif (.l | index("wayfinder:map")) then "map"
+    elif any(.l[]; startswith("wayfinder:")) then "wayfinder"
+    else "unlabelled" end;'
+
 # next_child <n>: "; next child ..." for in-motion parent #n, naming the first
 # open sub-issue in the parent's order with every blocker closed (the blocker
 # test of the frontier rule in docs/agents/issue-tracker.md) and not parked,
 # and its command; "; every open child blocked: ..." with the blockers, or
 # "parked", when none qualifies; nothing when #n has no open sub-issues.
-# Reads $open_nums, $unread_refs, $repo_slug, $body_blockers and the label
-# strings. The weigh step reads the child's number back from "; next child
+# On Local Markdown the children are the open rows whose `Part of:` names
+# #n, in NN order. Reads $open_nums, $unread_refs, $repo_slug,
+# $body_blockers, $tracker, $rows and the label strings. The weigh step reads the child's number back from "; next child
 # #N", so keep that wording. Writes the open children to
 # $tmp/kids-<n>.json, which the /supervise queue reads.
 # Reads every page: gh prints one array per page, merged here into one, and
 # the first page can hold only closed children.
 next_child() {
-    subs=$(gh api "repos/{owner}/{repo}/issues/$1/sub_issues?per_page=100" --paginate 2>/dev/null) &&
-        subs=$(printf '%s' "$subs" | jq -cs 'add' 2>/dev/null) &&
-        printf '%s' "$subs" | jq -e 'type == "array"' >/dev/null 2>&1 ||
-        { printf '; sub-issues not read'; return; }
-    kids=$(printf '%s' "$subs" | jq -c --arg repo "$repo_slug" --argjson open "$open_nums" "$body_blockers"'
-        [.[] | select(.state == "open")
-         | {n: .number, id: .id, t: .title, l: [.labels[].name], c: .comments,
-            dep: (.issue_dependencies_summary.blocked_by // 0),
-            line: [body_blockers[] | select(. as $b | $open | index($b))]}]')
+    if [ "$tracker" = local ]; then
+        # Local Markdown (#233): the open tickets whose `Part of:` names
+        # #n, in NN order, from the rows already read.
+        kids=$(printf '%s' "$rows" | jq -c --arg p "$1" --argjson open "$open_nums" \
+            '[.[] | select(.parent == $p) | .line |= [.[] | select(. as $b | $open | index($b))]] | sort_by(.nn)')
+    else
+        subs=$(gh api "repos/{owner}/{repo}/issues/$1/sub_issues?per_page=100" --paginate 2>/dev/null) &&
+            subs=$(printf '%s' "$subs" | jq -cs 'add' 2>/dev/null) &&
+            printf '%s' "$subs" | jq -e 'type == "array"' >/dev/null 2>&1 ||
+            { printf '; sub-issues not read'; return; }
+        kids=$(printf '%s' "$subs" | jq -c --arg repo "$repo_slug" --argjson open "$open_nums" "$body_blockers"'
+            [.[] | select(.state == "open")
+             | {n: .number, id: .id, t: .title, l: [.labels[].name], c: .comments,
+                dep: (.issue_dependencies_summary.blocked_by // 0),
+                line: [body_blockers[] | select(. as $b | $open | index($b))]}]')
+    fi
     kids=$(mark_parked "$kids")
     [ "$(printf '%s' "$kids" | jq length)" = 0 ] && return
     # Kept for the /supervise queue, which replays this pick: this function
     # runs in a command substitution, so a variable would not outlive it.
     printf '%s' "$kids" >"$tmp/kids-$1.json"
-    step=$(printf '%s' "$kids" | jq -r --arg ta "$t_agent" --arg th "$t_human" --arg you "$you_type_bare" "$frontier_def"'
-        [.[] | select(frontier([]))]
+    # On Local Markdown only, a ready-for-human child is passed over when a
+    # ready-for-agent child free to start follows it (#233); it stays on the
+    # by hand line.
+    pass_human=
+    [ "$tracker" = local ] && pass_human=1
+    step=$(printf '%s' "$kids" | jq -r --arg ta "$t_agent" --arg th "$t_human" --arg you "$you_type_bare" \
+        --arg pass "$pass_human" "$frontier_def$ref_def"'
+        [.[] | select(frontier([]))] as $f
+        | [range($f | length) as $i | $f[$i]
+           | select($pass == "" or (.l | index($th) | not)
+                    or ([$f[$i + 1:][] | select(.l | index($ta))] | length == 0))]
         | first // empty
-        | "; next child #\(.n) ("
-          + (if (.l | index($ta)) then "\($ta), /implement #\(.n), \($you)"
+        | "; next child \(.n | ref) ("
+          + (if (.l | index($ta)) then "\($ta), /implement \(.n | ref), \($you)"
              elif (.l | index($th)) then "\($th), by hand"
              else "not ready" end)
           + "): \(.t)"')
     if [ -n "$step" ]; then printf '%s' "$step"; return; fi
     blocked=
     for k in $(printf '%s' "$kids" | jq -r '.[].n'); do
-        if printf '%s' "$kids" | jq -e --argjson k "$k" '.[] | select(.n == $k) | .l | index("parked")' >/dev/null; then
-            if printf '%s' "$kids" | jq -e --argjson k "$k" '.[] | select(.n == $k) | .pk' >/dev/null; then
-                blocked="$blocked, #$k parked: awaiting reply"
+        case $k in (*'#'*) kr=$k ;; (*) kr="#$k" ;; esac
+        if printf '%s' "$kids" | jq -e --arg k "$k" '.[] | select((.n | tostring) == $k) | .l | index("parked")' >/dev/null; then
+            if printf '%s' "$kids" | jq -e --arg k "$k" '.[] | select((.n | tostring) == $k) | .pk' >/dev/null; then
+                blocked="$blocked, $kr parked: awaiting reply"
             else
-                blocked="$blocked, #$k parked"
+                blocked="$blocked, $kr parked"
             fi
             continue
         fi
-        by=$(printf '%s' "$kids" | jq -r --argjson k "$k" '.[] | select(.n == $k) | .line[]')
+        by=$(printf '%s' "$kids" | jq -r --arg k "$k" '.[] | select((.n | tostring) == $k) | .line[]')
         linked=
-        if [ "$(printf '%s' "$kids" | jq --argjson k "$k" '.[] | select(.n == $k) | .dep')" -gt 0 ]; then
+        if [ "$(printf '%s' "$kids" | jq --arg k "$k" '.[] | select((.n | tostring) == $k) | .dep')" -gt 0 ]; then
             linked=$(open_link_blockers "$k" | jq -r '.[]')
             by="$by
 $linked"
@@ -159,7 +200,7 @@ $linked"
                        (*) case " $unread_refs " in (*" $r "*) printf '%s (unread)\n' "$r" ;; (*) printf '%s\n' "$r" ;; esac ;;
                    esac
                done; } | tr '\n' ' ')
-        blocked="$blocked, #$k by ${by:-an unread blocker}"
+        blocked="$blocked, $kr by ${by:-an unread blocker}"
     done
     blocked=$(printf '%s' "$blocked" | sed 's/ ,/,/g; s/ $//')
     printf '; every open child blocked: %s' "${blocked#, }"
@@ -174,6 +215,12 @@ $linked"
 # not parked. Each read spends the time budget, so the answer is kept in
 # $tmp: next_child runs in a command substitution, and asks again.
 awaiting_reply() {
+    # On Local Markdown the comments were read with the files: the row's .lp
+    # holds the same answer, from park.sh's local defs (#233).
+    if [ "$tracker" = local ]; then
+        printf '%s' "$rows" | jq -e --arg n "$1" 'any(.[]; .n == $n and .lp)' >/dev/null
+        return
+    fi
     f="$tmp/park-$1"
     if [ ! -f "$f" ]; then
         gh api "repos/{owner}/{repo}/issues/$1/comments?per_page=100" --paginate 2>/dev/null |
@@ -193,7 +240,7 @@ mark_parked() {
         .[] | select((.l | index($ta)) and (.c // 0) > 0 and (open_line($open) | frontier([]))) | .n'); do
         awaiting_reply "$n" && pk="$pk $n"
     done
-    printf '%s' "$1" | jq -c --arg pk "$pk" '($pk | split(" ") | map(select(. != "") | tonumber)) as $pk
+    printf '%s' "$1" | jq -c --arg pk "$pk" '($pk | split(" ") | map(select(. != "") | tonumber? // .)) as $pk
         | map(if (.n as $n | $pk | index($n)) then .l += ["parked"] | .pk = true else . end)'
 }
 
@@ -209,6 +256,97 @@ open_link_blockers() {
             | if (.repository_url // $repo | ascii_downcase) == ($repo | ascii_downcase) then .number
               else "\(.repository_url | sub("^.*/repos/"; "") | ascii_downcase)#\(.number)" end]' 2>/dev/null
 }
+
+# read_local: every Local Markdown ticket file (#233),
+# .scratch/<feature-slug>/issues/<NN>-<slug>.md, as a JSON array of
+# {path, text} in $tmp/local.json. No .scratch/ folder is an empty tracker.
+# Prints why and returns 1 when a file cannot be read. Calls no gh.
+read_local() {
+    : >"$tmp/local.jsonl"
+    if [ -d .scratch ]; then
+        find .scratch -path '.scratch/*/issues/*' -name '[0-9]*-*.md' -type f >"$tmp/local-files" 2>/dev/null ||
+            { echo ".scratch/ could not be listed"; return 1; }
+        while IFS= read -r f; do
+            jq -nc --arg path "$f" --rawfile text "$f" '{path: $path, text: $text}' >>"$tmp/local.jsonl" 2>/dev/null ||
+                { printf '%s could not be read\n' "$f"; return 1; }
+        done <"$tmp/local-files"
+    fi
+    jq -sc . "$tmp/local.jsonl" >"$tmp/local.json"
+}
+
+# local_rows_def: jq that turns read_local's files into the rows the GitHub
+# path builds, with the open ids and the unread items beside them (#233).
+# The conventions are docs/agents/issue-tracker.md's for Local Markdown: the
+# file opens `# <title>`, then header lines, then the body, whose priority
+# line `priority` reads; comments are the `**YYYY-MM-DD.**` blocks under
+# `## Comments`. A row's id (.n) is `<feature-slug>#<NN>` as the file names
+# it, and .k the same with NN's leading zeros dropped, the key a closing
+# commit and a `Blocked by:` or `Part of:` number resolve by, within the
+# ticket's own folder. Closed: a `Closed:` line, or `Status: resolved` on a
+# wayfinder ticket (one with a `Type:` line). Labels: `Labels:` plus the
+# `Status:` role's label string, and `wayfinder:<type>` from `Type:`. A
+# Status that is neither a triage role nor, on a wayfinder ticket, claimed
+# or resolved is unread, as is a `Blocked by:` number with no file, which
+# stays an open blocker, and a `Part of:` naming none. Needs $roles (each
+# triage role's label string), $ta $th $ti $tr $tw, and the priority,
+# role_of and local_parked defs before it.
+local_rows_def='
+    def header: first(capture("^(?<k>[A-Z][A-Za-z -]*):(?<v>.*)$") | select(.k != "Priority")) // null;
+    def comments_hd: test("^##\\s+Comments\\s*$");
+    def file: . as $f
+        | (first($f.path | capture("^\\.scratch/(?<slug>[^/]+)/issues/(?<nn>[0-9]+)-[^/]*\\.md$")) // null) as $m
+        | select($m != null)
+        | ($f.text | split("\n") | map(sub("\r$"; ""))) as $ls
+        | (first(range($ls | length) | select($ls[.] | test("^# "))) // -1) as $ti
+        | (reduce $ls[($ti + 1):][] as $line ({ph: "pre", h: {}, body: [], com: []};
+            ($line | header) as $hd
+            | if .ph == "com" then .com += [$line]
+              elif ($line | comments_hd) then .ph = "com"
+              elif .ph == "body" then .body += [$line]
+              elif $hd != null then .ph = "head" | .h[$hd.k] = ($hd.v | sub("^\\s+"; "") | sub("\\s+$"; ""))
+              elif .ph == "pre" and ($line | test("^\\s*$")) then .
+              else .ph = "body" | .body += [$line] end)) as $p
+        | (reduce $p.com[] as $line ([];
+            if ($line | test("^\\*\\*[0-9]{4}-[0-9]{2}-[0-9]{2}\\.\\*\\*")) then . + [$line]
+            elif length > 0 then .[-1] += "\n" + $line else . end)) as $cs
+        | {path: $f.path, slug: $m.slug, nnw: $m.nn, nn: ($m.nn | tonumber),
+           t: (if $ti >= 0 then $ls[$ti] | sub("^#\\s+"; "") else "" end),
+           h: $p.h, body: ($p.body | join("\n")), cs: $cs};
+    def nnum: capture("^0*(?<d>[0-9]+)").d;
+    [.[] | file] as $fs
+    | ($fs | map({key: "\(.slug)#\(.nn)", value: "\(.slug)#\(.nnw)"}) | from_entries) as $ids
+    | [$fs[] | . as $x
+       | ($x.h.Status // null) as $s
+       | ($x.h.Type // null) as $ty
+       | "\($x.slug)#\($x.nnw)" as $id
+       | ((($x.h["Blocked by"] // "") | [scan("[0-9]+")])
+          | map({w: ., key: "\($x.slug)#\(nnum)"})
+          | map(.key as $key | . + {id: ($ids[$key] // "\($x.slug)#\(.w)"), missing: ($ids | has($key) | not)})) as $bl
+       | (($x.h["Part of"] // "") | (first(capture("^\\s*0*(?<d>[0-9]+)")) // null)
+          | if . == null then null else "\($x.slug)#\(.d)" end) as $pk
+       | {id: $id,
+          closed: (($x.h | has("Closed")) or ($ty != null and $s == "resolved")),
+          bad: (if $s == null then "\($x.path) (no Status: line)"
+                elif ($roles | has($s)) or ($ty != null and ($s == "claimed" or $s == "resolved")) then null
+                else "\($x.path) (Status: \($s))" end),
+          missing: [$bl[] | select(.missing) | "\(.id) (named on the Blocked by: line of \($x.path), no such ticket)"]
+                   + (if $pk != null and ($ids | has($pk) | not) then ["\($x.path) (Part of: \($x.h["Part of"]) names no ticket in its folder)"] else [] end),
+          missing_ids: [$bl[] | select(.missing) | .id],
+          row: ({n: $id, k: "\($x.slug)#\($x.nn)", t: $x.t, c: ($x.cs | length),
+                 l: ((($x.h.Labels // "") | split(",") | map(sub("^\\s+"; "") | sub("\\s+$"; "")) | map(select(. != "")))
+                     + (if $s != null and ($roles | has($s)) then [$roles[$s]] else [] end)
+                     + (if $ty != null then ["wayfinder:\($ty | ascii_downcase)"] else [] end)),
+                 dep: 0, line: [$bl[].id], p: ({body: $x.body} | priority),
+                 parent: (if $pk != null then $ids[$pk] else null end),
+                 slug: $x.slug, nn: $x.nn, path: $x.path,
+                 lp: ($x.cs | map(select(local_run_record | not)) | last // "" | local_parked)}
+                | .role = role_of($ta; $th; $ti; $tr; $tw))}] as $all
+    | ($all | map(select(.closed | not))) as $open
+    | {rows: ([$open[] | select(.bad == null) | .row] | sort_by([.slug, .nn])
+              | to_entries | map(.value + {o: .key})
+              | sort_by([({high: 0, medium: 1, low: 3}[.p // ""] // 2), .o])),
+       open: ([$open[].id] + [$open[].missing_ids[]] | unique),
+       unread: ([$open[].bad | strings] + [$open[].missing[]] | unique)}'
 
 # git_state <dir>: <dir>'s branch, default branch, sync with its upstream,
 # uncommitted paths and unpushed commits, in r_branch, r_default, r_sync,
@@ -317,13 +455,13 @@ gather() {
         grep -oE '[0-9]+' | sort -un | tr '\n' ' ')
 
     # --- tracker ---------------------------------------------------------
-    tracker=none
-    if [ -f docs/agents/issue-tracker.md ]; then
-        if head -n 5 docs/agents/issue-tracker.md | grep -qi github; then tracker=github
-        else tracker=other; fi
-    fi
+    tracker=$(tracker_backend docs/agents/issue-tracker.md)
     reached=0 why=
-    if [ $tracker = github ]; then
+    if [ $tracker = local ]; then
+        if ! command -v jq >/dev/null; then why="jq not installed"
+        elif ! why=$(read_local); then :
+        else why= reached=1; fi
+    elif [ $tracker = github ]; then
         if ! command -v jq >/dev/null; then why="jq not installed"
         elif ! command -v gh >/dev/null; then why="gh not installed"
         # Every page, merged as in next_child.
@@ -342,6 +480,8 @@ gather() {
         other) echo "tracker: not GitHub; read it per docs/agents/issue-tracker.md" ;;
         github) if [ $reached = 1 ]; then echo "tracker: GitHub, reached"
             else echo "tracker: GitHub, UNREACHED: $why"; fi ;;
+        local) if [ $reached = 1 ]; then echo "tracker: Local Markdown, read"
+            else echo "tracker: Local Markdown, UNREACHED: $why"; fi ;;
     esac
 
     if [ $reached = 1 ]; then
@@ -349,7 +489,9 @@ gather() {
         t_agent=$(label_for ready-for-agent) t_human=$(label_for ready-for-human)
         t_wont=$(label_for wontfix)
 
-        own=$(printf '%s' "$prs" | jq -r '[.[] | select(.isCrossRepository | not)]
+        # Local Markdown has no PR surface (#233).
+        own=
+        [ $tracker = github ] && own=$(printf '%s' "$prs" | jq -r '[.[] | select(.isCrossRepository | not)]
             | map("#\(.number) \(.title) [\(.headRefName)]") | join("; ")')
         if [ -n "$own" ]; then
             echo "open PRs from this repo: $own"
@@ -395,6 +537,27 @@ gather() {
              then .nums += ($line | refs)
              else . end) | .nums;'
 
+        if [ $tracker = local ]; then
+        # Local Markdown (#233): the rows, the open ids a blocker can name
+        # (a number with no file stays open) and the unread items, from the
+        # files read_local read, with no gh call. Its unread blockers are
+        # $unread_refs, which next_child marks as GitHub's are.
+        local_out=$(jq -c --arg tr "$t_triage" --arg ti "$t_info" --arg ta "$t_agent" --arg th "$t_human" --arg tw "$t_wont" \
+            '{"needs-triage": $tr, "needs-info": $ti, "ready-for-agent": $ta, "ready-for-human": $th, "wontfix": $tw} as $roles
+            | '"$body_blockers$role_def$park_local_def$local_rows_def" "$tmp/local.json")
+        rows=$(printf '%s' "$local_out" | jq -c '.rows')
+        open_nums=$(printf '%s' "$local_out" | jq -c '.open')
+        unread=$(printf '%s' "$local_out" | jq -r '.unread | join("; ")')
+        unread_refs=$(printf '%s' "$rows" | jq -r --argjson open "$open_nums" \
+            '([.[].n]) as $have | [$open[] | select(. as $o | $have | index($o) | not)] | join(" ")')
+        # A ticket a default-branch commit message closes (Closes
+        # <feature-slug>#<NN>), keyed as .k, NN's leading zeros dropped.
+        # There is no reopen to read.
+        fixed_nums=$(git log "$defref" --format=%B 2>/dev/null |
+            grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?):? +[A-Za-z0-9._-]+#[0-9]+' |
+            grep -oE '[A-Za-z0-9._-]+#[0-9]+$' | sed 's/#0*\([0-9]\)/#\1/' |
+            jq -Rnc '[inputs] | unique')
+        else
         # This repo's API URL, which a linked blocker's repository_url matches
         # when the blocker is in this repo, and its owner/repo, lower case.
         repo_url=$(printf '%s' "$issues" | jq -r 'first(.[].repository_url // empty) // ""')
@@ -402,19 +565,12 @@ gather() {
 
         # Open issues only (the endpoint also lists PRs), with what the cases need.
         rows=$(printf '%s' "$issues" | jq -c --arg repo "$repo_slug" --arg tr "$t_triage" --arg ti "$t_info" \
-            --arg ta "$t_agent" --arg th "$t_human" --arg tw "$t_wont" "$body_blockers"'
+            --arg ta "$t_agent" --arg th "$t_human" --arg tw "$t_wont" "$body_blockers$role_def"'
             [.[] | select(.pull_request | not)
              | {n: .number, t: .title, c: .comments, l: [.labels[].name],
                 dep: (.issue_dependencies_summary.blocked_by // 0),
                 line: body_blockers, p: priority}
-             | .role = (if (.l | index($ta)) then "agent"
-                        elif (.l | index($th)) then "human"
-                        elif (.l | index($ti)) then "info"
-                        elif (.l | index($tr)) then "triage"
-                        elif (.l | index($tw)) then "wontfix"
-                        elif (.l | index("wayfinder:map")) then "map"
-                        elif any(.l[]; startswith("wayfinder:")) then "wayfinder"
-                        else "unlabelled" end)]
+             | .role = role_of($ta; $th; $ti; $tr; $tw)]
             | sort_by(.n)')
         open_nums=$(printf '%s' "$rows" | jq -c '[.[].n]')
         # Open blockers a body can name: this repo's open tickets, then each
@@ -444,9 +600,10 @@ gather() {
                 'add | any(.[]; .event == "reopened" and (.created_at | fromdateiso8601) > $at)' >/dev/null 2>&1 &&
                 fixed_nums=$(printf '%s' "$fixed_nums" | jq -c --argjson n "$n" 'map(select(. != $n))')
         done
+        fi
         # A ticket awaiting a reply to its park question is parked (#158).
         rows=$(mark_parked "$rows")
-        awaiting=$(printf '%s' "$rows" | jq -r 'map(select(.pk) | "#\(.n) \(.t)") | join("; ")')
+        awaiting=$(printf '%s' "$rows" | jq -r "$ref_def"'map(select(.pk) | "\(.n | ref) \(.t)") | join("; ")')
         # count <role> [rows]: the rows (all of them by default) with that role.
         count() { printf '%s' "${2:-$rows}" | jq --arg r "$1" '[.[] | select(.role == $r)] | length'; }
         # Incoming work leaves out a parked ticket, as every other case does:
@@ -455,18 +612,18 @@ gather() {
         unparked=$(printf '%s' "$rows" | jq -c 'map(select(.l | index("parked") | not))')
         # A parked ticket goes beside ready-for-agent or ready-for-human only;
         # one parked beside any other state, or none, has a label to fix.
-        misparked=$(printf '%s' "$rows" | jq -r '
-            map(select((.l | index("parked")) and .role != "agent" and .role != "human") | "#\(.n)") | join(", ")')
+        misparked=$(printf '%s' "$rows" | jq -r "$ref_def"'
+            map(select((.l | index("parked")) and .role != "agent" and .role != "human") | "\(.n | ref)") | join(", ")')
 
         # Open tickets the default branch already closes.
-        stale=$(printf '%s' "$rows" | jq -r --argjson fx "$fixed_nums" '
-            [.[] | select(.n as $n | $fx | index($n))] | map("#\(.n) \(.t)") | join("; ")')
+        stale=$(printf '%s' "$rows" | jq -r --argjson fx "$fixed_nums" "$ref_def"'
+            [.[] | select(fxkey as $n | $fx | index($n))] | map("\(.n | ref) \(.t)") | join("; ")')
 
         # Ready-for-agent tickets with every blocker closed, not already fixed.
-        ready_rows=$(printf '%s' "$rows" | jq -c --argjson open "$open_nums" --argjson fx "$fixed_nums" "$frontier_def"'
+        ready_rows=$(printf '%s' "$rows" | jq -c --argjson open "$open_nums" --argjson fx "$fixed_nums" "$frontier_def$ref_def"'
             [.[] | select(.role == "agent" and (open_line($open) | frontier([]))
-                            and (.n as $n | $fx | index($n) | not))]')
-        ready=$(printf '%s' "$ready_rows" | jq -r 'map("#\(.n) \(.t)") | join("; ")')
+                            and (fxkey as $n | $fx | index($n) | not))]')
+        ready=$(printf '%s' "$ready_rows" | jq -r "$ref_def"'map("\(.n | ref) \(.t)") | join("; ")')
 
         # What closing each ticket unblocks: the open tickets, not parked,
         # wontfix or already fixed, it is the last open blocker of, by GitHub
@@ -474,70 +631,72 @@ gather() {
         # count) has its links read: with two it cannot be unblocked by one
         # close, and each read spends the time budget. A ticket whose links
         # were not read has unknown blockers and is left out.
-        targets=$(printf '%s' "$rows" | jq -c --argjson fx "$fixed_nums" '
+        targets=$(printf '%s' "$rows" | jq -c --argjson fx "$fixed_nums" "$ref_def"'
             [.[] | select(.dep <= 1 and .role != "wontfix" and (.l | index("parked") | not)
-                          and (.n as $n | $fx | index($n) | not))]')
+                          and (fxkey as $n | $fx | index($n) | not))]')
         links='{}'
         for n in $(printf '%s' "$targets" | jq -r '.[] | select(.dep == 1) | .n'); do
             b=$(open_link_blockers "$n")
             links=$(printf '%s' "$links" | jq -c --arg n "$n" --argjson b "${b:-null}" '.[$n] = $b')
         done
         # {"<blocker>": "#91 (High), #93", ...}, in ticket order.
-        unblocks_map=$(printf '%s' "$targets" | jq -c --argjson open "$open_nums" --argjson links "$links" '
+        unblocks_map=$(printf '%s' "$targets" | jq -c --argjson open "$open_nums" --argjson links "$links" "$ref_def"'
             [.[] | (if .dep > 0 then $links["\(.n)"] else [] end) as $l
              | select($l != null)
              | {n, p, by: ($l + [.line[] | select(. as $b | $open | index($b))] | unique)}
              | select(.by | length == 1)]
             | group_by(.by[0])
             | map({key: "\(.[0].by[0])",
-                   value: map("#\(.n)" + (if .p then " (\(.p[:1] | ascii_upcase)\(.p[1:]))" else "" end))
+                   value: map("\(.n | ref)" + (if .p then " (\(.p[:1] | ascii_upcase)\(.p[1:]))" else "" end))
                           | join(", ")})
             | from_entries')
-        unblocks=$(printf '%s' "$ready_rows" | jq -r --argjson u "$unblocks_map" '
-            map($u["\(.n)"] as $t | select($t) | "#\(.n) unblocks \($t)") | join("; ")')
+        unblocks=$(printf '%s' "$ready_rows" | jq -r --argjson u "$unblocks_map" "$ref_def"'
+            map($u["\(.n)"] as $t | select($t) | "\(.n | ref) unblocks \($t)") | join("; ")')
 
         # Hand work: ready-for-human tickets not in motion or parked, with every
         # blocker closed and not already fixed, ranked by priority line (high,
         # medium, none, low), then lowest number.
-        hand_rows=$(printf '%s' "$rows" | jq -c --argjson open "$open_nums" --argjson fx "$fixed_nums" '
+        hand_rows=$(printf '%s' "$rows" | jq -c --argjson open "$open_nums" --argjson fx "$fixed_nums" "$ref_def"'
             [.[] | select(.role == "human" and .dep == 0
                             and (.l | index("in-motion") or index("parked") | not)
                             and ([.line[] | select(. as $b | $open | index($b))] | length == 0)
-                            and (.n as $n | $fx | index($n) | not))]
-            | sort_by([({high: 0, medium: 1, low: 3}[.p // ""] // 2), .n])
+                            and (fxkey as $n | $fx | index($n) | not))]
+            | sort_by([({high: 0, medium: 1, low: 3}[.p // ""] // 2), (.o // .n)])
             | map(.p |= if . then "\(.[:1] | ascii_upcase)\(.[1:])" else . end)')
-        hand=$(printf '%s' "$hand_rows" | jq -r '
-            map("#\(.n) \(.t)" + (if .p then " (\(.p))" else "" end)) | join("; ")')
+        hand=$(printf '%s' "$hand_rows" | jq -r "$ref_def"'
+            map("\(.n | ref) \(.t)" + (if .p then " (\(.p))" else "" end)) | join("; ")')
         # The top two, one per line: the second is the runner-up when case 6 wins.
-        hand_steps=$(printf '%s' "$hand_rows" | jq -r '
+        hand_steps=$(printf '%s' "$hand_rows" | jq -r "$ref_def"'
             .[:2][] | "6 by hand" + (if .p then " (\(.p))" else "" end) + ": #\(.n) \(.t)"')
 
         # Ready-for-human tickets a session left in motion: capturing labels the
         # one it worked on, which git cannot see. Not already fixed.
-        moving_rows=$(printf '%s' "$rows" | jq -c --argjson fx "$fixed_nums" '
+        moving_rows=$(printf '%s' "$rows" | jq -c --argjson fx "$fixed_nums" "$ref_def"'
             [.[] | select(.role == "human" and (.l | index("in-motion"))
-                            and (.n as $n | $fx | index($n) | not))]')
-        moving=$(printf '%s' "$moving_rows" | jq -r 'map("#\(.n) \(.t)") | join("; ")')
+                            and (fxkey as $n | $fx | index($n) | not))]')
+        moving=$(printf '%s' "$moving_rows" | jq -r "$ref_def"'map("\(.n | ref) \(.t)") | join("; ")')
         # A parent's work in flight is its next child, so each carries that step.
         in_motion= children=
         for n in $(printf '%s' "$moving_rows" | jq -r '.[].n'); do
             child=$(next_child "$n")
-            children="$children $(printf '%s' "$child" | sed -n 's/^; next child #\([0-9]*\).*/\1/p')"
+            children="$children $(printf '%s' "$child" | sed -n 's/^; next child \([^ ]*\) (.*/\1/p')"
             in_motion="$in_motion; $(printf '%s' "$moving_rows" |
-                jq -r --argjson n "$n" '.[] | select(.n == $n) | "#\(.n) \(.t)"')$child"
+                jq -r --arg n "$n" "$ref_def"'.[] | select((.n | tostring) == $n) | "\(.n | ref) \(.t)"')$child"
         done
         if [ -n "$in_motion" ]; then
             inflight="$inflight, in motion ${in_motion#; }" inflight_rest="$inflight_rest, in motion ${in_motion#; }"
         fi
         # Case 2's ticket: the first ready one case 1 has not already named as
         # a next child, so next: and runner-up: never name the same ticket.
-        children_nums=$(jq -nc --arg c "$children" '$c | split(" ") | map(select(. != "") | tonumber)')
-        pick=$(printf '%s' "$ready_rows" | jq -r --argjson cn "$children_nums" '
-            [.[] | select(.n as $n | $cn | index($n) | not)] | first // empty | "#\(.n) \(.t)"')
+        children_nums=$(jq -nc --arg c "$children" '$c | split(" ") | map(select(. != ""))')
+        pick=$(printf '%s' "$ready_rows" | jq -r --argjson cn "$children_nums" "$ref_def"'
+            [.[] | select((.n | ref) as $n | $cn | index($n) | not)] | first // empty | "\(.n | ref) \(.t)"')
 
         # needs-info with a reply: the last comment is not the tracker user's.
+        # Local Markdown comments record no author, so no reply is read (#233).
         replied=
-        infos=$(printf '%s' "$unparked" | jq -r '.[] | select(.role == "info" and .c > 0) | .n')
+        infos=
+        [ $tracker = local ] || infos=$(printf '%s' "$unparked" | jq -r '.[] | select(.role == "info" and .c > 0) | .n')
         if [ -n "$infos" ]; then
             me=$(gh api user 2>/dev/null | jq -r '.login // empty')
             for n in $infos; do
@@ -550,8 +709,12 @@ gather() {
 
         n_triage=$(count triage "$unparked") n_info=$(count info "$unparked") n_unl=$(count unlabelled "$unparked")
         n_agent=$(count agent) n_human=$(count human) n_map=$(count map)
-        maps=$(printf '%s' "$rows" | jq -r '[.[] | select(.role == "map")] | map("#\(.n) \(.t)") | join("; ")')
-        echo "issues: $n_unl unlabelled, $n_triage $t_triage, $n_info $t_info (replied: ${replied:-none}), $n_agent $t_agent, $n_human $t_human, $n_map wayfinder:map"
+        maps=$(printf '%s' "$rows" | jq -r "$ref_def"'[.[] | select(.role == "map")] | map("\(.n | ref) \(.t)") | join("; ")')
+        replied_shown=${replied:-none}
+        [ $tracker = local ] && replied_shown="not read"
+        echo "issues: $n_unl unlabelled, $n_triage $t_triage, $n_info $t_info (replied: $replied_shown), $n_agent $t_agent, $n_human $t_human, $n_map wayfinder:map"
+        [ $tracker = local ] && echo "note: $t_info replies are not read on Local Markdown, since its comments record no author"
+        [ -n "${unread:-}" ] && echo "unread: $unread"
         echo "in motion: ${moving:-none}"
         echo "ready, blockers closed: ${ready:-none}"
         [ -n "$awaiting" ] && echo "parked, awaiting reply: $awaiting"
@@ -577,7 +740,11 @@ gather() {
             add_case "3 /triage $you_type: $n_unl unlabelled, $n_triage $t_triage, replied $t_info: ${replied:-none}"
         fi
         # The open list can lag a push that closed the ticket by a few seconds.
-        [ -n "$stale" ] && add_case "4 tracker and repo disagree: close $stale (as of the last read: confirm with gh issue view first)"
+        if [ $tracker = local ]; then
+            [ -n "$stale" ] && add_case "4 tracker and repo disagree: close $stale (a commit message closes it, and its file has no Closed: line)"
+        else
+            [ -n "$stale" ] && add_case "4 tracker and repo disagree: close $stale (as of the last read: confirm with gh issue view first)"
+        fi
         [ "$n_map" -gt 0 ] && add_case "5 /wayfinder $you_type: $maps"
         [ -n "$hand_steps" ] && add_case "$hand_steps"
         if [ -n "$cases" ]; then add_case "7 nothing else in motion: $ideas"
@@ -591,13 +758,15 @@ gather() {
         for i in 1 2; do
             c=$(printf '%s' "$cases" | sed -n "${i}p")
             case $c in
-                '2 /implement #'*) t=${c#2 /implement #} ;;
-                '1 '*'; next child #'*) t=${c#*; next child #} ;;
-                '1 '*'in motion #'*) t=${c#*in motion #} ;;
-                '6 by hand'*': #'*) t=${c#*: #} ;;
+                '2 /implement '*) t=${c#2 /implement } ;;
+                '1 '*'; next child '*) t=${c#*; next child } ;;
+                '1 '*'in motion '*) t=${c#*in motion } ;;
+                '6 by hand'*': '*) t=${c#*: } ;;
                 *) t= ;;
             esac
-            t=${t%%[!0-9]*}
+            # The id as unblocks_map keys it: the number, or a Local
+            # Markdown id as written.
+            t=${t%% *} t=${t#\#}
             [ -n "$t" ] || continue
             u=$(printf '%s' "$unblocks_map" | jq -r --arg t "$t" '.[$t] // empty')
             [ -n "$u" ] || continue
@@ -631,6 +800,15 @@ gather() {
     # continue: line names the Distribution start too (#263); with none,
     # they refuse as that repo's work in flight, with no push: line.
     first=$(printf '%s' "$cases" | sed -n 1p)
+    # /supervise does not run on a Local Markdown tracker yet (#235): an
+    # /implement step says so, and nothing else is printed.
+    if [ $tracker = local ]; then
+        case $first in
+            ('2 /implement '* | '1 '*'; next child '*', /implement '*)
+                echo "supervise: not offered: /supervise does not run on a Local Markdown tracker yet" ;;
+        esac
+        return 0
+    fi
     offer=$first
     held=$((unpushed + dist_unpushed))
     if [ "$held" -gt 0 ] || [ -n "$dist_unread" ]; then

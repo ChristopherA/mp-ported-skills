@@ -1302,6 +1302,230 @@ check "dist: none named, output byte-identical" "$before" "$(run)"
 command rm -f "$FAKE_GH/sub-24.json"
 issues "$saved_issues"
 
+# --- the tracker backend, from the doc's title (#233) ------------------------
+tracker_sh="$root/plugins/mp-ported-skills/skills/supervise/scripts/tracker.sh"
+backend() { (. "$tracker_sh" && tracker_backend "$1"); }
+mkdir -p "$work/docs"
+printf '# Issue tracker: Local Markdown\n\nThere are no GitHub Issues for this repo.\n' >"$work/docs/local.md"
+printf '# Issue tracker: GitLab\n\nIssues live in GitLab.\n' >"$work/docs/gitlab.md"
+printf '# Issues\n\nThey live as GitHub issues.\n' >"$work/docs/untitled.md"
+printf '# Issues\n\nThey live in a spreadsheet.\n' >"$work/docs/plain.md"
+check "backend: Local Markdown that mentions GitHub reads local" local "$(backend "$work/docs/local.md")"
+check "backend: a GitLab title reads other" other "$(backend "$work/docs/gitlab.md")"
+check "backend: this repo's own doc reads github" github "$(backend "$root/docs/agents/issue-tracker.md")"
+check "backend: an untitled doc naming GitHub reads github" github "$(backend "$work/docs/untitled.md")"
+check "backend: an untitled doc naming none reads other" other "$(backend "$work/docs/plain.md")"
+check "backend: no doc reads none" none "$(backend "$work/docs/missing.md")"
+
+# --- a Local Markdown tracker (#233) ----------------------------------------
+# A scratch repo whose doc opens `# Issue tracker: Local Markdown`, run with a
+# fake gh first on PATH that logs its call and exits 99: a Local Markdown
+# read calls no gh.
+lproj="$work/lproj"
+git init -q -b main "$lproj"
+mkdir -p "$lproj/docs/agents" "$work/gh99"
+printf '# Issue tracker: Local Markdown\n\nIssues live in .scratch/. There are no GitHub Issues: never run gh issue against origin.\n' \
+    >"$lproj/docs/agents/issue-tracker.md"
+cp "$root/docs/agents/triage-labels.md" "$lproj/docs/agents/"
+cat >"$work/gh99/gh" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$GH99_LOG"
+exit 99
+EOF
+chmod +x "$work/gh99/gh"
+: >"$work/gh99.log"
+lg() { git -C "$lproj" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
+# ticket <slug> <NN> <header lines> [body] [comments]: .scratch/<slug>/issues/<NN>-t.md,
+# titled t<NN without zeros>.
+ticket() {
+    mkdir -p "$lproj/.scratch/$1/issues"
+    {
+        printf '# t%s\n\n%s\n\n%s\n' "${2#0}" "$3" "${4:-Body.}"
+        [ -z "${5:-}" ] || printf '\n## Comments\n\n%s\n' "$5"
+    } >"$lproj/.scratch/$1/issues/$2-t.md"
+}
+fresh() { command rm -rf "$lproj/.scratch"; }
+save() { lg add -A; lg commit -qm "${1:-Tickets}" --allow-empty; }
+lrun() {
+    (PATH="$work/gh99:$PATH" && GH99_LOG="$work/gh99.log" && export PATH GH99_LOG &&
+        [ "$(command -v gh)" = "$work/gh99/gh" ] && sh "$state" "$lproj" </dev/null 2>&1)
+}
+save Init
+
+out=$(lrun)
+check "local: no .scratch is an empty tracker, read" "Local Markdown, read" "$(line_of "$out" tracker)"
+check "local: no .scratch, nothing in motion" "7 nothing in motion" "$(next "$out")"
+
+# Two feature folders, ranked by priority line, then folder, then NN.
+ticket api 01 'Status: ready-for-agent' 'Priority: Low'
+ticket api 02 'Status: ready-for-agent' '**Priority: High.** First.'
+ticket api 03 'Status: ready-for-human' '**Priority: Medium.** Hand.'
+ticket web 01 'Status: ready-for-agent' '**Priority: High.** Second.'
+ticket web 02 'Status: ready-for-human'
+ticket web 03 'Status: needs-triage'
+ticket web 04 'Status: ready-for-agent
+Blocked by: 02'
+printf 'A loose note, no Status line.\n' >"$lproj/.scratch/note.md"
+save
+out=$(lrun)
+check "local: tracker read" "Local Markdown, read" "$(line_of "$out" tracker)"
+check "local: issues line" "0 unlabelled, 1 needs-triage, 0 needs-info (replied: not read), 4 ready-for-agent, 2 ready-for-human, 0 wayfinder:map" "$(line_of "$out" issues)"
+check "local: ready in priority, folder, NN order" "api#02 t2; web#01 t1; api#01 t1" "$(line_of "$out" 'ready, blockers closed')"
+check "local: by hand in priority, folder, NN order" "api#03 t3 (Medium); web#02 t2" "$(line_of "$out" 'by hand, blockers closed')"
+check "local: next" "2 /implement api#02 (you type it; user-invoked): api#02 t2" "$(next "$out")"
+check "local: runner-up" "3 /triage (you type it; user-invoked): 0 unlabelled, 1 needs-triage, replied needs-info: none" "$(runner "$out")"
+check "local: the needs-info reply read is skipped with a note" "needs-info replies are not read on Local Markdown, since its comments record no author" "$(line_of "$out" note)"
+check "local: what a ready ticket unblocks" "none" "$(line_of "$out" unblocks)"
+check "local: no supervise offer yet" "not offered: /supervise does not run on a Local Markdown tracker yet" "$(sup "$out")"
+check "local: no unread line when all is read" "" "$(line_of "$out" unread)"
+check "local: no PR line" "" "$(line_of "$out" 'open PRs from this repo')"
+
+# One folder and a GitHub tracker holding the same tickets print the same
+# case lines, ids aside, and the parked-without-a-state line on both (#145).
+fresh
+ticket solo 01 'Status: ready-for-agent' '**Priority: High.** First.'
+ticket solo 02 'Status: ready-for-agent
+Blocked by: 01'
+ticket solo 03 'Status: ready-for-human' '**Priority: Medium.** Hand.'
+ticket solo 04 'Status: ready-for-human' 'Priority: Low'
+ticket solo 05 'Status: needs-triage
+Labels: parked'
+ticket solo 06 'Status: needs-triage'
+save
+local_out=$(lrun | sed 's/solo#0\([0-9]\)/#\1/g')
+saved_gh_issues=$(cat "$FAKE_GH/issues.json")
+issues "$(list "$(issue 1 ready-for-agent 0 '**Priority: High.** First.')" \
+    "$(issue 2 ready-for-agent 0 'Blocked by: #1')" \
+    "$(issue 3 ready-for-human 0 '**Priority: Medium.** Hand.')" \
+    "$(issue 4 ready-for-human 0 'Priority: Low')" \
+    "$(issue 5 needs-triage,parked)" "$(issue 6 needs-triage)")"
+prs '[]'
+gh_out=$(run)
+issues "$saved_gh_issues"
+check "parity: the GitHub side reads GitHub" "GitHub, reached" "$(line_of "$gh_out" tracker)"
+for l in next runner-up 'ready, blockers closed' 'by hand, blockers closed' unblocks 'parked without a state label'; do
+    check "parity: $l" "$(line_of "$gh_out" "$l")" "$(line_of "$local_out" "$l")"
+done
+check "parity: the parked ticket is named" "#5" "$(line_of "$local_out" 'parked without a state label')"
+
+# A Blocked by number resolves in the ticket's own folder: a closed blocker
+# clears it, an open one does not, and two folders' 03s are told apart.
+fresh
+ticket dep 01 'Status: ready-for-agent
+Blocked by: 03'
+ticket dep 03 'Status: ready-for-human'
+ticket dep2 01 'Status: ready-for-agent
+Blocked by: 03'
+ticket dep2 03 'Status: ready-for-human
+Closed: 2026-11-01 -- done'
+save
+out=$(lrun)
+check "blocked: an open blocker holds, a closed one in another folder clears" "dep2#01 t1" "$(line_of "$out" 'ready, blockers closed')"
+check "blocked: the open blocker unblocks its ticket" "none" "$(line_of "$out" unblocks)"
+ticket dep 03 'Status: ready-for-human
+Closed: 2026-11-02 -- done'
+save
+out=$(lrun)
+check "blocked: closing the blocker clears it" "dep#01 t1; dep2#01 t1" "$(line_of "$out" 'ready, blockers closed')"
+# A number with no file stays a blocker, named on the unread line.
+ticket dep 01 'Status: ready-for-agent
+Blocked by: 09'
+save
+out=$(lrun)
+check "blocked: a missing blocker holds" "dep2#01 t1" "$(line_of "$out" 'ready, blockers closed')"
+check "blocked: a missing blocker is unread" "dep#09 (named on the Blocked by: line of .scratch/dep/issues/01-t.md, no such ticket)" "$(line_of "$out" unread)"
+
+# Wayfinder tickets: resolved clears a blocker, claimed is open and never a
+# step, and a Status that is no triage role is unread.
+fresh
+ticket way 01 'Type: task
+Status: resolved'
+ticket way 02 'Type: task
+Status: claimed'
+ticket way 03 'Status: ready-for-agent
+Blocked by: 01'
+ticket way 04 'Status: ready-for-agent
+Blocked by: 02'
+ticket way 05 'Status: someword'
+save
+out=$(lrun)
+check "wayfinder: resolved clears, claimed blocks" "way#03 t3" "$(line_of "$out" 'ready, blockers closed')"
+check "wayfinder: the step is the unblocked ticket" "2 /implement way#03 (you type it; user-invoked): way#03 t3" "$(next "$out")"
+check "wayfinder: claimed is never the runner-up" "7 nothing else in motion: $ideas" "$(runner "$out")"
+check "wayfinder: an unknown Status is unread with its path" ".scratch/way/issues/05-t.md (Status: someword)" "$(line_of "$out" unread)"
+
+# An in-motion parent's next child passes over a ready-for-human child when a
+# ready-for-agent one follows it, which stays on the by hand line.
+fresh
+ticket par 01 'Status: ready-for-human
+Labels: in-motion'
+ticket par 02 'Status: ready-for-human
+Part of: 01-t'
+ticket par 03 'Status: ready-for-agent
+Part of: 01-t'
+save
+out=$(lrun)
+check "parent: the ready-for-agent child goes first" \
+    "1 work in flight: in motion par#01 t1; next child par#03 (ready-for-agent, /implement par#03, you type it; user-invoked): t3" "$(next "$out")"
+check "parent: the passed-over child stays by hand" "par#02 t2" "$(line_of "$out" 'by hand, blockers closed')"
+ticket par 03 'Status: ready-for-agent
+Part of: 01-t
+Blocked by: 02'
+save
+out=$(lrun)
+check "parent: with no free ready-for-agent child after it, the hand child is next" \
+    "1 work in flight: in motion par#01 t1; next child par#02 (ready-for-human, by hand): t2" "$(next "$out")"
+
+# A park comment skips its ticket until a later comment that is not a run
+# record follows it.
+fresh
+park='**2026-11-01.** **Parked.** A or B?'
+record='**2026-11-02.** **Supervised run of pk#01.**
+
+- outcome: no commits after abc1234'
+ticket pk 01 'Status: ready-for-agent' 'Body.' "$park"
+save
+out=$(lrun)
+check "park: a park comment skips the ticket" "none" "$(line_of "$out" 'ready, blockers closed')"
+check "park: named as awaiting reply" "pk#01 t1" "$(line_of "$out" 'parked, awaiting reply')"
+ticket pk 01 'Status: ready-for-agent' 'Body.' "$park
+
+$record"
+save
+out=$(lrun)
+check "park: a run record after it keeps it skipped" "none" "$(line_of "$out" 'ready, blockers closed')"
+ticket pk 01 'Status: ready-for-agent' 'Body.' "$park
+
+$record
+
+**2026-11-03.** A."
+save
+out=$(lrun)
+check "park: a plain comment after it brings it back" "pk#01 t1" "$(line_of "$out" 'ready, blockers closed')"
+
+# Case 4: an open ticket a commit message closes, NN's zeros optional.
+fresh
+ticket fix 01 'Status: ready-for-agent'
+save
+lg commit -q --allow-empty -m 'Mend it' -m 'Closes fix#1'
+out=$(lrun)
+check "closed by a commit: case 4" "4 tracker and repo disagree: close fix#01 t1 (a commit message closes it, and its file has no Closed: line)" "$(next "$out")"
+
+# A ticket file that cannot be read leaves the tracker unreached.
+fresh
+ticket bad 01 'Status: ready-for-agent'
+save
+chmod 000 "$lproj/.scratch/bad/issues/01-t.md"
+if [ -r "$lproj/.scratch/bad/issues/01-t.md" ]; then
+    pass=$((pass + 1)) # running as root: nothing is unreadable
+else
+    out=$(lrun)
+    check "unreadable: tracker unreached" "Local Markdown, UNREACHED: .scratch/bad/issues/01-t.md could not be read" "$(line_of "$out" tracker)"
+fi
+chmod 644 "$lproj/.scratch/bad/issues/01-t.md"
+
+check "local: gh is never called" "" "$(command cat "$work/gh99.log")"
+
 # --- label strings from triage-labels.md ------------------------------------
 sed 's/^\(| `ready-for-agent` *| \)`ready-for-agent`/\1`AFK`/' "$root/docs/agents/triage-labels.md" >"$proj/docs/agents/triage-labels.md"
 g commit -qam 'Map ready-for-agent to AFK'

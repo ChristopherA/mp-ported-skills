@@ -35,3 +35,12 @@ park_line_sed='/^[`* ]*Parked:/{s/^[`* ]*Parked: *//;s/[`* ]*$//;p;}'
 # strips it, or null.
 park_question_def='def park_question: [splits("\n") | select(test("^[`* ]*Parked:"))] | last
     | if . == null then null else sub("^[`* ]*Parked: *"; "") | sub("[`* ]*$"; "") end;'
+
+# park_local_def: jq defs for a Local Markdown comment block (#233), the text
+# from its `**YYYY-MM-DD.**` line to the next. `local_parked` is true for a
+# park comment, which opens `**YYYY-MM-DD.** **Parked.**`; `local_run_record`
+# for a run record, which opens `**YYYY-MM-DD.** **Supervised run of <id>.**`
+# or `**Hand run of <id>.**`. A comment holds no `#`-heading there, since a
+# `##` heading would end the file's `## Comments` section.
+park_local_def='def local_parked: test("^\\*\\*[0-9]{4}-[0-9]{2}-[0-9]{2}\\.\\*\\* +\\*\\*Parked\\.\\*\\*");
+    def local_run_record: test("^\\*\\*[0-9]{4}-[0-9]{2}-[0-9]{2}\\.\\*\\* +\\*\\*(Supervised|Hand) run of [^*]+\\.\\*\\*");'
