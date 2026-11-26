@@ -58,6 +58,16 @@ check "move 1 reads the ticket's parent" yes \
 check "an in-motion parent keeps its label" yes \
     "$(contains "$capturing" "When the parent is labelled \`in-motion\`, change no label")"
 
+# A ticket the session deferred is parked, not labelled in-motion (#201).
+check "a deferred ticket is not labelled in-motion" yes \
+    "$(contains "$capturing" "When this session deferred the ticket")"
+check "a deferred ticket is offered parked with a trigger comment" yes \
+    "$(contains "$capturing" "offer \`parked\` with a trigger comment in one AskUserQuestion")"
+check "unattended, the park is an unposted item" yes \
+    "$(contains "$capturing" "Unattended, list the park as an unposted item")"
+check "a ticket left mid-work still gets in-motion" yes \
+    "$(contains "$capturing" "A ticket left mid-work, not deferred, takes the route below")"
+
 # A ticket filed under a parent: blockers from what the session reasoned,
 # a placement asked with the filing, and no reorder unattended (#124).
 check "the new-ticket routes point at placing" yes \
