@@ -323,21 +323,21 @@ local_rows_def='
           | map({w: ., key: "\($x.slug)#\(nnum)"})
           | map(.key as $key | . + {id: ($ids[$key] // "\($x.slug)#\(.w)"), missing: ($ids | has($key) | not)})) as $bl
        | (($x.h["Part of"] // "") | (first(capture("^\\s*0*(?<d>[0-9]+)")) // null)
-          | if . == null then null else "\($x.slug)#\(.d)" end) as $pk
+          | if . == null then null else "\($x.slug)#\(.d)" end) as $partof
        | {id: $id,
           closed: (($x.h | has("Closed")) or ($ty != null and $s == "resolved")),
           bad: (if $s == null then "\($x.path) (no Status: line)"
                 elif ($roles | has($s)) or ($ty != null and ($s == "claimed" or $s == "resolved")) then null
                 else "\($x.path) (Status: \($s))" end),
           missing: [$bl[] | select(.missing) | "\(.id) (named on the Blocked by: line of \($x.path), no such ticket)"]
-                   + (if $pk != null and ($ids | has($pk) | not) then ["\($x.path) (Part of: \($x.h["Part of"]) names no ticket in its folder)"] else [] end),
+                   + (if $partof != null and ($ids | has($partof) | not) then ["\($x.path) (Part of: \($x.h["Part of"]) names no ticket in its folder)"] else [] end),
           missing_ids: [$bl[] | select(.missing) | .id],
           row: ({n: $id, k: "\($x.slug)#\($x.nn)", t: $x.t, c: ($x.cs | length),
                  l: ((($x.h.Labels // "") | split(",") | map(sub("^\\s+"; "") | sub("\\s+$"; "")) | map(select(. != "")))
                      + (if $s != null and ($roles | has($s)) then [$roles[$s]] else [] end)
                      + (if $ty != null then ["wayfinder:\($ty | ascii_downcase)"] else [] end)),
                  dep: 0, line: [$bl[].id], p: ({body: $x.body} | priority),
-                 parent: (if $pk != null then $ids[$pk] else null end),
+                 parent: (if $partof != null then $ids[$partof] else null end),
                  slug: $x.slug, nn: $x.nn, path: $x.path,
                  lp: ($x.cs | map(select(local_run_record | not)) | last // "" | local_parked)}
                 | .role = role_of($ta; $th; $ti; $tr; $tw))}] as $all
@@ -667,7 +667,7 @@ gather() {
             map("\(.n | ref) \(.t)" + (if .p then " (\(.p))" else "" end)) | join("; ")')
         # The top two, one per line: the second is the runner-up when case 6 wins.
         hand_steps=$(printf '%s' "$hand_rows" | jq -r "$ref_def"'
-            .[:2][] | "6 by hand" + (if .p then " (\(.p))" else "" end) + ": #\(.n) \(.t)"')
+            .[:2][] | "6 by hand" + (if .p then " (\(.p))" else "" end) + ": \(.n | ref) \(.t)"')
 
         # Ready-for-human tickets a session left in motion: capturing labels the
         # one it worked on, which git cannot see. Not already fixed.
@@ -737,14 +737,12 @@ gather() {
     else
         [ -n "$pick" ] && add_case "2 /implement ${pick%% *} $you_type: $pick"
         if [ "$n_unl" -gt 0 ] || [ "$n_triage" -gt 0 ] || [ -n "$replied" ]; then
-            add_case "3 /triage $you_type: $n_unl unlabelled, $n_triage $t_triage, replied $t_info: ${replied:-none}"
+            add_case "3 /triage $you_type: $n_unl unlabelled, $n_triage $t_triage, replied $t_info: $replied_shown"
         fi
         # The open list can lag a push that closed the ticket by a few seconds.
-        if [ $tracker = local ]; then
-            [ -n "$stale" ] && add_case "4 tracker and repo disagree: close $stale (a commit message closes it, and its file has no Closed: line)"
-        else
-            [ -n "$stale" ] && add_case "4 tracker and repo disagree: close $stale (as of the last read: confirm with gh issue view first)"
-        fi
+        stale_why="as of the last read: confirm with gh issue view first"
+        [ $tracker = local ] && stale_why="a commit message closes it, and its file has no Closed: line"
+        [ -n "$stale" ] && add_case "4 tracker and repo disagree: close $stale ($stale_why)"
         [ "$n_map" -gt 0 ] && add_case "5 /wayfinder $you_type: $maps"
         [ -n "$hand_steps" ] && add_case "$hand_steps"
         if [ -n "$cases" ]; then add_case "7 nothing else in motion: $ideas"

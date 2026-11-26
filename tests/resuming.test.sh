@@ -1373,7 +1373,7 @@ check "local: issues line" "0 unlabelled, 1 needs-triage, 0 needs-info (replied:
 check "local: ready in priority, folder, NN order" "api#02 t2; web#01 t1; api#01 t1" "$(line_of "$out" 'ready, blockers closed')"
 check "local: by hand in priority, folder, NN order" "api#03 t3 (Medium); web#02 t2" "$(line_of "$out" 'by hand, blockers closed')"
 check "local: next" "2 /implement api#02 (you type it; user-invoked): api#02 t2" "$(next "$out")"
-check "local: runner-up" "3 /triage (you type it; user-invoked): 0 unlabelled, 1 needs-triage, replied needs-info: none" "$(runner "$out")"
+check "local: runner-up, with no reply read" "3 /triage (you type it; user-invoked): 0 unlabelled, 1 needs-triage, replied needs-info: not read" "$(runner "$out")"
 check "local: the needs-info reply read is skipped with a note" "needs-info replies are not read on Local Markdown, since its comments record no author" "$(line_of "$out" note)"
 check "local: what a ready ticket unblocks" "none" "$(line_of "$out" unblocks)"
 check "local: no supervise offer yet" "not offered: /supervise does not run on a Local Markdown tracker yet" "$(sup "$out")"
@@ -1392,7 +1392,8 @@ ticket solo 05 'Status: needs-triage
 Labels: parked'
 ticket solo 06 'Status: needs-triage'
 save
-local_out=$(lrun | sed 's/solo#0\([0-9]\)/#\1/g')
+# Ids aside, and the reply read, which Local Markdown skips by design.
+local_out=$(lrun | sed -e 's/solo#0\([0-9]\)/#\1/g' -e 's/replied: not read/replied: none/' -e 's/replied needs-info: not read/replied needs-info: none/')
 saved_gh_issues=$(cat "$FAKE_GH/issues.json")
 issues "$(list "$(issue 1 ready-for-agent 0 '**Priority: High.** First.')" \
     "$(issue 2 ready-for-agent 0 'Blocked by: #1')" \
@@ -1403,10 +1404,19 @@ prs '[]'
 gh_out=$(run)
 issues "$saved_gh_issues"
 check "parity: the GitHub side reads GitHub" "GitHub, reached" "$(line_of "$gh_out" tracker)"
-for l in next runner-up 'ready, blockers closed' 'by hand, blockers closed' unblocks 'parked without a state label'; do
+for l in issues next runner-up 'ready, blockers closed' 'by hand, blockers closed' unblocks 'parked without a state label'; do
     check "parity: $l" "$(line_of "$gh_out" "$l")" "$(line_of "$local_out" "$l")"
 done
 check "parity: the parked ticket is named" "#5" "$(line_of "$local_out" 'parked without a state label')"
+
+# Case 6 names a Local Markdown id as the other cases do.
+fresh
+ticket hand 01 'Status: ready-for-human' '**Priority: High.** Now.'
+ticket hand 02 'Status: ready-for-human'
+save
+out=$(lrun)
+check "local: case 6 names the id" "6 by hand (High): hand#01 t1" "$(next "$out")"
+check "local: case 6's runner-up" "6 by hand: hand#02 t2" "$(runner "$out")"
 
 # A Blocked by number resolves in the ticket's own folder: a closed blocker
 # clears it, an open one does not, and two folders' 03s are told apart.
