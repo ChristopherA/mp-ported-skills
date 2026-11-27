@@ -55,13 +55,14 @@ prof="$work/prof"; mkdir -p "$prof"
 
 check "absent: no copy yet" "absent" "$(lib "$v1" "$prof" sl_state status-line.sh)"
 
-lib "$v1" "$prof" sl_write status-line.sh status-line-base.sh
+lib "$v1" "$prof" sl_write status-line.sh status-line-base.sh session-tag.sh
 check "write: copy made" "same" "$(same "$v1/scripts/status-line.sh" "$prof/scripts/status-line.sh")"
 check "write: in sync" "in-sync" "$(lib "$v1" "$prof" sl_state status-line.sh)"
 check "write: base in sync" "in-sync" "$(lib "$v1" "$prof" sl_state status-line-base.sh)"
 check "write: stamp names the release" "plugin: mp-ported-skills 1.0.0" "$(sed -n 1p "$prof/scripts/status-line.source")"
 check "write: stamp commit unknown outside a checkout" "commit: unknown" "$(sed -n 2p "$prof/scripts/status-line.source")"
-check "write: stamp records each file" "status-line.sh status-line-base.sh" \
+check "write: tag helper in sync" "in-sync" "$(lib "$v1" "$prof" sl_state session-tag.sh)"
+check "write: stamp records each file" "status-line.sh status-line-base.sh session-tag.sh" \
     "$(awk 'NR > 3 { printf "%s%s", (NR > 4 ? " " : ""), $1 }' "$prof/scripts/status-line.source")"
 
 # A later release whose status-line.sh changed; its base did not.

@@ -12,7 +12,9 @@
 #   unordered the stamp names a release that cannot be ordered against this
 #             plugin's (a pre-release, say): kept, and one line points to
 #             /setup-mp-ported-skills, which replaces it on a yes
-#   in-sync, absent   nothing
+#   new       absent, with no hash in the stamp: a file the copy gained in a
+#             later release, so copied in, and the stamp rewritten
+#   in-sync, or absent with a hash in the stamp   nothing
 # The profile is $CLAUDE_CONFIG_DIR, else ~/.claude; the plugin is
 # $CLAUDE_PLUGIN_ROOT. Without jq, or with anything else amiss, it does
 # nothing: it prints only that one line, and always exits 0, so it never
@@ -31,6 +33,7 @@ for f in $SL_FILES; do
     behind) to_copy="$to_copy $f" ;;
     modified) edited="$edited, scripts/$f" ;;
     unordered) unordered=1 ;;
+    absent) [ -n "$(sl_stamped "$f")" ] || [ "$(sl_order)" = later ] || to_copy="$to_copy $f" ;;
     esac
 done
 

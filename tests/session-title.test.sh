@@ -147,6 +147,15 @@ sl=$(printf '{"workspace":{"project_dir":"%s"},"context_window":{"used_percentag
 t=$(title startup "$repo")      # <repo> (<tag>) » <host>
 t_host=${t##* » }; t_tag=${t##*(}; t_tag=${t_tag%%)*}
 check "host and profile match the status line" "${sl%% » *}" "$t_host · $t_tag"
+# With a tag file, both show its tag.
+printf 'mp\n' >"$CLAUDE_CONFIG_DIR/session-tag"
+sl=$(printf '{"workspace":{"project_dir":"%s"},"context_window":{"used_percentage":4,"context_window_size":1000000}}' "$repo" \
+    | sh "$CLAUDE_PLUGIN_ROOT/scripts/status-line.sh" | sed -n 1p)
+t=$(title startup "$repo")
+t_host=${t##* » }; t_tag=${t##*(}; t_tag=${t_tag%%)*}
+check "tag file: the tag is the file's" "mp" "$t_tag"
+check "tag file: host and profile match the status line" "${sl%% » *}" "$t_host · $t_tag"
+command rm -f "$CLAUDE_CONFIG_DIR/session-tag"
 
 # The matcher Claude Code applies before the script's own check.
 check "matcher: startup, clear and fork only" "startup|clear|fork" "$(jq -r "$entry | .matcher" "$hooks")"

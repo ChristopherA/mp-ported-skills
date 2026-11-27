@@ -18,8 +18,10 @@
 # Wraps status-line-base.sh, an unmodified copy of claude-workstream-kit's
 # .claude/scripts/status-line.sh (source below). The base renders line 1 and
 # writes <dir>/claude-<session_id>-context.json on every update. This wrapper
-# adds the machine and the profile (from CLAUDE_CONFIG_DIR), so an empty or
-# missing profile marker shows as the wrong name rather than passing silently,
+# adds the machine and the profile's session tag (session-tag.sh beside it:
+# the first line of $CLAUDE_CONFIG_DIR/session-tag, else the profile folder's
+# name), so an empty or missing profile marker shows as the wrong name rather
+# than passing silently,
 # and replaces the base's line 2: the base colours by share of the usable
 # window, which on a 1M window stays green long after a session has left the
 # ~150k-token smart zone.
@@ -123,9 +125,15 @@ input=$(cat)
 [ -n "$input" ] || exit 0
 
 host=$(hostname -s 2>/dev/null) || host=""
-profile=$(basename "${CLAUDE_CONFIG_DIR:-$HOME/.claude}")
-profile=${profile#.claude-}
-[ "$profile" = ".claude" ] && profile=default
+# The profile slot is the session tag, as the session title shows it. A copy
+# missing the helper beside it names the profile from the folder, as before.
+if [ -f "$here/session-tag.sh" ] && . "$here/session-tag.sh" 2>/dev/null; then
+    profile=$(session_tag "${CLAUDE_CONFIG_DIR:-$HOME/.claude}")
+else
+    profile=$(basename "${CLAUDE_CONFIG_DIR:-$HOME/.claude}")
+    profile=${profile#.claude-}
+    [ "$profile" = ".claude" ] && profile=default
+fi
 
 out=$(printf '%s' "$input" | sh "$base")
 line1=$(printf '%s\n' "$out" | sed -n 1p | sed 's/ » none$//')

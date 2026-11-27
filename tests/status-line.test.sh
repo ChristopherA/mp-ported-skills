@@ -86,8 +86,28 @@ out=$(payload 0 1000000 | sh "$scripts/status-line.sh")
 check "no usage yet: empty line 2" "" "$(printf '%s\n' "$out" | sed -n 2p)"
 out=$(printf '' | sh "$scripts/status-line.sh")
 check "empty stdin: nothing" "" "$out"
-out=$(payload 4 1000000 | CLAUDE_CONFIG_DIR="$HOME/.claude" sh "$scripts/status-line.sh" | sed -n 1p)
+mkdir -p "$work/home/.claude"
+out=$(payload 4 1000000 | CLAUDE_CONFIG_DIR="$work/home/.claude" sh "$scripts/status-line.sh" | sed -n 1p)
 check "default profile name" "$host · default » proj » feature-x" "$out"
+
+# The profile slot shows the session tag, as the title does: the session-tag
+# file's first line, else the profile's name.
+line1() { payload 4 1000000 | sh "${1:-$scripts}/status-line.sh" | sed -n 1p; }
+printf 'mp\nsecond line\n' >"$CLAUDE_CONFIG_DIR/session-tag"
+check "tag: the file's first line" "$host · mp » proj » feature-x" "$(line1)"
+printf '  mp  \n' >"$CLAUDE_CONFIG_DIR/session-tag"
+check "tag: spaces around it trimmed" "$host · mp » proj » feature-x" "$(line1)"
+: >"$CLAUDE_CONFIG_DIR/session-tag"
+check "tag: an empty file falls back to the profile" "$host · testprof » proj » feature-x" "$(line1)"
+command rm -f "$CLAUDE_CONFIG_DIR/session-tag"
+check "tag: no file, the profile" "$host · testprof » proj » feature-x" "$(line1)"
+# A copy without the tag helper beside it still names the profile.
+mkdir -p "$work/nohelper"
+command cp -f "$scripts/status-line.sh" "$scripts/status-line-base.sh" "$work/nohelper/"
+printf 'mp\n' >"$CLAUDE_CONFIG_DIR/session-tag"
+out=$(payload 4 1000000 | sh "$work/nohelper/status-line.sh" 2>&1 | sed -n 1p)
+check "tag: no helper, the profile" "$host · testprof » proj » feature-x" "$out"
+command rm -f "$CLAUDE_CONFIG_DIR/session-tag"
 
 # --- line 1 with session titles on ----------------------------------------
 # A repo whose default branch is main, as origin/HEAD says.

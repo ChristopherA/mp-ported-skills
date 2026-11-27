@@ -127,6 +127,7 @@ check "sl on: exit 0" "0" "$rc"
 check "sl on: statusLine set" "$sl_cmd" "$(jq -r .statusLine.command "$p/settings.json")"
 check "sl on: copy made" "" "$(cmp "$v1/scripts/status-line.sh" "$p/scripts/status-line.sh" 2>&1)"
 check "sl on: base copied" "" "$(cmp "$v1/scripts/status-line-base.sh" "$p/scripts/status-line-base.sh" 2>&1)"
+check "sl on: tag helper copied" "" "$(cmp "$v1/scripts/session-tag.sh" "$p/scripts/session-tag.sh" 2>&1)"
 check "sl on: stamped" "plugin: mp-ported-skills 1.0.0" "$(sed -n 1p "$p/scripts/status-line.source")"
 setup "$v1" "$p" report
 check "sl on: reported" "on" "$(feature status-line)"

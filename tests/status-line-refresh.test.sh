@@ -51,7 +51,7 @@ printf '# changed in 1.1.0\n' >> "$v2/scripts/status-line.sh"
 install_copy() { # <plugin-root> <profile>: a stamped copy, as /setup-mp-ported-skills makes
     mkdir -p "$2"
     (. "$1/scripts/status-line-copy.sh" && sl_init "$1" "$2" \
-        && sl_write status-line.sh status-line-base.sh) </dev/null
+        && sl_write status-line.sh status-line-base.sh session-tag.sh) </dev/null
 }
 # hook <plugin-root> <profile>: run the hook; its stdout in $out, its exit
 # status in $rc, its stderr in $work/stderr.
@@ -81,6 +81,23 @@ check "behind: stamp rewritten" "1.1.0" "$(stamp_version "$p")"
 check "behind: now in sync" "in-sync" \
     "$( (. "$v2/scripts/status-line-copy.sh" && sl_init "$v2" "$p" && sl_state status-line.sh) </dev/null)"
 check "behind: nothing on stderr" "" "$(cat "$work/stderr")"
+
+# A file the copy gained in a later release: an install from before it has
+# neither the file nor a stamp line for it, and the hook copies it in.
+p="$work/newfile"; install_copy "$v1" "$p"
+command rm -f "$p/scripts/session-tag.sh"
+grep -v '^session-tag\.sh ' "$p/scripts/status-line.source" >"$p/s" && command mv -f "$p/s" "$p/scripts/status-line.source"
+hook "$v2" "$p"
+check "new file: no output" "" "$out"
+check "new file: exit 0" "0" "$rc"
+check "new file: copied" "" "$(cmp "$v2/scripts/session-tag.sh" "$p/scripts/session-tag.sh" 2>&1)"
+check "new file: stamped" "1" "$(grep -c '^session-tag\.sh [0-9a-f]' "$p/scripts/status-line.source")"
+# Alone, with the rest in sync, it is copied too.
+p="$work/newonly"; install_copy "$v2" "$p"
+command rm -f "$p/scripts/session-tag.sh"
+grep -v '^session-tag\.sh ' "$p/scripts/status-line.source" >"$p/s" && command mv -f "$p/s" "$p/scripts/status-line.source"
+hook "$v2" "$p"
+check "new file alone: copied" "" "$(cmp "$v2/scripts/session-tag.sh" "$p/scripts/session-tag.sh" 2>&1)"
 
 # Modified: untouched, and exactly one line pointing to the setup skill.
 p="$work/modified"; install_copy "$v1" "$p"

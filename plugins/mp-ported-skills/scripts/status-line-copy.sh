@@ -9,8 +9,9 @@
 #                              # refused over a later release, and over an
 #                              # unordered one without --force
 #
-# A profile's statusLine runs its own copy of status-line.sh and
-# status-line-base.sh, in <profile>/scripts/, because settings cannot name a
+# A profile's statusLine runs its own copy of status-line.sh,
+# status-line-base.sh and the session-tag.sh helper status-line.sh sources,
+# in <profile>/scripts/, because settings cannot name a
 # plugin's cache path (docs/adr/0001). Copies are stamped in
 # <profile>/scripts/status-line.source with the plugin version, its commit and
 # each file's sha256 as installed; the stamp is how a later run tells "behind"
@@ -33,7 +34,7 @@ sl_sha() {
 # plugin's version.
 sl_init() {
     command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required" >&2; return 2; }
-    SL_FILES="status-line.sh status-line-base.sh"
+    SL_FILES="status-line.sh status-line-base.sh session-tag.sh"
     SL_SRC="$1/scripts"
     SL_DEST="${2%/}/scripts"
     SL_STAMP="$SL_DEST/status-line.source"

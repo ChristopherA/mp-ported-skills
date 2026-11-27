@@ -4,9 +4,11 @@
 #
 # The tag is the first line of <config dir>/session-tag, spaces around it
 # trimmed, when that line is not empty. Otherwise it is the config folder's
-# name without its `.claude-` prefix, as the status line names the profile,
-# and `default` for ~/.claude itself. Used by session-title.sh and supervise's
-# launch.sh, so a session and the workers it launches carry the same tag.
+# name without its `.claude-` prefix, and `default` for ~/.claude itself.
+# Used by session-title.sh, status-line.sh (line 1's profile slot) and
+# supervise's launch.sh, so a session's title, its status line and the workers
+# it launches carry the same tag. The status line's copy in a profile carries
+# a copy of this file (status-line-copy.sh's SL_FILES).
 
 session_tag() { # <config dir>
     session_tag_line=""
