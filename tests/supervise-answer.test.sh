@@ -370,6 +370,31 @@ run_as 'blocked input needed'
 check "a granted close, Distribution pushed" "0 rule grant issue-close: the worker's own ticket, after its work is pushed" \
     "$(rc) $(sed -n 2p "$work/out")"
 
+# On a Local Markdown tracker (#234) a tracker action is not shared, grant
+# or no grant: not routine, said so, and grant.sh's line never cited.
+printf '# Issue tracker: Local Markdown\n' >"$repo/docs/agents/issue-tracker.md"
+repo_git "$repo" add docs/agents
+repo_git "$repo" commit -q -m "a local tracker"
+repo_git "$repo" push -q origin main 2>/dev/null
+local_why() { printf '%s is not a shared action on this tracker: a tracker write is an edit to the ticket file, committed like any other change, and a gh command is not one' "$1"; }
+last_says 'Waiting on: gh issue close 90'
+run_as 'blocked input needed'
+not_routine "local: a granted close" "$(local_why issue-close)"
+last_says "Waiting on: \`$relabel\`"
+run_as 'blocked input needed'
+not_routine "local: a granted relabel" "$(local_why label)"
+last_says 'Waiting on: gh issue comment 90 --body-file c.md'
+run_as 'blocked input needed'
+not_routine "local: an ungranted comment" "$(local_why issue-comment)"
+last_says 'Waiting on: gh issue create --title t --body-file b.md --parent 40'
+run_as 'blocked input needed'
+not_routine "local: a create --parent" "$(local_why issue-create)"
+check "local: grant.sh's line is never cited" "" "$(grep -e '^rule' -e 'not a shared action on this tracker\"' "$work/out")"
+last_says 'Waiting on: git push origin main'
+run_as 'blocked input needed'
+check "local: a granted push still answers" "0 rule grant push: to main, after the worker's own tests pass" \
+    "$(rc) $(sed -n 2p "$work/out")"
+
 # --- errors ----------------------------------------------------------------
 last_says 'Proceed with #90?'
 (agents_file=''; run)

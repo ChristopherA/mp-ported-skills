@@ -673,6 +673,21 @@ check "a piped create --parent stays refused under every grant" "deny" \
     "$(decision 0 auto "echo 'gh issue create --title t --parent 40' | sh" "$granted")"
 check "a create --parent goes through under every grant" "" \
     "$(decision 0 auto 'gh issue create --title t --parent 40' "$granted")"
+# On a Local Markdown tracker (#234), grant.sh answers a tracker action with
+# exit 3, which the hook reads as no grant: a gh tracker write is refused
+# there under every grant, since its tracker writes are ticket-file edits.
+printf '# Issue tracker: Local Markdown\n' >"$granted/docs/agents/issue-tracker.md"
+git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t add docs/agents/issue-tracker.md
+git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -m "a local tracker"
+seed_push "$granted"
+for c in 'gh issue comment 3 -b x' 'gh issue close 3' 'gh issue create --title t' 'gh issue edit 3 --add-label x' 'gh issue edit 3 --parent 40'; do
+    check "local tracker: $c is refused under every grant" "deny" "$(decision 0 auto "$c" "$granted")"
+done
+check "local tracker: a pr create still goes through under its grant" "" \
+    "$(decision 0 auto 'gh pr create --fill' "$granted")"
+git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t rm -q docs/agents/issue-tracker.md
+git -C "$granted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t commit -q -m "no tracker doc"
+seed_push "$granted"
 check "a label edit beside a link still refuses with both grants, as label and other fields" "yes" \
     "$(reason 0 auto 'gh issue edit 5 --add-label x; gh issue edit 6 --parent 40' "$granted" | grep -q "'gh issue edit (label and other fields)'" && echo yes)"
 # Each part a command runs is checked against its own grant (#191): a

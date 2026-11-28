@@ -193,11 +193,25 @@ fi
 if [ "$OUTCOME" = pushed ]; then
     if [ "$APPROVED" = 1 ]; then
         echo "skip grant: --approved given, the maintainer approved the close"
-    elif cited=$(sh "$here/grant.sh" --dir "$DIR" --action issue-close </dev/null 2>/dev/null); then
-        ok "grant: $cited"
     else
-        bad "grant: the Project grants no issue-close; ask the maintainer, then run with --approved"
+        cited=$(sh "$here/grant.sh" --dir "$DIR" --action issue-close </dev/null 2>/dev/null)
+        grant_rc=$?
+        if [ "$grant_rc" = 3 ]; then
+            # A Local Markdown tracker (#234): the close is a ticket-file
+            # edit, no shared action, and grant.sh's line is no citation.
+            echo "skip grant: issue-close is not a shared action on this Local Markdown tracker, so it needs no grant or approval"
+        elif [ "$grant_rc" = 0 ]; then
+            ok "grant: $cited"
+        else
+            bad "grant: the Project grants no issue-close; ask the maintainer, then run with --approved"
+        fi
     fi
+fi
+# On a Local Markdown tracker the close is a ticket-file edit, which this
+# script does not make: refuse before any gh call reaches GitHub.
+. "$here/tracker.sh"
+if [ "$(tracker_backend "$DIR/docs/agents/issue-tracker.md")" = local ]; then
+    bad "tracker: $DIR's tracker is Local Markdown, where the close is an edit to the ticket file, and close.sh closes only GitHub issues; edit the ticket file and commit it"
 fi
 
 [ "$failed" = 0 ] || exit 2

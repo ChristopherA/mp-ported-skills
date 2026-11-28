@@ -38,8 +38,16 @@
 #                       or an issue-close grant waits on a Distribution
 #                       repo ahead of its upstream (#186; a note on stderr
 #                       names it)
+#   local: not a shared action on this tracker
+#                       attended or not, for a tracker action (issue-close,
+#                       issue-comment, issue-create, label, sub-issue) on a
+#                       Local Markdown tracker, as grant.sh answers it
+#                       (#234): the job is an edit to a ticket file,
+#                       committed with the capture's other work, so there is
+#                       nothing to ask or grant; push and distribution-push
+#                       answer as on GitHub
 #
-# Exits 0 for all three. Exits 1 on a usage error, or when grant.sh itself
+# Exits 0 for all four. Exits 1 on a usage error, or when grant.sh itself
 # fails (its stderr starts with Error, distinct from the "note: ... ignored"
 # it also prints on stderr for a grant that exists but is not committed on
 # origin); that stderr is passed through either way.
@@ -56,7 +64,7 @@ while [ $# -gt 0 ]; do
         --dir)    need_value "$@"; DIR="$2"; shift 2 ;;
         --help)
             printf 'Usage: before-clear.sh --action <push|distribution-push|pr-create|pr-merge|issue-close|issue-comment|issue-create|sub-issue|label|other> [--dir DIR]\n'
-            printf 'Prints attended, "granted: <citation>", or ungranted.\n'
+            printf 'Prints attended, "granted: <citation>", ungranted, or "local: not a shared action on this tracker".\n'
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
@@ -68,7 +76,13 @@ case "$ACTION" in
     *) fail "--action must be push, distribution-push, pr-create, pr-merge, issue-close, issue-comment, issue-create, sub-issue, label or other, not '$ACTION'" ;;
 esac
 
-if [ "${CLAUDE_CODE_SESSION_ATTENDED:-1}" != 0 ]; then
+attended=""
+[ "${CLAUDE_CODE_SESSION_ATTENDED:-1}" = 0 ] || attended=1
+tracker_action=""
+case "$ACTION" in issue-close | issue-comment | issue-create | label | sub-issue) tracker_action=1 ;; esac
+# Attended, only a tracker action reads the grants, for grant.sh's Local
+# Markdown answer (#234); a folder it cannot read still asks.
+if [ -n "$attended" ] && { [ -z "$tracker_action" ] || [ ! -d "$DIR" ]; }; then
     echo attended
     exit 0
 fi
@@ -82,7 +96,20 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 grant_sh="$SCRIPT_DIR/../../supervise/scripts/grant.sh"
 errs=$(mktemp) || fail "mktemp failed, so the grant cannot be read"
-if cited=$(sh "$grant_sh" --dir "$DIR" --action "$ACTION" 2>"$errs"); then
+cited=$(sh "$grant_sh" --dir "$DIR" --action "$ACTION" 2>"$errs")
+rc=$?
+if [ "$rc" = 3 ]; then
+    command cat "$errs" >&2
+    command rm -f "$errs"
+    printf '%s\n' "$cited"
+    exit 0
+fi
+if [ -n "$attended" ]; then
+    command rm -f "$errs"
+    echo attended
+    exit 0
+fi
+if [ "$rc" = 0 ]; then
     command cat "$errs" >&2
     command rm -f "$errs"
     # A granted close waits while the Project's Distribution repo is ahead

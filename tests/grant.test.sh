@@ -251,6 +251,77 @@ err=$(sh "$scripts/grant.sh" --dir "$norigin" --action push 2>&1 >/dev/null </de
 check "no origin remote: a local grant is still noted, not an error" \
     "note: docs/agents/supervision.md grants push on the working tree or current branch, not on the committed origin/main; ignored" "$err"
 
+# A Local Markdown tracker (#234): its tracker writes are ticket-file edits,
+# visible to nobody until a push, so a tracker action is no shared action
+# there. grant.sh says so with exit 3 and one line, granted or not; the
+# other actions answer as on GitHub. The backend is read where the grants
+# are, from origin's default branch.
+local_line="local: not a shared action on this tracker"
+lremote="$work/local.git"
+lrepo="$work/local"
+git init -q --bare "$lremote"
+git init -q -b main "$lrepo"
+repo_git "$lrepo" commit -q --allow-empty -m start
+repo_git "$lrepo" remote add origin "$lremote"
+commit_file "$lrepo" docs/agents/issue-tracker.md '# Issue tracker: Local Markdown
+
+There are no GitHub Issues for this repo: origin on GitHub is the upstream for the files.
+' "a local tracker"
+commit_file "$lrepo" docs/agents/supervision.md '## Grants
+
+- push: after tests
+- issue-comment
+' "grants"
+push_main "$lrepo"
+git -C "$lrepo" remote set-head origin main
+lgrant() { sh "$scripts/grant.sh" --dir "${2:-$lrepo}" --action "$1" </dev/null; } # <action> [dir]
+for action in issue-close issue-comment issue-create label sub-issue; do
+    out=$(lgrant "$action" 2>&1); rc=$?
+    check "local: $action is not shared" "3 $local_line" "$rc $out"
+done
+out=$(lgrant push); rc=$?
+check "local: push still cites its grant" "0 push: after tests" "$rc $out"
+for action in distribution-push pr-create pr-merge checked-push; do
+    out=$(lgrant "$action" 2>&1); rc=$?
+    check "local: $action ungranted as on GitHub" "1 " "$rc $out"
+done
+mkdir -p "$lrepo/sub"
+out=$(lgrant label "$lrepo/sub"); rc=$?
+check "local: a folder inside the repo reads the same backend" "3 $local_line" "$rc $out"
+
+# A working-tree tracker doc is not read while origin exists: a worker could
+# reach it without pushing, and on GitHub it would turn a gated close into
+# a free one.
+printf '# Issue tracker: Local Markdown\n' >"$repo/docs/agents/issue-tracker.md"
+out=$(grant issue-close 2>/dev/null); rc=$?
+check "github repo, local doc in the working tree only: answers as on GitHub" "1 " "$rc $out"
+repo_git "$repo" add docs/agents/issue-tracker.md
+repo_git "$repo" commit -q -m "local-only tracker change"
+out=$(grant issue-close 2>/dev/null); rc=$?
+check "github repo, local doc committed but not pushed: answers as on GitHub" "1 " "$rc $out"
+repo_git "$repo" reset -q --hard origin/main
+
+# A GitHub title on origin keeps the GitHub answers, a tracker grant included.
+commit_file "$lrepo" docs/agents/issue-tracker.md '# Issue tracker: GitHub
+' "back to GitHub"
+push_main "$lrepo"
+out=$(lgrant issue-comment); rc=$?
+check "github title: a tracker grant cites as before" "0 issue-comment" "$rc $out"
+out=$(lgrant label); rc=$?
+check "github title: an ungranted tracker action exits 1" "1 " "$rc $out"
+
+# With no origin remote there is nowhere to share to, and the working
+# tree's doc is read.
+nlocal="$work/no-origin-local"
+git init -q -b main "$nlocal"
+repo_git "$nlocal" commit -q --allow-empty -m start
+mkdir -p "$nlocal/docs/agents"
+printf '# Issue tracker: Local Markdown\n' >"$nlocal/docs/agents/issue-tracker.md"
+out=$(lgrant issue-create "$nlocal" 2>&1); rc=$?
+check "no origin, local doc in the working tree: not shared" "3 $local_line" "$rc $out"
+out=$(lgrant push "$nlocal" 2>&1); rc=$?
+check "no origin, local doc: push ungranted as before" "1 " "$rc $out"
+
 # Usage errors.
 for bad in "--dir $repo" "--action push" "--dir $repo --action bogus"; do
     # shellcheck disable=SC2086

@@ -1483,6 +1483,46 @@ check "launch checked-push: no push or comment form without those grants" "" \
 check "launch checked-push: without issue-comment and sub-issue, no park" "" \
     "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | grep '^Park ')"
 command rm -f "$(git -C "$checked" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
+# On a Local Markdown tracker (#234) a tracker action is not shared: the
+# grants text lists only the grants that still gate something, says a
+# tracker write is a commit, and never shows grant.sh's line as a grant.
+lgranted="$work/lgranted"
+git init -q --bare "$work/lgranted.git"
+git init -q -b main "$lgranted"
+lgranted_git() { git -C "$lgranted" -c commit.gpgsign=false -c user.name=t -c user.email=t@t "$@" >/dev/null 2>&1; }
+tracker_docs "$lgranted"
+echo '# Issue tracker: Local Markdown' >"$lgranted/docs/agents/issue-tracker.md"
+printf '# Supervision\n\n## Grants\n\n- push: to main, once tests pass\n- issue-comment: findings\n- sub-issue: under its parent\n' >"$lgranted/docs/agents/supervision.md"
+lgranted_git add docs
+lgranted_git commit -m grants
+lgranted_git remote add origin "$work/lgranted.git"
+lgranted_git push origin main
+lgranted_git remote set-head origin main
+local_commits="This Project's tracker is Local Markdown, so issue-close, issue-comment, issue-create, label and sub-issue are not shared actions here: a tracker write is an edit to a ticket file, committed like any other change and seen by nobody until git push, so make it and commit it without asking or waiting. A gh issue or gh api command is not a tracker write here, and no grant covers one."
+out=$(launch_in "$lgranted" --ticket 56 2>/dev/null); rc=$?
+grants_text=$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d')
+check "launch local: exit 0" "0 c2a368ee" "$rc $out"
+check "launch local: lists only the push grant" "- push: to main, once tests pass" \
+    "$(printf '%s\n' "$grants_text" | grep '^- ')"
+check "launch local: says tracker writes are commits" "$local_commits" \
+    "$(printf '%s\n' "$grants_text" | grep "^This Project's tracker is Local Markdown")"
+check "launch local: grant.sh's line is never a citation" "" \
+    "$(printf '%s\n' "$grants_text" | grep 'not a shared action on this tracker')"
+check "launch local: no comment form or park under grants that gate nothing" "" \
+    "$(printf '%s\n' "$grants_text" | grep -e '^Post a granted comment' -e '^Park ')"
+check "launch with grants on GitHub: no Local Markdown line" "" \
+    "$(launch_in "$checked" --ticket 56 2>/dev/null >/dev/null; sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | grep "^This Project's tracker")"
+command rm -f "$(git -C "$checked" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
+command rm -f "$(git -C "$lgranted" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
+# With no grant at all, the line follows the no-grants text.
+printf '# Supervision\n' >"$lgranted/docs/agents/supervision.md"
+lgranted_git commit -am 'no grants'
+lgranted_git push origin main
+launch_in "$lgranted" --ticket 56 >/dev/null 2>&1
+check "launch local, no grants: the line follows the no-grants text" "$(printf '%s\n' "$no_grants" | head -n 1)
+$local_commits" \
+    "$(sed -n '/^--append-system-prompt$/,/^--name$/p' "$fake/args" | sed '1d;$d' | sed -n 1,2p)"
+command rm -f "$(git -C "$lgranted" rev-parse --path-format=absolute --git-path mp-supervise-worker)"
 
 # --- release.sh --------------------------------------------------------------
 printf 'c2a368ee\ndistribution\n' >"$marker"
@@ -2190,6 +2230,8 @@ new_grant_repo() { # <folder var name> <grant file content> [dist path]: a repo 
     mkdir -p "$grepo/docs/agents"
     printf '%s' "$2" >"$grepo/docs/agents/supervision.md"
     [ -z "${3:-}" ] || printf '%s\n' "$3" >"$grepo/docs/agents/distribution-repo.md"
+    # grant_tracker, when set, is the issue-tracker.md title line (#234).
+    [ -z "${grant_tracker:-}" ] || printf '%s\n' "$grant_tracker" >"$grepo/docs/agents/issue-tracker.md"
     repo_git "$grepo" add docs/agents
     repo_git "$grepo" commit -q -m "grant"
     fixture_push "$grepo" main
@@ -2290,6 +2332,30 @@ command succeeded ungranted: gh issue -R o/r comment 104 --body x
 command succeeded ungranted: gh issue -R o/r comment 104 --edit-last
 command succeeded ungranted: gh issue create --title y --repo=o/r" \
     "$(sh "$scripts/actions.sh" --id c2a368ee --dir "$grepo4" --start "$gstart" </dev/null | grep '^command')"
+# On a Local Markdown tracker (#234) grant.sh answers a tracker action as
+# not shared, grant or no grant. A gh write there still went to GitHub, so
+# it stays ungranted, with a note saying why, and grant.sh's line is never
+# a citation.
+# The sub-issue checks below read grepo4, so its gstart is put back after.
+grepo4_start=$gstart
+grant_tracker='# Issue tracker: Local Markdown'
+new_grant_repo glocal '## Grants
+
+- issue-comment: findings for open tickets
+- issue-create
+'
+unset grant_tracker
+out=$(sh "$scripts/actions.sh" --id c2a368ee --dir "$glocal" --start "$gstart" </dev/null)
+gstart=$grepo4_start
+check "actions local: a tracker gh write stays ungranted" \
+    "command succeeded ungranted: gh issue comment 104 --body-file \"\$CLAUDE_JOB_DIR/tmp/c.md\"
+command succeeded ungranted: gh issue create --title \"x\" --body-file b.md --label ready-for-agent" \
+    "$(printf '%s\n' "$out" | grep '^command' | sed -n 1,2p)"
+check "actions local: grant.sh's line is never a citation" "" \
+    "$(printf '%s\n' "$out" | grep '^command.*granted (local')"
+check "actions local: a note says the action is not shared there" \
+    "note gh issue comment 104 --body-file \"\$CLAUDE_JOB_DIR/tmp/c.md\": issue-comment is not a shared action on this Local Markdown tracker, where a tracker write is a ticket-file edit; this gh write went to GitHub, and no grant covers it" \
+    "$(printf '%s\n' "$out" | grep '^note gh issue comment 104 --body-file')"
 
 # A capture's link of its ticket under the parent, and its reorder, cite the
 # sub-issue grant (#162); a removal of a sub-issue does not.

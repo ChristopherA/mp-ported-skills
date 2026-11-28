@@ -174,6 +174,42 @@ out=$(cd "$repo" && CLAUDE_CODE_SESSION_ATTENDED=0 sh "$script" --action push </
 check "default dir: exit 0" "0" "$rc"
 check "default dir: cites the action" "granted: push" "$out"
 
+# A Local Markdown tracker (#234): a tracker action prints grant.sh's line,
+# exit 0, attended or not, since there is nothing to ask or grant; push and
+# distribution-push answer as on GitHub.
+local_line="local: not a shared action on this tracker"
+lrepo="$work/local"
+git init -q --bare "$work/local.git"
+git init -q -b main "$lrepo"
+repo_git "$lrepo" commit -q --allow-empty -m start
+repo_git "$lrepo" remote add origin "$work/local.git"
+commit_file "$lrepo" docs/agents/issue-tracker.md '# Issue tracker: Local Markdown
+' "a local tracker"
+push_main "$lrepo"
+git -C "$lrepo" remote set-head origin main
+for action in issue-close issue-comment issue-create label sub-issue; do
+    for attended in 0 1 ''; do
+        out=$(bc "$attended" "$action" "$lrepo" 2>&1); rc=$?
+        check "local, attended '$attended', $action: not shared" "0 $local_line" "$rc $out"
+    done
+done
+out=$(bc 0 push "$lrepo" 2>&1); rc=$?
+check "local, no push grant: ungranted" "0 ungranted" "$rc $out"
+out=$(bc 0 distribution-push "$lrepo" 2>&1); rc=$?
+check "local, no distribution-push grant: ungranted" "0 ungranted" "$rc $out"
+check "local, attended push: still asks" "attended" "$(bc 1 push "$lrepo")"
+check "local, attended, not a checkout: still asks" "attended" "$(bc 1 issue-comment "$work/not-a-repo")"
+commit_file "$lrepo" docs/agents/supervision.md '## Grants
+
+- push: after tests
+- issue-close
+' "grant push"
+push_main "$lrepo"
+out=$(bc 0 push "$lrepo" 2>&1); rc=$?
+check "local, push granted: cites the grant" "0 granted: push: after tests" "$rc $out"
+out=$(bc 0 issue-close "$lrepo" 2>&1); rc=$?
+check "local, issue-close granted: still not shared" "0 $local_line" "$rc $out"
+
 # Usage errors.
 sh "$script" --action push --dir "$repo" --dir </dev/null >/dev/null 2>&1
 check "refuses: --dir with no value" "1" "$?"

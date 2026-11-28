@@ -237,8 +237,13 @@ case $kind in
         # A command can need two actions (gh issue create --parent; #218):
         # each must be granted, and the answer cites both.
         citation=""
+        # On a Local Markdown tracker grant.sh exits 3 for a tracker action
+        # (#234): no shared action to answer, and its line is no citation.
         for want in $action; do
-            if ! cite=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$want" </dev/null 2>"$errors"); then
+            cite=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$want" </dev/null 2>"$errors")
+            grant_rc=$?
+            [ "$grant_rc" != 3 ] || not_routine "$want is not a shared action on this tracker: a tracker write is an edit to the ticket file, committed like any other change, and a gh command is not one"
+            if [ "$grant_rc" != 0 ]; then
                 grep -q '^Error:' "$errors" && { printf 'not routine: grant.sh failed: %s\n' "$(grep '^Error:' "$errors" | head -n 1)"; exit 2; }
                 not_routine "no standing grant covers $want"
             fi

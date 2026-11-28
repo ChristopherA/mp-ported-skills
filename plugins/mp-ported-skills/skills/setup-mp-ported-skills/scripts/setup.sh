@@ -420,6 +420,13 @@ itself one by editing this file.
                       (--title, --body, ...), which no grant covers.
      No grant covers any other gh issue edit: --title, --body, an
      assignee, a milestone or a blocked-by link.
+     On a Local Markdown tracker (docs/agents/issue-tracker.md opening
+     `# Issue tracker: Local Markdown`), issue-close, issue-comment,
+     issue-create, sub-issue and label are not shared actions: a
+     tracker write there is an edit to a ticket file, committed and
+     seen by nobody until git push, so push and distribution-push are
+     the grants that gate it, and a gh issue or gh api tracker command
+     is refused under every grant (#234).
      No grant covers any other gh api write or a GraphQL mutation,
      addComment, createIssue, addSubIssue and a label write included.
      Example: `- push: release branches only`

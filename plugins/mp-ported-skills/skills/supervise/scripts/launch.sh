@@ -385,8 +385,10 @@ marker=$(marker_path "$DIR")
 [ -z "$DIST" ] || dist_marker=$(marker_path "$DIST")
 
 # The standing grants, each as grant.sh cites it, from its source alone.
-# grant.sh exits 1 both for "not granted" and for an error, so its stderr
-# tells them apart: an error stops the launch rather than reading as no
+# On a Local Markdown tracker grant.sh answers a tracker action with exit 3
+# (#234): the worker is told such a write is a commit, and the action is
+# not listed as a grant. grant.sh exits 1 both for "not granted" and for
+# an error, so its stderr tells them apart: an error stops the launch rather than reading as no
 # grant, and a note (a grant committed only locally) is passed on.
 errs=$(mktemp) || fail "mktemp failed, so the grants cannot be read; not launched"
 granted=""
@@ -394,10 +396,16 @@ push_granted=""
 checked_granted=""
 comment_granted=""
 sub_issue_granted=""
+local_tracker=""
 actions="push pr-create pr-merge issue-close issue-comment issue-create sub-issue label checked-push"
 [ -z "$DIST" ] || actions="$actions distribution-push"
 for action in $actions; do
-    cited=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$action" </dev/null 2>"$errs") &&
+    # Exit 3 (#234): a tracker action on a Local Markdown tracker is no
+    # shared action, and its line is no citation.
+    cited=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$action" </dev/null 2>"$errs")
+    rc=$?
+    [ "$rc" != 3 ] || local_tracker=1
+    [ "$rc" = 0 ] &&
         granted="$granted
 - $cited" && { [ "$action" != push ] || push_granted=1; } &&
         { [ "$action" != checked-push ] || checked_granted=1; } &&
@@ -437,6 +445,8 @@ Post a granted comment as \`gh issue comment N --body-file <file>\`, with the bo
 else
     GRANTS="You are a supervised worker, launched by /supervise. This Project grants no shared action: docs/agents/supervision.md, as committed on origin/$default, holds no standing grant."
 fi
+[ -z "$local_tracker" ] || GRANTS="$GRANTS
+This Project's tracker is Local Markdown, so issue-close, issue-comment, issue-create, label and sub-issue are not shared actions here: a tracker write is an edit to a ticket file, committed like any other change and seen by nobody until git push, so make it and commit it without asking or waiting. A gh issue or gh api command is not a tracker write here, and no grant covers one."
 GRANTS="$GRANTS
 A shared action no grant covers (git push, gh pr create, gh pr merge, gh issue close, gh issue comment, gh issue create, a gh api link or reorder of a sub-issue, a gh issue edit) is not yours to take: do not take it or try it. Finish and commit the rest of the work, then end your turn with one line naming the action you wait on, as \`Waiting on: git push origin $default\`."
 [ -z "$comment_granted" ] || [ -z "$sub_issue_granted" ] || GRANTS="$GRANTS

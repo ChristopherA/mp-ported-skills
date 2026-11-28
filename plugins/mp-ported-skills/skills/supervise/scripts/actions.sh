@@ -486,7 +486,10 @@ push_words() {
 # working tree or an unpushed commit -- ignored, since a worker can reach
 # either without the maintainer seeing it -- is surfaced as a `note` line
 # via note(), not swallowed, so a tampered or merely premature grant is
-# reported, not just quietly ignored. Called directly, never through
+# reported, not just quietly ignored. On a Local Markdown tracker, where
+# grant.sh answers a tracker action with exit 3 (#234), the command stays
+# ungranted, since a gh write still reaches GitHub, and a note names why.
+# Called directly, never through
 # $(...): note() mutates the shared $notes, and that mutation would be
 # lost if this ran in a command-substitution subshell.
 grant_label() {
@@ -496,8 +499,15 @@ grant_label() {
     for want in $1; do
         needs="$needs${needs:+ and }$want"
         err=$(mktemp)
-        if cite=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$want" 2>"$err") && [ -n "$cite" ]; then
+        cite=$(sh "$SCRIPT_DIR/grant.sh" --dir "$DIR" --action "$want" 2>"$err")
+        grant_rc=$?
+        if [ "$grant_rc" = 0 ] && [ -n "$cite" ]; then
             cites="$cites${cites:+; }$cite"
+        elif [ "$grant_rc" = 3 ]; then
+            # A Local Markdown tracker (#234): grant.sh's line is no
+            # citation, and a gh write there still reached GitHub.
+            missing="$missing${missing:+ and }$want"
+            note "${2:-a command}: $want is not a shared action on this Local Markdown tracker, where a tracker write is a ticket-file edit; this gh write went to GitHub, and no grant covers it"
         else
             missing="$missing${missing:+ and }$want"
             # grant.sh's own message already starts "note: "; note() adds
