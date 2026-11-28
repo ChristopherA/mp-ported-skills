@@ -11,7 +11,7 @@ Each caller handles the new status apart from a grant:
 - `before-clear.sh` prints the line, exit 0, attended or not, so `capturing` asks nothing about the job and treats it as neither granted nor refused.
 - `launch.sh` leaves the action out of the worker's grant list and adds a line saying tracker writes on this backend are commits it makes without asking.
 - `answer.sh` reports a worker waiting on such an action as not routine, naming it as not shared on this tracker.
-- `close.sh` skips its grant check with a line saying why. It then refuses to run `gh` on a Local Markdown Project, since the close there is a file edit, which #235 builds.
+- `close.sh` refuses every outcome on a Local Markdown Project with one `fail tracker` line, before any `gh` call, since the close there is a file edit, which #235 builds. It reads the backend only through `grant.sh`'s exit 3.
 - `actions.sh` keeps a `gh` tracker write `ungranted`, with a note: the command still wrote to GitHub, which is not this Project's tracker, and `finish.sh` raises the line to the maintainer.
 
 None of them shows the line as a citation.
@@ -28,4 +28,4 @@ The `deny-shared-actions.sh` hook, the classifier and the worker `gh` wrapper ar
 
 - `tests/grant.test.sh` covers each tracker action on a `local` fixture (exit 3 and the line), `push` still citing its grant, the other actions as on GitHub, a Local Markdown doc only in the working tree or an unpushed commit (ignored while `origin` exists), and a repo with no `origin`.
 - `tests/before-clear.test.sh` covers the line attended and unattended, and `push` both granted and not.
-- `tests/supervise.test.sh`, `tests/supervise-answer.test.sh` and `tests/supervise-close.test.sh` cover `launch.sh`'s grants text, `actions.sh`'s note, `answer.sh`'s not-routine reason and `close.sh`'s skip and refusal. `tests/deny-shared-actions.test.sh` pins the hook refusing granted `gh` tracker writes on a `local` fixture.
+- `tests/supervise.test.sh`, `tests/supervise-answer.test.sh` and `tests/supervise-close.test.sh` cover `launch.sh`'s grants text, `actions.sh`'s note, `answer.sh`'s not-routine reason and `close.sh`'s refusal. `tests/deny-shared-actions.test.sh` pins the hook refusing granted `gh` tracker writes on a `local` fixture.
