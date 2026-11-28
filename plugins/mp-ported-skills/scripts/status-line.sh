@@ -125,14 +125,17 @@ input=$(cat)
 [ -n "$input" ] || exit 0
 
 host=$(hostname -s 2>/dev/null) || host=""
-# The profile slot is the session tag, as the session title shows it. A copy
-# missing the helper beside it names the profile from the folder, as before.
-if [ -f "$here/session-tag.sh" ] && . "$here/session-tag.sh" 2>/dev/null; then
-    profile=$(session_tag "${CLAUDE_CONFIG_DIR:-$HOME/.claude}")
-else
-    profile=$(basename "${CLAUDE_CONFIG_DIR:-$HOME/.claude}")
-    profile=${profile#.claude-}
-    [ "$profile" = ".claude" ] && profile=default
+# The profile slot is the session tag, as the session title shows it. The
+# helper is sourced in a subshell, so one that is missing, fails to load or
+# prints nothing (a copy caught mid-update, a file of unknown origin) falls
+# back to the profile folder's name: session_tag's own fallback, kept in step
+# with session-tag.sh.
+cfg_dir=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+tag=$( { [ -f "$here/session-tag.sh" ] && . "$here/session-tag.sh" && session_tag "$cfg_dir"; } 2>/dev/null ) || tag=""
+if [ -z "$tag" ]; then
+    tag=$(basename "$cfg_dir")
+    tag=${tag#.claude-}
+    [ "$tag" = ".claude" ] && tag=default
 fi
 
 out=$(printf '%s' "$input" | sh "$base")
@@ -140,9 +143,9 @@ line1=$(printf '%s\n' "$out" | sed -n 1p | sed 's/ » none$//')
 
 if [ "${MP_SESSION_TITLE:-}" != 1 ]; then
     if [ -n "$line1" ]; then
-        printf '%s · %s » %s\n' "$host" "$profile" "$line1"
+        printf '%s · %s » %s\n' "$host" "$tag" "$line1"
     else
-        printf '%s · %s\n' "$host" "$profile"
+        printf '%s · %s\n' "$host" "$tag"
     fi
 elif ! command -v jq >/dev/null 2>&1; then
     # The base printed only "jq required"; pass it through.

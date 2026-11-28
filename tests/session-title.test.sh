@@ -59,7 +59,8 @@ check "subdirectory: the repo's name" "myrepo (testprof) » $host" "$(title star
 outside="$work/plainfolder"; mkdir -p "$outside"
 check "outside git: the folder's name, no branch" "plainfolder (testprof) » $host" \
     "$(GIT_CEILING_DIRECTORIES="$work" title startup "$outside")"
-check "default profile" "myrepo (default) » $host" "$(CLAUDE_CONFIG_DIR="$HOME/.claude" title startup "$repo")"
+mkdir -p "$work/home/.claude"
+check "default profile" "myrepo (default) » $host" "$(CLAUDE_CONFIG_DIR="$work/home/.claude" title startup "$repo")"
 check "profile without the .claude- prefix" "myrepo (config) » $host" \
     "$(mkdir -p "$work/config"; CLAUDE_CONFIG_DIR="$work/config" title startup "$repo")"
 

@@ -107,6 +107,15 @@ command cp -f "$scripts/status-line.sh" "$scripts/status-line-base.sh" "$work/no
 printf 'mp\n' >"$CLAUDE_CONFIG_DIR/session-tag"
 out=$(payload 4 1000000 | sh "$work/nohelper/status-line.sh" 2>&1 | sed -n 1p)
 check "tag: no helper, the profile" "$host · testprof » proj » feature-x" "$out"
+# A helper that fails to load, or defines no session_tag, still names the
+# profile and leaves line 2 in place.
+printf 'if then\n' >"$work/nohelper/session-tag.sh"
+out=$(payload 4 1000000 | sh "$work/nohelper/status-line.sh" 2>&1)
+check "tag: broken helper, the profile" "$host · testprof » proj » feature-x" "$(printf '%s\n' "$out" | sed -n 1p)"
+check "tag: broken helper, line 2 shown" "1" "$(printf '%s\n' "$out" | sed -n 2p | plain | grep -c 'of zone$')"
+printf 'other() { :; }\n' >"$work/nohelper/session-tag.sh"
+out=$(payload 4 1000000 | sh "$work/nohelper/status-line.sh" 2>&1 | sed -n 1p)
+check "tag: foreign helper, the profile" "$host · testprof » proj » feature-x" "$out"
 command rm -f "$CLAUDE_CONFIG_DIR/session-tag"
 
 # --- line 1 with session titles on ----------------------------------------
