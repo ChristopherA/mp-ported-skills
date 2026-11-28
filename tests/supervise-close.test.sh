@@ -390,9 +390,9 @@ check "no Distribution repo, --approved: closes" "exit=0" "$(last "$out")"
 check "no Distribution repo, --approved: closed" "closed https://github.com/o/r/issues/7" \
     "$(printf '%s\n' "$out" | grep '^closed ')"
 
-# On a Local Markdown tracker (#234) the close is no shared action: the
-# grant check is skipped, grant.sh's line is never cited, and no gh close
-# runs, since the close there is an edit to the ticket file.
+# On a Local Markdown tracker (#234) the close is no shared action: every
+# outcome is refused before gh runs, since the close there is an edit to
+# the ticket file, and grant.sh's line is never cited.
 printf '# Issue tracker: Local Markdown\n' >"$proj/docs/agents/issue-tracker.md"
 g "$proj" add docs/agents/issue-tracker.md
 g "$proj" -c commit.gpgsign=false commit -q -m 'a local tracker'
@@ -402,11 +402,10 @@ for a in "" --approved; do
     # shellcheck disable=SC2086
     out=$(close --pushed $a)
     check "local $a: refused" "exit=2" "$(last "$out")"
-    [ -n "$a" ] || check "local: the grant check is skipped" \
-        "skip grant: issue-close is not a shared action on this Local Markdown tracker, so it needs no grant or approval" \
-        "$(printf '%s\n' "$out" | grep 'grant')"
+    [ -n "$a" ] || check "local: no grant line, and grant.sh's line is never cited" "" \
+        "$(printf '%s\n' "$out" | grep -e 'grant' -e 'not a shared action on this tracker')"
     check "local $a: says the close is a file edit" \
-        "fail tracker: $proj's tracker is Local Markdown, where the close is an edit to the ticket file, and close.sh closes only GitHub issues; edit the ticket file and commit it" \
+        "fail tracker: $proj's tracker is Local Markdown, where the close is an edit to the ticket file, not a shared action, and close.sh closes only GitHub issues; edit the ticket file and commit it" \
         "$(printf '%s\n' "$out" | grep '^fail tracker')"
     check "local $a: gh not called" "no" "$([ -f "$work/gh-log" ] && echo yes || echo no)"
 done

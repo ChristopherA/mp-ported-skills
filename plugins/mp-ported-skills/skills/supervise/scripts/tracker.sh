@@ -1,8 +1,9 @@
 #!/bin/sh
-# tracker.sh -- sourced by resuming's state.sh and supervise's grant.sh:
-# which tracker backend a Project's docs/agents/issue-tracker.md names
-# (#233). One copy of the rule, for every script that branches on the
-# tracker.
+# tracker.sh -- sourced by resuming's state.sh, supervise's grant.sh and
+# capturing's before-clear.sh: which tracker backend a Project's
+# docs/agents/issue-tracker.md names (#233), and which shared actions are
+# tracker actions (#234). One copy of each rule, for every script that
+# branches on them.
 
 # tracker_backend <doc path>: prints `none` when the file does not exist,
 # else what tracker_backend_read prints for its text.
@@ -27,5 +28,14 @@ tracker_backend_read() {
         ('# issue tracker: local markdown') echo local ;;
         ('# issue tracker:'*) echo other ;;
         (*) if printf '%s\n' "$tracker_head" | grep -qi github; then echo github; else echo other; fi ;;
+    esac
+}
+
+# tracker_action <action>: succeeds for an action that writes to the
+# tracker, which is no shared action on a Local Markdown tracker (#234).
+tracker_action() {
+    case $1 in
+        (issue-close | issue-comment | issue-create | label | sub-issue) return 0 ;;
+        (*) return 1 ;;
     esac
 }

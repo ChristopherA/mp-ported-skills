@@ -78,8 +78,10 @@ esac
 
 attended=""
 [ "${CLAUDE_CODE_SESSION_ATTENDED:-1}" = 0 ] || attended=1
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/../../supervise/scripts/tracker.sh"
 tracker_action=""
-case "$ACTION" in issue-close | issue-comment | issue-create | label | sub-issue) tracker_action=1 ;; esac
+! tracker_action "$ACTION" || tracker_action=1
 # Attended, only a tracker action reads the grants, for grant.sh's Local
 # Markdown answer (#234); a folder it cannot read still asks.
 if [ -n "$attended" ] && { [ -z "$tracker_action" ] || [ ! -d "$DIR" ]; }; then
@@ -93,7 +95,6 @@ if [ "$ACTION" = other ]; then
 fi
 
 [ -d "$DIR" ] || fail "not a directory: $DIR"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 grant_sh="$SCRIPT_DIR/../../supervise/scripts/grant.sh"
 errs=$(mktemp) || fail "mktemp failed, so the grant cannot be read"
 cited=$(sh "$grant_sh" --dir "$DIR" --action "$ACTION" 2>"$errs")

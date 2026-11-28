@@ -41,9 +41,11 @@
 # cannot make a gated close free with a commit of its own; with no origin
 # remote at all, where nothing is shared, from the working tree. A caller
 # that reads exit 0 as a grant, as the hook and the wrappers do, reads 3 as
-# no grant, so a gh tracker write stays refused there. When the working tree or current branch holds a grant for
-# the same action that the committed ref does not, prints a note on stderr
-# naming it as ignored -- a worker's own commit, or one not yet pushed.
+# no grant, so a gh tracker write stays refused there.
+#
+# When the working tree or current branch holds a grant for the same action
+# that the committed ref does not, prints a note on stderr naming it as
+# ignored -- a worker's own commit, or one not yet pushed.
 
 set -u
 
@@ -96,19 +98,18 @@ fi
 default=${default:-main}
 
 # A Local Markdown tracker (#234): its tracker actions are not shared.
-case "$ACTION" in
-    issue-close | issue-comment | issue-create | label | sub-issue)
-        . "$(dirname -- "$0")/tracker.sh"
-        if git -C "$DIR" remote get-url origin >/dev/null 2>&1; then
-            backend=$(git -C "$DIR" show "origin/$default:docs/agents/issue-tracker.md" 2>/dev/null | tracker_backend_read)
-        else
-            backend=$(tracker_backend "$(git -C "$DIR" rev-parse --show-toplevel)/docs/agents/issue-tracker.md")
-        fi
-        if [ "$backend" = local ]; then
-            echo 'local: not a shared action on this tracker'
-            exit 3
-        fi ;;
-esac
+. "$(dirname -- "$0")/tracker.sh"
+if tracker_action "$ACTION"; then
+    if git -C "$DIR" remote get-url origin >/dev/null 2>&1; then
+        backend=$(git -C "$DIR" show "origin/$default:docs/agents/issue-tracker.md" 2>/dev/null | tracker_backend_read)
+    else
+        backend=$(tracker_backend "$(git -C "$DIR" rev-parse --show-toplevel)/docs/agents/issue-tracker.md")
+    fi
+    if [ "$backend" = local ]; then
+        echo 'local: not a shared action on this tracker'
+        exit 3
+    fi
+fi
 
 committed=""
 have_committed=0
