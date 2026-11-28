@@ -351,7 +351,7 @@ titles)
     if [ "$(titles_state)" = "$want" ]; then echo "titles: already $want"; exit 0; fi
     if [ "$want" = on ]; then put '.env.MP_SESSION_TITLE = "1"'
     else put 'del(.env.MP_SESSION_TITLE) | if .env == {} then del(.env) else . end'; fi
-    echo "titles: $want. Sessions started from now on $([ "$want" = on ] && echo "are titled [branch » ][workstream » ]<repo> (<tag>) » <host>, and status line 1 shows only what is unusual" || echo "get no title, and status line 1 shows host · profile » project » branch")." ;;
+    echo "titles: $want. Sessions started from now on $([ "$want" = on ] && echo "are titled [branch » ][workstream » ]<repo> (<tag>) » <host>, and status line 1 shows only what is unusual" || echo "get no title, and status line 1 shows host · <tag> » project » branch")." ;;
 status-line)
     if [ "$want" = on ]; then status_line_on; else status_line_off; fi ;;
 supervision-doc)

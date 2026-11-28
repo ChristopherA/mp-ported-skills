@@ -1,7 +1,9 @@
 #!/bin/sh
 # status-line.sh -- Claude Code status line measured against the smart zone.
 #
-# Line 1: host · profile » project » branch » workstream
+# Line 1: host · tag » project » branch » workstream
+#         The tag is the session title's (session-tag.sh): the first line of
+#         $CLAUDE_CONFIG_DIR/session-tag, else the profile's name.
 #         With session titles on (MP_SESSION_TITLE=1), the title already shows
 #         project, profile and host, so line 1 shows only what is unusual:
 #         branch » workstream » agent: <name>, each part only when it applies.
